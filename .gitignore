@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Test / coverage output
+coverage/
+*.lcov
+.nyc_output/
+
+# Node-RED runtime artifacts created by the test harness
+test/**/.userdir-*/
+test/**/*.userdir/
+
+# Playwright
+test-results/
+playwright-report/
+.playwright/
+
+# Logs and OS cruft
+*.log
+.DS_Store
+
+# Process artifacts — plan reviews are working notes, not shipped docs
+PLAN_REVIEW_*.md
