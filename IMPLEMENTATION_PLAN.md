@@ -370,7 +370,7 @@ Before declaring the implementation complete:
 2. Run real Node-RED black-box tests.
 3. Run real Dapr/Redis Docker integration tests, including unchanged flow redeploy without restarting daprd.
 4. Run Playwright E2E and inspect all captured screenshots.
-5. Run ESLint, Prettier check, `git diff --check`, and `npm audit`.
+5. Run ESLint, Prettier check, and `git diff --check`. For audit: `npm audit --omit=dev` must be clean; the full `npm audit` is reviewed, permitting only the specific advisories explicitly listed in `docs/testing.md` — any other or newly-disclosed advisory fails until individually assessed.
 6. Run `npm pack --dry-run` and inspect the package contents even though publication is out of scope.
 7. Confirm secrets, tokens, temporary credentials, screenshots with sensitive content, coverage output, and test data are excluded from the package and Git where appropriate.
 8. Review every milestone commit for a single coherent purpose and passing state.

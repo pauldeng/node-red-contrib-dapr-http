@@ -16,6 +16,7 @@
   },
   "scripts": {
     "test": "node --test \"test/unit/**/*.test.js\"",
+    "test:runtime": "node --test \"test/runtime/**/*.test.js\"",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -28,6 +29,7 @@
     "@eslint/js": "^9.9.0",
     "eslint": "^9.9.0",
     "globals": "^15.9.0",
+    "node-red": "5.0.1",
     "prettier": "^3.3.0"
   }
 }

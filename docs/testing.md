@@ -19,10 +19,16 @@ with them.
 ## Running
 
 ```bash
-npm test          # unit
+npm test              # unit
+npm run test:runtime  # real Node-RED child-process harness
 ```
 
-(Runtime, integration, and e2e scripts are added with their milestones.)
+(Integration and e2e scripts are added with their milestones.)
+
+The runtime harness (`test/helpers/node-red.js`) drives a real `node-red@5.0.1`
+process in a throwaway user directory with this package symlinked into its
+`node_modules`, deploys flows over the Admin API, and observes behavior over
+HTTP. A fake Dapr HTTP sidecar (`test/helpers/fake-dapr.js`) stands in for daprd.
 
 ## Conventions and diagnosis
 
@@ -38,3 +44,32 @@ npm test          # unit
 - Async failures inside flow handlers can surface as timeouts rather than
   assertion errors; assert on observable effects (HTTP calls, node status, sent
   messages), not on internal promises.
+- **Post-deploy route race (runtime):** a node-served route becomes live a short
+  moment after a deploy, and a full redeploy has a brief teardown gap where it
+  404s. Await presence with the harness's `waitForHttp(...)`; make a single
+  request (not `waitForHttp`) only when asserting a route is _absent_.
+- **Prompt process exit (runtime):** the harness makes HTTP calls over
+  non-pooled `node:http` connections (`agent: false`) and clears every timer it
+  creates, so a test-file process exits on its own once tests finish. No
+  `--test-force-exit` — that flag can hide genuine resource leaks.
+
+## Security audit
+
+Two-part policy:
+
+- **Package gate:** `npm audit --omit=dev` must report zero vulnerabilities. It
+  covers everything the package ships.
+- **Full audit review:** `npm audit` is reviewed but need not be empty. Only the
+  specific advisories listed below are permitted; any advisory not on the list —
+  including a newly-disclosed one reached through `node-red` — fails the review
+  until it is individually assessed and added here. `node-red` is pinned
+  deliberately and never shipped.
+
+  Permitted advisories (dev-only):
+  - [GHSA-86vw-mfpg-wwv9](https://github.com/advisories/GHSA-86vw-mfpg-wwv9) —
+    `jsonata` < 2.2.0 resource exhaustion via `$toMillis`, reached only through
+    the dev-only `node-red@5.0.1` test dependency.
+
+Do **not** run `npm audit fix --force` — its suggested `node-red` downgrade
+breaks the pin. Revisit when a Node-RED 5.x that bumps `jsonata` to >= 2.2.0
+ships.

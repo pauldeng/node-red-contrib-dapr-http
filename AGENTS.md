@@ -33,11 +33,12 @@ target, not permission to scaffold empty files.
 
 - `npm install` — install dependencies.
 - `npm test` — native unit tests (`node --test "test/unit/**/*.test.js"`).
+- `npm run test:runtime` — real Node-RED child-process harness tests.
 - `npm run lint` / `npm run lint:fix` — ESLint 9 (correctness + security rules).
 - `npm run format` / `npm run format:check` — Prettier.
 
-Runtime, integration, and e2e test scripts are added by the milestone that
-introduces each tier; keep this list in step with `package.json`.
+Integration and e2e test scripts are added by the milestone that introduces each
+tier; keep this list in step with `package.json`.
 
 ## Architecture invariants (do not violate)
 
@@ -105,5 +106,8 @@ runtime tests. Target >= 90% line/function and >= 85% branch coverage on `lib/`.
 See `IMPLEMENTATION_PLAN.md` §9 (Completion Gate). In short: unit+coverage,
 real Node-RED black-box, real Dapr/Redis integration (including unchanged-flow
 redeploy without restarting daprd), Playwright e2e with visual inspection,
-lint + format + `git diff --check` + `npm audit` + `npm pack --dry-run`, and
-confirmation that `AGENTS.md` is the only durable AI instruction source.
+lint + format + `git diff --check` + `npm pack --dry-run`, and confirmation that
+`AGENTS.md` is the only durable AI instruction source. Audit policy: `npm audit
+--omit=dev` must be clean; the full `npm audit` is reviewed and only the specific
+advisories explicitly listed in `docs/testing.md` are permitted — any other or
+newly-disclosed advisory fails until individually assessed.
