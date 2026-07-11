@@ -16,6 +16,11 @@ no `node-red-node-test-helper`.
 Tiers are introduced by the milestone that first needs them; this file grows
 with them.
 
+Visual inspection of every node's editor dialog (light/dark, multiple viewports)
+is consolidated in the E2E tier (Milestone 9). The `dapr-connection` dialog's
+visual check was deferred there from Milestone 3 by owner decision; it is built
+to Node-RED conventions and the runtime tier confirms it loads and registers.
+
 ## Running
 
 ```bash
@@ -36,8 +41,11 @@ HTTP. A fake Dapr HTTP sidecar (`test/helpers/fake-dapr.js`) stands in for daprd
   (Playwright).
 - Prefer `node:assert/strict`. Use the runner's native mocks and fake timers
   rather than a mocking library.
-- Coverage target on `lib/`: >= 90% line/function, >= 85% branch, enforced with
-  Node's native `--test-coverage-*` thresholds (wired once `lib/` exists).
+- Coverage on `lib/`: >= 90% line/function, >= 85% branch, enforced by
+  `npm run test:coverage` (Node's native `--test-coverage-*` thresholds, scoped
+  to `lib/**`). Node wrappers in `nodes/` run inside the child Node-RED process,
+  so they are covered behaviorally by the runtime tier, not by this line-coverage
+  gate.
 - **Startup ordering (integration):** deploy the Node-RED flow before starting
   daprd, and gate daprd on `GET /healthz` — daprd fetches `/dapr/subscribe` once
   at startup, so a sidecar that starts against an empty app receives nothing.

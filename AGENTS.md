@@ -33,6 +33,7 @@ target, not permission to scaffold empty files.
 
 - `npm install` — install dependencies.
 - `npm test` — native unit tests (`node --test "test/unit/**/*.test.js"`).
+- `npm run test:coverage` — unit tests with native coverage thresholds on `lib/`.
 - `npm run test:runtime` — real Node-RED child-process harness tests.
 - `npm run lint` / `npm run lint:fix` — ESLint 9 (correctness + security rules).
 - `npm run format` / `npm run format:check` — Prettier.

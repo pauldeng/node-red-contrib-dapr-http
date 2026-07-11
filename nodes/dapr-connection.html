@@ -1,0 +1,144 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-connection', {
+    category: 'config',
+    defaults: {
+      name: { value: '' },
+      daprHost: { value: '' },
+      daprPort: {
+        value: '',
+        validate: function (v) {
+          return v === '' || (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 65535);
+        },
+      },
+      bindAddress: { value: '127.0.0.1', required: true },
+      appPort: {
+        value: '3000',
+        required: true,
+        validate: function (v) {
+          return /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 65535;
+        },
+      },
+      bodyLimitMb: {
+        value: '4',
+        validate: function (v) {
+          const n = Number(v);
+          return v !== '' && Number.isFinite(n) && n >= 1 && n <= 64;
+        },
+      },
+      requestTimeoutSec: {
+        value: '30',
+        validate: function (v) {
+          const n = Number(v);
+          return v !== '' && Number.isFinite(n) && n >= 1 && n <= 300;
+        },
+      },
+    },
+    credentials: {
+      daprApiToken: { type: 'password' },
+      appApiToken: { type: 'password' },
+    },
+    label: function () {
+      return this.name || 'dapr sidecar';
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-connection">
+  <div class="form-row">
+    <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-config-input-name" placeholder="Name" />
+  </div>
+
+  <h4 style="margin-bottom:0">Outbound (app &rarr; sidecar)</h4>
+  <div class="form-tips" style="margin:6px 0">
+    Leave host and port blank to use the sidecar's <code>DAPR_HTTP_ENDPOINT</code>
+    environment discovery.
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-daprHost"><i class="fa fa-server"></i> Dapr host</label>
+    <input type="text" id="node-config-input-daprHost" placeholder="127.0.0.1" />
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-daprPort"><i class="fa fa-plug"></i> Dapr port</label>
+    <input type="text" id="node-config-input-daprPort" placeholder="3500" />
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-daprApiToken"><i class="fa fa-key"></i> Dapr API token</label>
+    <input type="password" id="node-config-input-daprApiToken" placeholder="(optional)" />
+  </div>
+
+  <h4 style="margin-bottom:0">Inbound (sidecar &rarr; app channel)</h4>
+  <div class="form-tips" style="margin:6px 0">
+    A dedicated HTTP listener for Dapr, separate from the Node-RED editor. Keep the bind address on
+    <code>127.0.0.1</code> unless the sidecar runs on another host &mdash; a non-loopback bind
+    exposes it to the network.
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-bindAddress"><i class="fa fa-sitemap"></i> Bind address</label>
+    <input type="text" id="node-config-input-bindAddress" placeholder="127.0.0.1" />
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-appPort"><i class="fa fa-plug"></i> App port</label>
+    <input type="text" id="node-config-input-appPort" placeholder="3000" />
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-appApiToken"><i class="fa fa-key"></i> App API token</label>
+    <input type="password" id="node-config-input-appApiToken" placeholder="(optional)" />
+  </div>
+
+  <h4 style="margin-bottom:0">Advanced</h4>
+  <div class="form-row">
+    <label for="node-config-input-bodyLimitMb"
+      ><i class="fa fa-arrows-h"></i> Body limit (MB)</label
+    >
+    <input type="text" id="node-config-input-bodyLimitMb" placeholder="4" style="width:80px" />
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-requestTimeoutSec"
+      ><i class="fa fa-clock-o"></i> Request timeout (s)</label
+    >
+    <input
+      type="text"
+      id="node-config-input-requestTimeoutSec"
+      placeholder="30"
+      style="width:80px"
+    />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-connection">
+  <p>
+    Shared connection to one Dapr sidecar. Publish, subscribe, invoke, and service nodes reference
+    this configuration.
+  </p>
+
+  <h3>Outbound</h3>
+  <p>
+    How this app reaches the sidecar's HTTP API. Leave <b>host</b> and <b>port</b> blank to use the
+    sidecar's <code>DAPR_HTTP_ENDPOINT</code> environment discovery; otherwise they default to
+    <code>127.0.0.1:3500</code>. An optional <b>Dapr API token</b> (else
+    <code>DAPR_API_TOKEN</code>) is sent with outbound calls.
+  </p>
+
+  <h3>Inbound app channel</h3>
+  <p>
+    The sidecar delivers subscriptions and service invocations to a dedicated HTTP listener owned by
+    this node &mdash; never the Node-RED editor port, so the Admin API is never exposed to the Dapr
+    mesh. Point the sidecar's <code>--app-port</code> at this <b>app port</b> (default
+    <code>3000</code>). The <b>bind address</b> defaults to loopback; binding to a non-loopback
+    address exposes the listener to the network and should be paired with an app API token and Dapr
+    access-control policies.
+  </p>
+  <p>
+    The optional <b>App API token</b> (else <code>APP_API_TOKEN</code>) is required on inbound
+    requests. It authenticates the sidecar to the app; it does not authorize a calling application
+    &mdash; use Dapr access control for that.
+  </p>
+
+  <h3>Status</h3>
+  <p>
+    The node polls <code>/v1.0/healthz/outbound</code> and shows <b>connected</b> (green) or
+    <b>sidecar unavailable</b> (red). Subscription changes require restarting the sidecar; a routine
+    flow redeploy does not.
+  </p>
+</script>

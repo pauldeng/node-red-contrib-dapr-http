@@ -16,16 +16,18 @@ npm install
 
 ## Commands
 
-| Command                | Purpose                                           |
-| ---------------------- | ------------------------------------------------- |
-| `npm test`             | Native unit tests over `test/unit/`.              |
-| `npm run lint`         | ESLint 9 — correctness and security rules.        |
-| `npm run lint:fix`     | ESLint with autofix.                              |
-| `npm run format`       | Prettier — write.                                 |
-| `npm run format:check` | Prettier — verify only (required before commits). |
+| Command                 | Purpose                                               |
+| ----------------------- | ----------------------------------------------------- |
+| `npm test`              | Native unit tests over `test/unit/`.                  |
+| `npm run test:coverage` | Unit tests with native coverage thresholds on `lib/`. |
+| `npm run test:runtime`  | Real Node-RED child-process harness tests.            |
+| `npm run lint`          | ESLint 9 — correctness and security rules.            |
+| `npm run lint:fix`      | ESLint with autofix.                                  |
+| `npm run format`        | Prettier — write.                                     |
+| `npm run format:check`  | Prettier — verify only (required before commits).     |
 
-Runtime, integration, and e2e commands are added by the milestone that
-introduces each tier. Keep this table and `package.json` in step.
+Integration and e2e commands are added by the milestone that introduces each
+tier. Keep this table and `package.json` in step.
 
 ## Test-driven loop
 

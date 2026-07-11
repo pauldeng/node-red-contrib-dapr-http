@@ -12,10 +12,13 @@
   },
   "node-red": {
     "version": ">=5.0.1 <6",
-    "nodes": {}
+    "nodes": {
+      "dapr-connection": "nodes/dapr-connection.js"
+    }
   },
   "scripts": {
     "test": "node --test \"test/unit/**/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='lib/**' --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=85 \"test/unit/**/*.test.js\"",
     "test:runtime": "node --test \"test/runtime/**/*.test.js\"",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

@@ -1,11 +1,12 @@
 'use strict';
 
 const net = require('node:net');
-const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { spawn } = require('node:child_process');
+
+const { httpRequest } = require('./http');
 
 const WORKSPACE = path.resolve(__dirname, '..', '..');
 const PKG = require(path.join(WORKSPACE, 'package.json'));
@@ -42,60 +43,6 @@ function settingsSource(uiPort) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Perform one HTTP request over a fresh, non-pooled connection (`agent: false`)
-// with an ABSOLUTE wall-clock deadline. Two reasons over `fetch`: (1) no
-// keep-alive socket or its timer lingers to keep the process alive after tests,
-// so the suite exits on its own without `--test-force-exit`; (2) precise
-// bounding. Note: `req.setTimeout` is a socket *inactivity* timeout that a slow
-// trickle keeps resetting, so instead an independent timer destroys the request
-// once the deadline elapses regardless of activity, cleared on completion or
-// error. Resolves { status, headers, text }.
-function httpRequest(urlStr, { method = 'GET', headers = {}, body, timeoutMs = 30000 } = {}) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(urlStr);
-    const req = http.request(
-      {
-        hostname: url.hostname,
-        port: url.port,
-        path: `${url.pathname}${url.search}`,
-        method,
-        headers,
-        agent: false,
-      },
-      (res) => {
-        const chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('error', (err) => settle(() => reject(err)));
-        res.on('aborted', () => settle(() => reject(new Error('response aborted'))));
-        res.on('end', () =>
-          settle(() =>
-            resolve({
-              status: res.statusCode,
-              headers: res.headers,
-              text: Buffer.concat(chunks).toString(),
-            })
-          )
-        );
-      }
-    );
-    const timer = setTimeout(
-      () => req.destroy(new Error(`request exceeded ${timeoutMs}ms deadline`)),
-      Math.max(1, timeoutMs)
-    );
-    // `settle` (defined after `timer`) is only ever invoked from the async
-    // request/response handlers, well after both are initialized.
-    const settle = (fn) => {
-      clearTimeout(timer);
-      fn();
-    };
-    req.on('error', (err) => settle(() => reject(err)));
-    if (body !== undefined && body !== null) {
-      req.write(body);
-    }
-    req.end();
-  });
-}
-
 // Drives a real `node-red@5.0.1` process in an isolated temporary user
 // directory, with this workspace package made discoverable so its nodes load
 // exactly as an installed package would. Black-box: tests observe behavior over
@@ -123,7 +70,7 @@ class NodeRed {
     return this.logs.join('');
   }
 
-  async start({ flows = [], readyTimeoutMs = 30000 } = {}) {
+  async start({ flows = [], readyTimeoutMs = 30000, env = {} } = {}) {
     this.port = await freePort();
     // Transactional: if any step fails (including readiness), tear down the
     // process and temp directory before rethrowing so nothing leaks.
@@ -152,7 +99,7 @@ class NodeRed {
           '--settings',
           path.join(this.userDir, 'settings.js'),
         ],
-        { stdio: ['ignore', 'pipe', 'pipe'] }
+        { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } }
       );
       this.proc.stdout.on('data', (d) => this.logs.push(d.toString()));
       this.proc.stderr.on('data', (d) => this.logs.push(d.toString()));
