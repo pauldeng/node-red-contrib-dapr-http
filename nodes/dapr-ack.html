@@ -1,0 +1,61 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-ack', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      status: { value: 'SUCCESS' },
+    },
+    inputs: 1,
+    outputs: 1,
+    align: 'right',
+    icon: 'font-awesome/fa-check',
+    paletteLabel: 'dapr ack',
+    label: function () {
+      return this.name || `dapr ack: ${this.status || 'SUCCESS'}`;
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-ack">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-status"><i class="fa fa-handshake-o"></i> Status</label>
+    <select id="node-input-status">
+      <option value="SUCCESS">SUCCESS — processed</option>
+      <option value="RETRY">RETRY — redeliver</option>
+      <option value="DROP">DROP — discard</option>
+    </select>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-ack">
+  <p>
+    Completes a manual (explicit) pub/sub delivery from a <code>dapr subscribe</code>
+    node. Place it at the end of the processing path for that message.
+  </p>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt>dapr.ackId <span class="property-type">string</span></dt>
+    <dd>Correlation id set by the subscribe node. Must be preserved on the message.</dd>
+    <dt class="optional">dapr.status <span class="property-type">string</span></dt>
+    <dd>Overrides the configured status (SUCCESS, RETRY, or DROP).</dd>
+  </dl>
+
+  <h3>Details</h3>
+  <p>
+    The first acknowledgement for an id wins; a later, expired, or foreign-generation id is rejected
+    with an error (routable to a Catch node) and does not affect other deliveries. Preserve
+    <code>msg.dapr</code> through the flow (mutate the message rather than replacing it) so
+    <code>ackId</code> reaches this node.
+  </p>
+</script>

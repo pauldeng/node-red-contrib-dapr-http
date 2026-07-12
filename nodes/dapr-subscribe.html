@@ -1,0 +1,132 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-subscribe', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      pubsubName: { value: '', required: true },
+      topic: { value: '', required: true },
+      ackMode: { value: 'auto' },
+      rawPayload: { value: false },
+      deadLetterTopic: { value: '' },
+      metadata: {
+        value: '{}',
+        validate: function (value) {
+          try {
+            const parsed = JSON.parse(value || '{}');
+            return (
+              parsed !== null &&
+              typeof parsed === 'object' &&
+              !Array.isArray(parsed) &&
+              Object.entries(parsed).every(
+                ([key, item]) =>
+                  key.trim() !== '' &&
+                  (typeof item === 'string' ||
+                    typeof item === 'number' ||
+                    typeof item === 'boolean')
+              )
+            );
+          } catch {
+            return false;
+          }
+        },
+      },
+    },
+    inputs: 0,
+    outputs: 1,
+    icon: 'font-awesome/fa-rss',
+    paletteLabel: 'dapr subscribe',
+    label: function () {
+      return this.name || this.topic || 'dapr subscribe';
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-subscribe">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-pubsubName"><i class="fa fa-cubes"></i> Pub/sub</label>
+    <input type="text" id="node-input-pubsubName" placeholder="pubsub" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-topic"><i class="fa fa-rss"></i> Topic</label>
+    <input type="text" id="node-input-topic" placeholder="orders" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-ackMode"><i class="fa fa-handshake-o"></i> Ack mode</label>
+    <select id="node-input-ackMode">
+      <option value="auto">Automatic (ack on send)</option>
+      <option value="manual">Manual (wait for dapr ack)</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-rawPayload"><i class="fa fa-file-o"></i> Raw payload</label>
+    <input
+      type="checkbox"
+      id="node-input-rawPayload"
+      style="display:inline-block; width:auto; vertical-align:top"
+    />
+    <span
+      >Topic messages are not CloudEvents; daprd wraps them and the payload arrives as a
+      Buffer</span
+    >
+  </div>
+  <div class="form-row">
+    <label for="node-input-deadLetterTopic"><i class="fa fa-inbox"></i> Dead-letter</label>
+    <input type="text" id="node-input-deadLetterTopic" placeholder="(optional) topic" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-metadata"><i class="fa fa-list"></i> Metadata</label>
+    <textarea
+      id="node-input-metadata"
+      rows="3"
+      placeholder='{"consumerID":"group-1"}'
+      style="width:70%; resize:vertical"
+    ></textarea>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-subscribe">
+  <p>Subscribes to a Dapr pub/sub topic and emits each delivered event.</p>
+
+  <h3>Outputs</h3>
+  <dl class="message-properties">
+    <dt>payload <span class="property-type">object | buffer | any</span></dt>
+    <dd>The event data. CloudEvent <code>data_base64</code> is decoded to a Buffer.</dd>
+    <dt>dapr.pubsubName / dapr.topic / dapr.route <span class="property-type">string</span></dt>
+    <dd>Delivery source information.</dd>
+    <dt>dapr.deliveryId <span class="property-type">string</span></dt>
+    <dd>The CloudEvent id, or a generated id for raw deliveries.</dd>
+    <dt>dapr.metadata <span class="property-type">object</span></dt>
+    <dd>Delivery metadata carried on the request (e.g. tracing headers).</dd>
+    <dt>dapr.cloudEvent <span class="property-type">object</span></dt>
+    <dd>The full CloudEvent envelope daprd delivered (synthetic for raw payloads).</dd>
+    <dt class="optional">dapr.ackId <span class="property-type">string</span></dt>
+    <dd>Manual mode only: correlation id to pass to a <code>dapr ack</code> node.</dd>
+  </dl>
+
+  <h3>Acknowledgement</h3>
+  <p>
+    <b>Automatic</b> acknowledges each event as SUCCESS once it is sent into the flow.
+    <b>Manual</b> holds the delivery open until a downstream <code>dapr ack</code> node completes it
+    by <code>msg.dapr.ackId</code>; if no ack arrives before the connection's request timeout, the
+    event is RETRYed and a warning is logged.
+  </p>
+
+  <h3>Subscriptions and restart</h3>
+  <p>
+    The delivery route is derived from this node's id, so a routine redeploy keeps working without
+    restarting the sidecar. Adding or removing a subscription, or changing pub/sub, topic, metadata,
+    dead-letter topic, or raw-payload, changes the subscription definition and requires a sidecar
+    restart — the connection node shows <code>restart sidecar: subscriptions changed</code> until
+    daprd re-fetches <code>/dapr/subscribe</code>.
+  </p>
+</script>

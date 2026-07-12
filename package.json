@@ -14,7 +14,9 @@
     "version": ">=5.0.1 <6",
     "nodes": {
       "dapr-connection": "nodes/dapr-connection.js",
-      "dapr-publish": "nodes/dapr-publish.js"
+      "dapr-publish": "nodes/dapr-publish.js",
+      "dapr-subscribe": "nodes/dapr-subscribe.js",
+      "dapr-ack": "nodes/dapr-ack.js"
     }
   },
   "scripts": {

@@ -433,3 +433,51 @@ test('a slow-header client is disconnected by the headers timeout', async (t) =>
     'server closed the slow-header connection near the timeout'
   );
 });
+
+test('activate onDiscovery fires when daprd fetches /dapr/subscribe', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  let discovered = 0;
+  lease.activate({
+    subscriptions: [{ pubsubname: 'ps', topic: 't', route: '/r' }],
+    onDiscovery: () => {
+      discovered += 1;
+    },
+  });
+  assert.equal(discovered, 0);
+  const res = await httpRequest(url(port, '/dapr/subscribe'));
+  assert.equal(res.status, 200);
+  assert.equal(discovered, 1);
+});
+
+test('servedFingerprint records the last fetched set and survives a reacquire', async (t) => {
+  const port = await freePort();
+  const l1 = await acquireListener({
+    bindAddress: BIND,
+    port,
+    token: undefined,
+    limits: limits({ leaseGraceMs: 1000 }),
+  });
+  l1.activate({
+    subscriptions: [{ pubsubname: 'ps', topic: 't', route: '/r' }],
+    fingerprint: 'fp1',
+  });
+  assert.equal(l1.servedFingerprint(), null, 'null until daprd fetches');
+  await httpRequest(url(port, '/dapr/subscribe'));
+  assert.equal(l1.servedFingerprint(), 'fp1');
+
+  // Redeploy: the served fingerprint lives in the module-scoped entry, so the
+  // reacquiring generation still knows what daprd last fetched.
+  l1.release({ graceMs: 1000 });
+  const l2 = await acquireListener({
+    bindAddress: BIND,
+    port,
+    token: undefined,
+    limits: limits({ leaseGraceMs: 1000 }),
+  });
+  t.after(async () => {
+    l2.release({ graceMs: 0 });
+    await l2.whenClosed();
+  });
+  assert.equal(l2.servedFingerprint(), 'fp1', 'persists across reacquire');
+});
