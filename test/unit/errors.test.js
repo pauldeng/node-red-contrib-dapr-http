@@ -24,6 +24,8 @@ test('ErrorCodes exposes the codes the package relies on, each equal to its key'
     'INVALID_OPTIONS',
     'DUPLICATE_LISTENER',
     'SIDECAR_UNAVAILABLE',
+    'INVALID_MESSAGE',
+    'PUBLISH_FAILED',
     'PENDING_CAPACITY',
     'DUPLICATE_PENDING',
   ];

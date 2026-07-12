@@ -1,0 +1,133 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-publish', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      pubsubName: { value: '', required: true },
+      topic: { value: '', required: true },
+      contentType: { value: '' },
+      metadata: {
+        value: '{}',
+        validate: function (value) {
+          try {
+            const parsed = JSON.parse(value || '{}');
+            return (
+              parsed !== null &&
+              typeof parsed === 'object' &&
+              !Array.isArray(parsed) &&
+              Object.entries(parsed).every(
+                ([key, item]) =>
+                  key.trim() !== '' &&
+                  (typeof item === 'string' ||
+                    typeof item === 'number' ||
+                    typeof item === 'boolean')
+              )
+            );
+          } catch {
+            return false;
+          }
+        },
+      },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-paper-plane',
+    paletteLabel: 'dapr publish',
+    label: function () {
+      return this.name || this.topic || 'dapr publish';
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-publish">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-pubsubName"><i class="fa fa-cubes"></i> Pub/sub</label>
+    <input type="text" id="node-input-pubsubName" placeholder="pubsub" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-topic"><i class="fa fa-rss"></i> Topic</label>
+    <input type="text" id="node-input-topic" placeholder="orders" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-contentType"><i class="fa fa-file-o"></i> Content type</label>
+    <input type="text" id="node-input-contentType" placeholder="Automatic" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-metadata"><i class="fa fa-list"></i> Metadata</label>
+    <textarea
+      id="node-input-metadata"
+      rows="4"
+      placeholder='{"ttlInSeconds":"60"}'
+      style="width:70%; resize:vertical"
+    ></textarea>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-publish">
+  <p>Publishes <code>msg.payload</code> to a topic through a Dapr sidecar.</p>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt>
+      payload
+      <span class="property-type">buffer | string | object | array | number | boolean | null</span>
+    </dt>
+    <dd>The payload is required event data. An undefined payload is rejected.</dd>
+    <dt class="optional">dapr.pubsubName <span class="property-type">string</span></dt>
+    <dd>Overrides the configured pub/sub component for this message.</dd>
+    <dt class="optional">dapr.topic <span class="property-type">string</span></dt>
+    <dd>Overrides the configured topic for this message.</dd>
+    <dt class="optional">dapr.contentType <span class="property-type">string</span></dt>
+    <dd>Overrides the configured or inferred content type.</dd>
+    <dt class="optional">dapr.metadata <span class="property-type">object</span></dt>
+    <dd>Per-message Dapr publish metadata.</dd>
+  </dl>
+
+  <h3>Content types</h3>
+  <p>
+    Automatic mode publishes Buffers as <code>application/octet-stream</code>, strings as
+    <code>text/plain</code>, and objects, arrays, numbers, booleans, and <code>null</code> as
+    <code>application/json</code>. A configured MIME type may be any value supported by the Dapr
+    component.
+  </p>
+  <p>
+    To publish a custom CloudEvent envelope, set the content type to
+    <code>application/cloudevents+json</code>. To bypass Dapr's CloudEvent wrapping, add
+    <code>"rawPayload":"true"</code> to metadata.
+  </p>
+
+  <h3>Metadata precedence</h3>
+  <p>
+    Configured metadata and <code>msg.dapr.metadata</code> use a shallow merge; message keys win.
+    For example, configured <code>{"rawPayload":"false","ttlInSeconds":"60"}</code> plus message
+    metadata <code>{"ttlInSeconds":"10"}</code> publishes
+    <code>{"rawPayload":"false","ttlInSeconds":"10"}</code>. Metadata keys must have scalar values,
+    which are sent as strings. Neither source object is modified.
+  </p>
+
+  <h3>Outputs</h3>
+  <p>
+    On success, the original message is sent unchanged. On failure, the node calls
+    <code>done(error)</code> so a Catch node can handle it; messages are not queued while the
+    sidecar is unavailable.
+  </p>
+
+  <h3>Example</h3>
+  <pre>
+msg.payload = { orderId: "ORD-42" };
+msg.dapr = {
+  topic: "priority-orders",
+  metadata: { partitionKey: "customer-7" }
+};
+return msg;</pre>
+</script>

@@ -351,13 +351,14 @@ Every milestone follows red-green-refactor: add a focused failing test, run it a
 
 - Add pinned Compose services and Dapr component, resiliency, ACL, and subscription fixtures.
 - Implement pub/sub, invocation, retry, DLT, token, ACL, redeploy, and shutdown integration suites.
+- Reverify the pinned SDK adapter with real daprd: falsy and Buffer publish bodies, fail-fast readiness bypass, and publish after client-agent reuse.
 - Keep retry and dead-letter scenarios in separate fixtures.
 - Commit: `test: add real Dapr integration coverage`.
 
 ### Milestone 9: Editor E2E, examples, and documentation
 
 - Complete Node-RED v5 editor help and validation for all nodes.
-- Add Playwright interaction tests and visually inspect all required screenshots.
+- Add Playwright interaction tests and visually inspect every node dialog, including the deferred `dapr-connection` and `dapr-publish` dialogs.
 - Finish README, architecture, security, deployment, subscription runbook, and five importable examples.
 - Add CI for Node 24 and 26 unit/coverage/lint/format jobs plus one Ubuntu Docker/Playwright job.
 - Commit: `docs: complete UI examples and project guidance`.

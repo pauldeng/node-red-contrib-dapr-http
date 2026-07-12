@@ -69,6 +69,9 @@ These are load-bearing. Each traces to a verified constraint recorded in
   `/v1.0/healthz/outbound` (outbound excludes the app channel — the right probe).
 - **HTTP-only, one keep-alive policy.** The SDK's HTTP agents are process-global;
   keep-alive is centrally owned, not per-node.
+- **Pinned SDK adapter.** `lib/dapr-client.js` relies on pinned 3.18.0 HTTP-client
+  behavior for fail-fast readiness, falsy bodies, and agent reuse. Reverify all
+  three against source plus real daprd before any `@dapr/dapr` upgrade.
 
 ## Security boundaries
 

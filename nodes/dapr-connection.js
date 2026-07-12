@@ -80,6 +80,23 @@ module.exports = function registerDaprConnection(RED) {
     let pollTimer = null;
     let backoff = INITIAL_BACKOFF_MS;
     let stopped = false;
+    let healthy = false;
+    const healthListeners = new Set();
+
+    node.isSidecarHealthy = () => healthy;
+    node.onSidecarHealth = (listener) => {
+      healthListeners.add(listener);
+      listener(healthy);
+      return () => healthListeners.delete(listener);
+    };
+    const setHealthy = (next) => {
+      if (healthy !== next) {
+        healthy = next;
+        for (const listener of healthListeners) {
+          listener(healthy);
+        }
+      }
+    };
 
     const schedule = (ms) => {
       pollTimer = setTimeout(pollOnce, ms);
@@ -92,15 +109,16 @@ module.exports = function registerDaprConnection(RED) {
       if (stopped) {
         return;
       }
-      let healthy = false;
+      let nextHealthy = false;
       try {
-        healthy = await probe(healthUrl, HEALTH_TIMEOUT_MS, healthHeaders);
+        nextHealthy = await probe(healthUrl, HEALTH_TIMEOUT_MS, healthHeaders);
       } catch {
-        healthy = false;
+        nextHealthy = false;
       }
       if (stopped) {
         return;
       }
+      setHealthy(nextHealthy);
       if (healthy) {
         node.status({ fill: 'green', shape: 'dot', text: 'connected' });
         backoff = INITIAL_BACKOFF_MS;
@@ -146,6 +164,8 @@ module.exports = function registerDaprConnection(RED) {
     node.on('close', (removed, done) => {
       closing = true;
       stopped = true;
+      setHealthy(false);
+      healthListeners.clear();
       if (pollTimer) {
         clearTimeout(pollTimer);
       }

@@ -13,7 +13,8 @@
   "node-red": {
     "version": ">=5.0.1 <6",
     "nodes": {
-      "dapr-connection": "nodes/dapr-connection.js"
+      "dapr-connection": "nodes/dapr-connection.js",
+      "dapr-publish": "nodes/dapr-publish.js"
     }
   },
   "scripts": {

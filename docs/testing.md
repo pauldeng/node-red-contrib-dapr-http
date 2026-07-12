@@ -17,9 +17,9 @@ Tiers are introduced by the milestone that first needs them; this file grows
 with them.
 
 Visual inspection of every node's editor dialog (light/dark, multiple viewports)
-is consolidated in the E2E tier (Milestone 9). The `dapr-connection` dialog's
-visual check was deferred there from Milestone 3 by owner decision; it is built
-to Node-RED conventions and the runtime tier confirms it loads and registers.
+is consolidated in the E2E tier (Milestone 9). The `dapr-connection` and
+`dapr-publish` dialog checks are explicitly tracked there; the owner deferred
+the connection check from Milestone 3. Runtime tests confirm both nodes load.
 
 ## Running
 
