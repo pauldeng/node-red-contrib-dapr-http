@@ -1,0 +1,143 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-invoke', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      appId: { value: '', required: true },
+      method: { value: '', required: true },
+      verb: { value: 'GET' },
+      contentType: { value: '' },
+      timeoutSec: {
+        value: '',
+        validate: function (value) {
+          if (!value) {
+            return true;
+          }
+          const n = Number(value);
+          return Number.isFinite(n) && n >= 1 && n <= 300;
+        },
+      },
+      headers: {
+        value: '',
+        validate: function (value) {
+          if (!value) {
+            return true;
+          }
+          try {
+            const parsed = JSON.parse(value);
+            return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+          } catch {
+            return false;
+          }
+        },
+      },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-exchange',
+    paletteLabel: 'dapr invoke',
+    label: function () {
+      return this.name || (this.appId ? `${this.appId}/${this.method}` : 'dapr invoke');
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-invoke">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-appId"><i class="fa fa-cube"></i> App ID</label>
+    <input type="text" id="node-input-appId" placeholder="target-app" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-method"><i class="fa fa-code-fork"></i> Method</label>
+    <input type="text" id="node-input-method" placeholder="orders/create" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-verb"><i class="fa fa-arrows-h"></i> Verb</label>
+    <select id="node-input-verb">
+      <option value="GET">GET</option>
+      <option value="POST">POST</option>
+      <option value="PUT">PUT</option>
+      <option value="PATCH">PATCH</option>
+      <option value="DELETE">DELETE</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-contentType"><i class="fa fa-file-o"></i> Content type</label>
+    <input type="text" id="node-input-contentType" placeholder="Automatic" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-timeoutSec"><i class="fa fa-clock-o"></i> Timeout</label>
+    <input
+      type="text"
+      id="node-input-timeoutSec"
+      placeholder="connection default"
+      style="width:120px"
+    />
+    <span>&nbsp;seconds (1–300)</span>
+  </div>
+  <div class="form-row">
+    <label for="node-input-headers"><i class="fa fa-list"></i> Headers</label>
+    <textarea
+      id="node-input-headers"
+      rows="3"
+      placeholder='{"x-api-version":"1"}'
+      style="width:70%; resize:vertical"
+    ></textarea>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-invoke">
+  <p>Invokes a method on another Dapr application through the local sidecar.</p>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt class="optional">
+      payload <span class="property-type">buffer | string | object | any</span>
+    </dt>
+    <dd>The request body. Objects are sent as JSON; Buffers as binary.</dd>
+    <dt class="optional">
+      dapr.appId / dapr.method / dapr.verb <span class="property-type">string</span>
+    </dt>
+    <dd>Per-message overrides of the configured target and verb.</dd>
+    <dt class="optional">dapr.headers / dapr.query <span class="property-type">object</span></dt>
+    <dd>Per-message request headers and query string.</dd>
+    <dt class="optional">dapr.timeoutSec <span class="property-type">number</span></dt>
+    <dd>Per-message request timeout in seconds (1–300), overriding the configured value.</dd>
+  </dl>
+
+  <h3>Outputs</h3>
+  <dl class="message-properties">
+    <dt>payload <span class="property-type">object | string | buffer</span></dt>
+    <dd>The response body, parsed by its content type (JSON, text, or binary Buffer).</dd>
+    <dt>dapr.statusCode / dapr.headers <span class="property-type">number / object</span></dt>
+    <dd>The response status and headers.</dd>
+  </dl>
+
+  <h3>Details</h3>
+  <p>
+    Status, response headers, query strings, and binary bodies are preserved. Hop-by-hop headers are
+    dropped, and the Dapr API token is always sent — a message override cannot replace it. The app
+    id and method are validated and encoded, so a method cannot escape the invoke route. A call
+    still in flight when the node is stopped or redeployed is aborted. On failure the node calls
+    <code>done(error)</code> for a Catch node.
+  </p>
+
+  <h3>Example</h3>
+  <p>Set the body and target on the message, then read the reply from the output message:</p>
+  <pre>
+// Function node before dapr invoke
+msg.payload = { item: 'sku-1', qty: 2 };
+msg.dapr = { appId: 'orders', method: 'create', verb: 'POST' };
+return msg;
+// After the node: msg.payload is the reply, msg.dapr.statusCode its status</pre>
+</script>

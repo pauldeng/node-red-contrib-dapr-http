@@ -100,9 +100,12 @@ module.exports = function registerDaprConnection(RED) {
       }
     };
 
-    // ---- Subscription hub: dapr-subscribe and dapr-ack coordinate here. ----
+    // ---- Subscription + service hub: subscribe/ack/service/response nodes
+    // coordinate here. ----
     const subscriptions = new Map(); // nodeId -> { definition, handler }
+    const services = new Map(); // nodeId -> { definition, handler }
     const pendingAcks = new PendingRegistry({ max: options.limits.maxPending });
+    const pendingResponses = new PendingRegistry({ max: options.limits.maxPending });
     let desiredFingerprint = fingerprint([]);
     let activateScheduled = false;
     let warnedFingerprint = null; // rate-limits the restart warning to once per change
@@ -149,14 +152,23 @@ module.exports = function registerDaprConnection(RED) {
       }
       const defs = [...subscriptions.values()].map((entry) => entry.definition);
       desiredFingerprint = fingerprint(defs);
+      const deliveryRoutes = [...subscriptions.values()].map(({ definition, handler }) => ({
+        method: 'POST',
+        path: definition.route,
+        kind: 'internal',
+        handler,
+      }));
+      // Service methods are app-channel routes but not part of the Dapr
+      // subscription set, so they are neither advertised nor fingerprinted.
+      const serviceRoutes = [...services.values()].map(({ definition, handler }) => ({
+        method: definition.verb,
+        path: definition.path,
+        kind: 'service',
+        handler,
+      }));
       node.lease.activate({
         subscriptions: defs.map(discoveryEntry),
-        routes: defs.map((def) => ({
-          method: 'POST',
-          path: def.route,
-          kind: 'internal',
-          handler: subscriptions.get(def.nodeId).handler,
-        })),
+        routes: [...deliveryRoutes, ...serviceRoutes],
         fingerprint: desiredFingerprint,
         onDiscovery: refreshStatus,
       });
@@ -198,6 +210,29 @@ module.exports = function registerDaprConnection(RED) {
     };
     node.addPendingAck = (ackId, ackOptions) => pendingAcks.add(ackId, ackOptions);
     node.settleAck = (ackId, status) => pendingAcks.settle(ackId, status);
+
+    node.registerService = (definition, handler) => {
+      for (const { definition: existing } of services.values()) {
+        if (
+          existing.nodeId !== definition.nodeId &&
+          existing.verb === definition.verb &&
+          existing.path === definition.path
+        ) {
+          throw new DaprError(
+            ErrorCodes.INVALID_OPTIONS,
+            `duplicate service method ${definition.verb} ${definition.path}`
+          );
+        }
+      }
+      services.set(definition.nodeId, { definition, handler });
+      scheduleActivation();
+      return () => {
+        services.delete(definition.nodeId);
+        scheduleActivation();
+      };
+    };
+    node.addPendingResponse = (id, responseOptions) => pendingResponses.add(id, responseOptions);
+    node.settleResponse = (id, response) => pendingResponses.settle(id, response);
 
     const schedule = (ms) => {
       pollTimer = setTimeout(pollOnce, ms);
@@ -268,10 +303,14 @@ module.exports = function registerDaprConnection(RED) {
       if (pollTimer) {
         clearTimeout(pollTimer);
       }
-      // Resolve in-flight explicit acks as RETRY and let their handlers write the
-      // 200 { RETRY } response (one tick) before the listener is released — so a
-      // pending delivery completes as RETRY, not the 503 release backstop.
-      if (pendingAcks.drain('RETRY') > 0) {
+      // Resolve in-flight explicit acks as RETRY and pending service requests as
+      // 503, letting their handlers write the response (one tick) before the
+      // listener is released — so a pending delivery/request completes cleanly
+      // rather than hitting the release backstop.
+      const drained =
+        pendingAcks.drain('RETRY') +
+        pendingResponses.drain({ status: 503, headers: {}, body: 'connection restarting' });
+      if (drained > 0) {
         await new Promise((resolve) => setImmediate(resolve));
       }
       if (node.lease) {

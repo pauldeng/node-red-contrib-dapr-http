@@ -16,7 +16,10 @@
       "dapr-connection": "nodes/dapr-connection.js",
       "dapr-publish": "nodes/dapr-publish.js",
       "dapr-subscribe": "nodes/dapr-subscribe.js",
-      "dapr-ack": "nodes/dapr-ack.js"
+      "dapr-ack": "nodes/dapr-ack.js",
+      "dapr-invoke": "nodes/dapr-invoke.js",
+      "dapr-service": "nodes/dapr-service.js",
+      "dapr-response": "nodes/dapr-response.js"
     }
   },
   "scripts": {

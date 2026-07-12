@@ -1,0 +1,97 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-service', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      verb: { value: 'POST' },
+      methodPath: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          const p = value && value.charAt(0) === '/' ? value : `/${value || ''}`;
+          if (!/^\/[A-Za-z0-9\-._~/]*$/.test(p) || p.includes('..') || p.includes('//')) {
+            return false;
+          }
+          return !['/dapr', '/healthz', '/node-red-dapr'].some(
+            (r) => p === r || p.indexOf(`${r}/`) === 0
+          );
+        },
+      },
+    },
+    inputs: 0,
+    outputs: 1,
+    icon: 'font-awesome/fa-sign-in',
+    paletteLabel: 'dapr service',
+    label: function () {
+      return this.name || `${this.verb || 'POST'} ${this.methodPath || 'dapr service'}`;
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-service">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-verb"><i class="fa fa-arrows-h"></i> Verb</label>
+    <select id="node-input-verb">
+      <option value="GET">GET</option>
+      <option value="POST">POST</option>
+      <option value="PUT">PUT</option>
+      <option value="PATCH">PATCH</option>
+      <option value="DELETE">DELETE</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-methodPath"><i class="fa fa-code-fork"></i> Method</label>
+    <input type="text" id="node-input-methodPath" placeholder="/orders" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-service">
+  <p>
+    Exposes an HTTP method other Dapr apps can invoke, on this connection's dedicated app-channel
+    listener. Pair it with a <code>dapr response</code> node to reply.
+  </p>
+
+  <h3>Outputs</h3>
+  <dl class="message-properties">
+    <dt>payload <span class="property-type">object | string | buffer</span></dt>
+    <dd>The request body, decoded by its content type.</dd>
+    <dt>dapr.method / dapr.verb / dapr.query <span class="property-type">string / object</span></dt>
+    <dd>The invoked method path, verb, and query string.</dd>
+    <dt>dapr.headers <span class="property-type">object</span></dt>
+    <dd>Request headers, with transport and token headers removed.</dd>
+    <dt>dapr.callerAppId <span class="property-type">string | null</span></dt>
+    <dd>The calling app's id (for authorization decisions).</dd>
+    <dt>dapr.responseId <span class="property-type">string</span></dt>
+    <dd>Correlation id to pass to a <code>dapr response</code> node.</dd>
+  </dl>
+
+  <h3>Details</h3>
+  <p>
+    Reserved <code>/dapr</code>, <code>/healthz</code>, and internal delivery paths, path traversal,
+    and duplicate method routes are rejected. If no response arrives before the connection's request
+    timeout the caller receives HTTP 504; during shutdown or redeploy, pending requests receive 503.
+    The Dapr API token authenticates the sidecar to the app, not the caller — use Dapr access
+    control to authorize callers.
+  </p>
+
+  <h3>Example</h3>
+  <p>
+    Wire <code>dapr service</code> &rarr; a Function &rarr; <code>dapr response</code>. In the
+    Function, mutate and <b>return the same message</b> so <code>msg.dapr.responseId</code> is
+    preserved and the reply correlates to this request:
+  </p>
+  <pre>
+// Function node between service and response
+msg.payload = { received: msg.payload, method: msg.dapr.method };
+return msg; // keep msg.dapr — do not replace the message</pre>
+</script>

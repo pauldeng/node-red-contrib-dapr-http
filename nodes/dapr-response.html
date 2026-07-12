@@ -1,0 +1,80 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-response', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      statusCode: {
+        value: '200',
+        validate: function (value) {
+          const n = Number(value);
+          // 1xx codes are interim, not a final response; reject them here too.
+          return Number.isInteger(n) && n >= 200 && n <= 599;
+        },
+      },
+    },
+    inputs: 1,
+    outputs: 0,
+    align: 'right',
+    icon: 'font-awesome/fa-reply',
+    paletteLabel: 'dapr response',
+    label: function () {
+      return this.name || `dapr response: ${this.statusCode || '200'}`;
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-response">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-statusCode"><i class="fa fa-hashtag"></i> Status</label>
+    <input type="text" id="node-input-statusCode" placeholder="200" style="width:80px" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-response">
+  <p>
+    Replies to a <code>dapr service</code> invocation. Place it at the end of the handling path.
+  </p>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt>dapr.responseId <span class="property-type">string</span></dt>
+    <dd>Correlation id set by the service node. Preserve it on the message.</dd>
+    <dt class="optional">
+      payload <span class="property-type">buffer | string | object | null</span>
+    </dt>
+    <dd>The response body. Objects are sent as JSON; Buffers as binary.</dd>
+    <dt class="optional">dapr.statusCode <span class="property-type">number</span></dt>
+    <dd>Overrides the configured HTTP status.</dd>
+    <dt class="optional">
+      dapr.responseHeaders / dapr.contentType <span class="property-type">object / string</span>
+    </dt>
+    <dd>Response headers and content type.</dd>
+  </dl>
+
+  <h3>Details</h3>
+  <p>
+    The first response for an id wins; a later, expired, or foreign-generation id is rejected with
+    an error. Preserve <code>msg.dapr</code> through the flow so <code>responseId</code> reaches
+    this node. Framing and hop-by-hop response headers (e.g. <code>content-length</code>) are
+    dropped and computed by the runtime.
+  </p>
+
+  <h3>Example</h3>
+  <p>Set the body/status on the correlated message and return it — never build a new message:</p>
+  <pre>
+// Function node before dapr response
+msg.payload = { ok: true };
+msg.dapr.statusCode = 201;
+msg.dapr.responseHeaders = { 'x-trace': msg.dapr.headers['x-trace-id'] };
+return msg; // msg.dapr.responseId must survive</pre>
+</script>

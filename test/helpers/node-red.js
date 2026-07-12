@@ -144,13 +144,13 @@ class NodeRed {
 
   // Full-deploy a flow set via the documented Admin API (v2). Resolves once the
   // runtime has applied and started the flows.
-  async deploy(flows, { timeoutMs = 30000 } = {}) {
+  async deploy(flows, { timeoutMs = 30000, deploymentType = 'full' } = {}) {
     const res = await httpRequest(this.adminUrl('/flows'), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'Node-RED-API-Version': 'v2',
-        'Node-RED-Deployment-Type': 'full',
+        'Node-RED-Deployment-Type': deploymentType,
       },
       body: JSON.stringify({ flows }),
       timeoutMs,
