@@ -1,0 +1,80 @@
+[
+  {
+    "id": "ex-bulk-tab",
+    "type": "tab",
+    "label": "Dapr: bulk subscribe + acknowledgement",
+    "disabled": false,
+    "info": "Subscribes to a topic in bulk-delivery mode with manual acknowledgement. Every event in a batch is acknowledged independently, so one batch can resolve as a mix of SUCCESS/RETRY/DROP. Set the connection node's Dapr host/port and app port before deploying. The Decide function drops malformed orders (never retry those), asks Dapr to redeliver an order still marked \"pending\" upstream, and acknowledges everything else as SUCCESS."
+  },
+  {
+    "id": "ex-bulk-conn",
+    "type": "dapr-connection",
+    "name": "sidecar",
+    "daprHost": "",
+    "daprPort": "",
+    "bindAddress": "127.0.0.1",
+    "appPort": "3000",
+    "bodyLimitMb": "",
+    "requestTimeoutSec": ""
+  },
+  {
+    "id": "ex-bulk-sub",
+    "type": "dapr-subscribe",
+    "z": "ex-bulk-tab",
+    "name": "orders (bulk)",
+    "connection": "ex-bulk-conn",
+    "pubsubName": "pubsub",
+    "topic": "orders",
+    "ackMode": "manual",
+    "rawPayload": false,
+    "deadLetterTopic": "",
+    "metadata": "{}",
+    "rules": [],
+    "bulkEnabled": true,
+    "bulkMaxMessagesCount": "",
+    "bulkMaxAwaitDurationMs": "",
+    "outputs": 1,
+    "x": 190,
+    "y": 140,
+    "wires": [["ex-bulk-decide"]]
+  },
+  {
+    "id": "ex-bulk-decide",
+    "type": "function",
+    "z": "ex-bulk-tab",
+    "name": "decide per entry",
+    "func": "// Each message here is one entry of the batch, carrying its own\n// msg.dapr.entryId and msg.dapr.ackId - keep msg.dapr intact.\nif (!msg.payload || typeof msg.payload.orderId === 'undefined') {\n    msg.dapr.status = 'DROP'; // malformed - never retry it\n} else if (msg.payload.status === 'pending') {\n    msg.dapr.status = 'RETRY'; // upstream isn't ready yet - ask Dapr to redeliver\n} else {\n    msg.dapr.status = 'SUCCESS';\n}\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 140,
+    "wires": [["ex-bulk-ack"]]
+  },
+  {
+    "id": "ex-bulk-ack",
+    "type": "dapr-ack",
+    "z": "ex-bulk-tab",
+    "name": "",
+    "connection": "ex-bulk-conn",
+    "status": "SUCCESS",
+    "x": 630,
+    "y": 140,
+    "wires": [["ex-bulk-debug"]]
+  },
+  {
+    "id": "ex-bulk-debug",
+    "type": "debug",
+    "z": "ex-bulk-tab",
+    "name": "acknowledged",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 820,
+    "y": 140
+  }
+]

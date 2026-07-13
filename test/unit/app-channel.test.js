@@ -481,3 +481,58 @@ test('servedFingerprint records the last fetched set and survives a reacquire', 
   });
   assert.equal(l2.servedFingerprint(), 'fp1', 'persists across reacquire');
 });
+
+test('a removed internal route stays retryable (503), never 404, until daprd re-fetches', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    subscriptions: [{ pubsubname: 'ps', topic: 't', route: '/r' }],
+    routes: [
+      { method: 'POST', path: '/r', kind: 'internal', handler: async () => ({ status: 200 }) },
+    ],
+    fingerprint: 'fp1',
+  });
+  assert.equal((await httpRequest(url(port, '/r'), { method: 'POST', body: '' })).status, 200);
+
+  // Re-activate without that route (e.g. a rule removed): the old path must
+  // stay retryable, not 404 — Dapr treats 404 as a permanent DROP.
+  lease.activate({ subscriptions: [], routes: [], fingerprint: 'fp2' });
+  const stale = await httpRequest(url(port, '/r'), { method: 'POST', body: '' });
+  assert.equal(stale.status, 503);
+
+  // Once daprd actually fetches the new set, the placeholder is no longer
+  // needed — daprd will never call the old path again unless it restarts,
+  // which starts stale-tracking fresh.
+  await httpRequest(url(port, '/dapr/subscribe'));
+  const afterFetch = await httpRequest(url(port, '/r'), { method: 'POST', body: '' });
+  assert.equal(afterFetch.status, 404, 'cleared once daprd has fetched the current route set');
+});
+
+test('a re-added route at the same path wins over its own stale placeholder', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  const routeDef = (body) => [
+    { method: 'POST', path: '/r', kind: 'internal', handler: async () => ({ status: 200, body }) },
+  ];
+  lease.activate({ subscriptions: [], routes: routeDef('v1'), fingerprint: 'fp1' });
+  lease.activate({ subscriptions: [], routes: [], fingerprint: 'fp2' }); // removed -> stale
+  lease.activate({ subscriptions: [], routes: routeDef('v2'), fingerprint: 'fp3' }); // re-added
+  const res = await httpRequest(url(port, '/r'), { method: 'POST', body: '' });
+  assert.equal(res.status, 200, 'the real route wins, not the stale placeholder');
+  assert.equal(res.text, 'v2');
+});
+
+test('a removed service route 404s immediately — Dapr never caches service routes', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    subscriptions: [],
+    routes: [
+      { method: 'POST', path: '/svc', kind: 'service', handler: async () => ({ status: 200 }) },
+    ],
+  });
+  assert.equal((await httpRequest(url(port, '/svc'), { method: 'POST', body: '' })).status, 200);
+  lease.activate({ subscriptions: [], routes: [] });
+  const res = await httpRequest(url(port, '/svc'), { method: 'POST', body: '' });
+  assert.equal(res.status, 404, 'no stale-route protection for services');
+});

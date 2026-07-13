@@ -58,10 +58,10 @@ A Node-RED configuration node that owns one relationship with one Dapr sidecar.
 - Register a stable programmatic subscription with its connection.
 - Use stable delivery paths derived from persisted Node-RED node and rule identifiers, never array position or deployment generation.
 - Put event data in `msg.payload`.
-- Put the complete CloudEvent or raw-delivery metadata under `msg.dapr`, including pubsub name, topic, route, metadata, delivery ID, bulk entry ID, and acknowledgement correlation ID.
+- Put the complete CloudEvent or raw-delivery metadata under `msg.dapr`, including pubsub name, topic, route, rule ID, metadata, delivery ID, bulk entry ID, and acknowledgement correlation ID.
 - Decode CloudEvent `data_base64` to a Buffer and preserve the original envelope.
 - Support raw payloads, dead-letter topics, bulk settings, and ordered CEL routes.
-- Expose one labelled output for each CEL rule plus one default output.
+- Keep a single static output regardless of rule count — Node-RED has no documented public API for safely remapping existing wires when a node's output count changes, only that `outputs` may be configurable (see [Creating Nodes: properties](https://nodered.org/docs/creating-nodes/properties)). Emit every matched delivery from that output with `msg.dapr.ruleId` set to the matched rule's persisted ID, or `null` for the default; a flow needing separate branches wires a standard Switch node on `msg.dapr.ruleId`.
 - Apply CEL routes in declared order with first match winning.
 - Reject duplicate active pubsub-name/topic pairs within the same connection.
 - In bulk mode, emit one Node-RED message per entry and aggregate per-entry Dapr results by entry ID.
@@ -268,7 +268,7 @@ Use pinned `nodered/node-red:5.0.1-24`, `daprio/daprd:1.18.1`, and Redis images.
 ### Editor E2E and visual review
 
 - Use Playwright against real Node-RED 5.0.1.
-- Verify palette registration, dialogs, typed inputs, credential fields, conditional controls, validation, routing-rule editing, dynamic outputs, and help text.
+- Verify palette registration, dialogs, typed inputs, credential fields, conditional controls, validation, routing-rule editing, and help text.
 - Verify all seven nodes can be configured and deployed in a complete publish/subscribe and invoke/service flow.
 - Use Node-RED's standard form rows, labels, typed inputs, buttons, icons, spacing, and help structure; do not introduce a separate visual system.
 - Capture light and dark screenshots at 1440x900 and 1024x768 and a narrow viewport supported by the editor.
@@ -342,7 +342,7 @@ Every milestone follows red-green-refactor: add a focused failing test, run it a
 
 ### Milestone 7: Bulk subscription and CEL routing
 
-- Test rule ordering, stable rule IDs, dynamic outputs, bulk emission, mixed per-entry acknowledgement, metadata, and dead-letter definitions.
+- Test rule ordering, stable rule IDs, the single-output `msg.dapr.ruleId` contract, bulk emission, mixed per-entry acknowledgement, metadata, and dead-letter definitions.
 - Implement the smallest routing and bulk additions to the existing subscription modules and editor.
 - Add focused example flows and real Node-RED runtime coverage.
 - Commit: `feat: add bulk subscriptions and CEL routing`.

@@ -329,7 +329,7 @@ test(
 );
 
 test(
-  'removing the last subscription drops its route (restart required)',
+  'removing the last subscription keeps its route retryable, never a 404, until the sidecar restarts',
   { timeout: 60000 },
   async (t) => {
     const dapr = await createFakeDaprStarted();
@@ -361,9 +361,13 @@ test(
     });
     assert.deepEqual(JSON.parse((await deliver(appPort)).text), { status: 'SUCCESS' });
 
-    // Redeploy with the subscribe node removed. After re-activation the route is
-    // gone, so the previously-cached path now 404s, and — because daprd has a
-    // stale served fingerprint — the connection warns (once) to restart.
+    // Redeploy with the subscribe node removed. After re-activation the real
+    // route is gone, but the previously-served sidecar may still be posting to
+    // it (it hasn't restarted, so it hasn't re-fetched /dapr/subscribe) — the
+    // path must stay retryable (503), never 404: Dapr treats 404 as a
+    // permanent DROP, not a retry, so a bare 404 here would silently discard
+    // any message still in flight to the old route. The connection also warns
+    // (once) to restart, because daprd has a stale served fingerprint.
     await nr.deploy([
       { id: 'tab', type: 'tab', label: 'empty' },
       {
@@ -375,10 +379,11 @@ test(
         appPort: String(appPort),
       },
     ]);
-    await waitFor(async () => {
+    const res = await waitFor(async () => {
       const r = await deliver(appPort);
-      return r.status === 404 ? r : null;
+      return r.status === 503 ? r : null;
     });
+    assert.equal(res.status, 503, 'a stale route must be retryable, never a 404');
     await waitFor(() => (/restart the Dapr sidecar/i.test(nr.logText()) ? true : null));
     const warnings = nr.logText().match(/restart the Dapr sidecar/gi) || [];
     assert.equal(warnings.length, 1, 'the restart warning must be rate-limited to one');
@@ -413,8 +418,70 @@ test('a delivery pending at redeploy completes as RETRY', { timeout: 60000 }, as
   await new Promise((resolve) => setTimeout(resolve, 300));
   await nr.deploy(flow); // redeploy while the delivery is pending
   const res = await deliveryPromise;
-  assert.deepEqual(JSON.parse(res.text), { status: 'RETRY' });
+  // On a full redeploy, both the subscribe node's own close-time settle (fix
+  // for a modified-node-only redeploy, see the dedicated test below) and the
+  // connection's own drain race to answer the pending request — exactly the
+  // same harmless race the M6 dapr-service tests already accept by pinning
+  // only the outcome's retry-safety, not which encoding wins.
+  if (res.status === 200) {
+    assert.deepEqual(JSON.parse(res.text), { status: 'RETRY' });
+  } else {
+    assert.equal(res.status, 503);
+  }
 });
+
+test(
+  'a modified-node redeploy settles a pending manual ack as RETRY without waiting out the timeout',
+  { timeout: 60000 },
+  async (t) => {
+    const dapr = await createFakeDaprStarted();
+    t.after(() => dapr.stop());
+    dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
+    const capture = await startCapture();
+    t.after(() => capture.stop());
+    const appPort = await freePort();
+    const nr = new NodeRed();
+    // A long request timeout, so a fast RETRY proves the node's own close-time
+    // settle fired — not the ack timeout backstop.
+    await nr.start();
+    t.after(() => nr.stop());
+
+    const flowNamed = (name) => {
+      const f = subscribeFlow({
+        appPort,
+        daprPort: dapr.port,
+        captureUrl: capture.url,
+        ackMode: 'manual',
+        withAck: false,
+        requestTimeoutSec: 30,
+      });
+      f.find((n) => n.id === 'sub1').name = name;
+      return f;
+    };
+    await nr.deploy(flowNamed('v1'));
+    await waitFor(async () => {
+      const r = await httpRequest(`http://127.0.0.1:${appPort}/dapr/subscribe`, {
+        timeoutMs: 1000,
+      });
+      return r.status === 200 && r.text.includes(deliveryPath) ? r : null;
+    });
+
+    const t0 = Date.now();
+    const deliveryPromise = deliver(appPort); // manual + no ack → stays pending
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // "nodes" redeploy: a changed field marks the subscribe node "modified" so
+    // only it restarts; the connection (unchanged) stays up and does NOT
+    // drain, so the subscribe node itself must settle its own pending ack.
+    await nr.deploy(flowNamed('v2'), { deploymentType: 'nodes' });
+    const res = await deliveryPromise;
+    const elapsed = Date.now() - t0;
+    assert.deepEqual(JSON.parse(res.text), { status: 'RETRY' });
+    assert.ok(
+      elapsed < 5000,
+      `should settle promptly on close, not after the 30s timeout (was ${elapsed}ms)`
+    );
+  }
+);
 
 test('a second acknowledgement of the same delivery is rejected', { timeout: 60000 }, async (t) => {
   const dapr = await createFakeDaprStarted();

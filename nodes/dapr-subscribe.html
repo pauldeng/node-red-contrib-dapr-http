@@ -32,6 +32,32 @@
           }
         },
       },
+      rules: { value: [] },
+      bulkEnabled: { value: false },
+      bulkMaxMessagesCount: {
+        value: '',
+        // Dapr itself only requires a positive int32; 1-1000 is our own
+        // package safety cap (see lib/subscriptions.js BULK_MESSAGES_MAX) —
+        // kept in sync with it.
+        validate: function (value) {
+          if (!value) {
+            return true;
+          }
+          const n = Number(value);
+          return Number.isInteger(n) && n >= 1 && n <= 1000;
+        },
+      },
+      bulkMaxAwaitDurationMs: {
+        value: '',
+        // Our own package safety cap (see lib/subscriptions.js BULK_AWAIT_MS_MAX).
+        validate: function (value) {
+          if (!value) {
+            return true;
+          }
+          const n = Number(value);
+          return Number.isInteger(n) && n >= 1 && n <= 60000;
+        },
+      },
     },
     inputs: 0,
     outputs: 1,
@@ -39,6 +65,63 @@
     paletteLabel: 'dapr subscribe',
     label: function () {
       return this.name || this.topic || 'dapr subscribe';
+    },
+    oneditprepare: function () {
+      // A single static output (see the module docs above the rules template
+      // row for why): every rule just needs a persisted id + match text, kept
+      // in list order (order is significant — daprd evaluates rules in order,
+      // first match wins). An id is assigned once, the first time a rule is
+      // added, and never recomputed from its position, so inserting,
+      // removing, or reordering rules never reassigns an EXISTING rule's
+      // route (see lib/subscriptions.js normalizeRules for why that matters).
+      const list = $('#node-input-rules-container')
+        .css('min-height', '120px')
+        .css('min-width', '450px')
+        .editableList({
+          addItem: (container, _index, rule) => {
+            const id = rule.id || 'r' + Math.random().toString(36).slice(2, 10);
+            container.data('ruleId', id);
+            const row = $('<div/>', {
+              style: 'display:flex; gap:5px; align-items:center;',
+            }).appendTo(container);
+            $('<input/>', {
+              type: 'text',
+              class: 'node-input-rule-match',
+              placeholder: 'CEL match, e.g. event.type == "order"',
+              style: 'flex:1',
+            })
+              .val(rule.match || '')
+              .appendTo(row);
+            // Read-only: this rule's persisted id (see the comment above) is the
+            // value a downstream Switch node compares msg.dapr.ruleId against.
+            $('<span/>', {
+              style: 'font-family: monospace; font-size: 0.85em; color: #888; white-space: nowrap;',
+              title:
+                "This rule's persisted id — compare msg.dapr.ruleId against it in a Switch node",
+              text: `id: ${id}`,
+            }).appendTo(row);
+          },
+          removable: true,
+          sortable: true,
+        });
+      (this.rules || []).forEach((rule) => list.editableList('addItem', rule));
+
+      $('#node-input-bulkEnabled').on('change', function () {
+        $('#node-bulk-fields').toggle($(this).prop('checked'));
+      });
+      $('#node-bulk-fields').toggle(this.bulkEnabled);
+    },
+    oneditsave: function () {
+      const rules = [];
+      $('#node-input-rules-container')
+        .editableList('items')
+        .each(function () {
+          const match = $(this).find('.node-input-rule-match').val();
+          if (match && match.trim() !== '') {
+            rules.push({ id: $(this).data('ruleId'), match: match.trim() });
+          }
+        });
+      this.rules = rules;
     },
   });
 </script>
@@ -92,6 +175,50 @@
       style="width:70%; resize:vertical"
     ></textarea>
   </div>
+  <div class="form-row">
+    <label><i class="fa fa-random"></i> CEL routing rules</label>
+    <div style="margin-bottom: 6px; font-size: 0.85em; color: #888">
+      Evaluated in order (first match wins); every matched event is emitted from this node's one
+      output with <code>msg.dapr.ruleId</code> set to the matching rule's id (shown after each
+      match, below) or <code>null</code> for no match. Leave empty to skip CEL routing. Combines
+      with bulk subscribe: each route then receives its own batches. Wire a <code>switch</code> node
+      on <code>msg.dapr.ruleId</code> downstream to branch.
+    </div>
+    <ol id="node-input-rules-container"></ol>
+  </div>
+  <div class="form-row">
+    <label for="node-input-bulkEnabled"><i class="fa fa-layer-group"></i> Bulk subscribe</label>
+    <input
+      type="checkbox"
+      id="node-input-bulkEnabled"
+      style="display:inline-block; width:auto; vertical-align:top"
+    />
+    <span>Deliver events in batches</span>
+  </div>
+  <div id="node-bulk-fields">
+    <div class="form-row">
+      <label for="node-input-bulkMaxMessagesCount"
+        ><i class="fa fa-hashtag"></i> Max messages</label
+      >
+      <input
+        type="text"
+        id="node-input-bulkMaxMessagesCount"
+        placeholder="Dapr default (100); 1-1000"
+        style="width: 120px"
+      />
+    </div>
+    <div class="form-row">
+      <label for="node-input-bulkMaxAwaitDurationMs"
+        ><i class="fa fa-clock-o"></i> Max await (ms)</label
+      >
+      <input
+        type="text"
+        id="node-input-bulkMaxAwaitDurationMs"
+        placeholder="Dapr default (1000); 1-60000"
+        style="width: 120px"
+      />
+    </div>
+  </div>
 </script>
 
 <script type="text/html" data-help-name="dapr-subscribe">
@@ -102,15 +229,36 @@
     <dt>payload <span class="property-type">object | buffer | any</span></dt>
     <dd>The event data. CloudEvent <code>data_base64</code> is decoded to a Buffer.</dd>
     <dt>dapr.pubsubName / dapr.topic / dapr.route <span class="property-type">string</span></dt>
-    <dd>Delivery source information.</dd>
+    <dd>Delivery source information; <code>route</code> is the specific path that matched.</dd>
+    <dt>dapr.ruleId <span class="property-type">string | null</span></dt>
+    <dd>
+      The persisted id of the CEL rule that matched, or <code>null</code> if none matched (or no
+      rules are configured). Wire a <code>switch</code> node on this to branch.
+    </dd>
     <dt>dapr.deliveryId <span class="property-type">string</span></dt>
-    <dd>The CloudEvent id, or a generated id for raw deliveries.</dd>
+    <dd>
+      The CloudEvent id. For a single rawPayload delivery this is a generated id (daprd still wraps
+      it in a synthetic CloudEvent); for a bulk rawPayload entry it is that entry's
+      <code>entryId</code> instead — bulk raw entries carry no CloudEvent at all.
+    </dd>
     <dt>dapr.metadata <span class="property-type">object</span></dt>
-    <dd>Delivery metadata carried on the request (e.g. tracing headers).</dd>
-    <dt>dapr.cloudEvent <span class="property-type">object</span></dt>
-    <dd>The full CloudEvent envelope daprd delivered (synthetic for raw payloads).</dd>
+    <dd>
+      Delivery metadata (e.g. tracing headers). In bulk subscribe this instead comes from the
+      entry's own metadata, merged over the batch's shared metadata.
+    </dd>
+    <dt>dapr.cloudEvent <span class="property-type">object | null</span></dt>
+    <dd>
+      The full CloudEvent envelope daprd delivered (synthetic for a single rawPayload delivery).
+      <code>null</code> for a bulk rawPayload entry, which has no CloudEvent wrapper.
+    </dd>
+    <dt class="optional">dapr.contentType <span class="property-type">string</span></dt>
+    <dd>Bulk subscribe only: the content type Dapr reported for this entry.</dd>
     <dt class="optional">dapr.ackId <span class="property-type">string</span></dt>
     <dd>Manual mode only: correlation id to pass to a <code>dapr ack</code> node.</dd>
+    <dt class="optional">dapr.entryId <span class="property-type">string</span></dt>
+    <dd>Bulk subscribe only: this event's id within its batch — preserve it for the ack node.</dd>
+    <dt class="optional">dapr.batchId <span class="property-type">string</span></dt>
+    <dd>Bulk subscribe only: the id Dapr assigned to the whole batch this event arrived in.</dd>
   </dl>
 
   <h3>Acknowledgement</h3>
@@ -118,15 +266,41 @@
     <b>Automatic</b> acknowledges each event as SUCCESS once it is sent into the flow.
     <b>Manual</b> holds the delivery open until a downstream <code>dapr ack</code> node completes it
     by <code>msg.dapr.ackId</code>; if no ack arrives before the connection's request timeout, the
-    event is RETRYed and a warning is logged.
+    event is RETRYed and a warning is logged. In bulk subscribe, every event in a batch is
+    acknowledged independently, so one batch can resolve as a mix of SUCCESS/RETRY/DROP.
+  </p>
+
+  <h3>CEL routing rules</h3>
+  <p>
+    Add one rule with a <a href="https://github.com/google/cel-spec" target="_blank">CEL</a> match
+    expression (e.g. <code>event.type == "order"</code>); daprd evaluates them in order and delivers
+    to the first match, or falls back to the default route if none match. Every delivery — matched
+    or not — is emitted from this node's single output, with <code>msg.dapr.ruleId</code> set to the
+    matching rule's persisted id, or <code>null</code> for the default. To branch a flow by rule,
+    wire a standard Node-RED <code>switch</code> node on <code>msg.dapr.ruleId</code>
+    downstream — this node deliberately keeps one static output rather than one per rule, since
+    Node-RED has no documented public API for safely remapping existing wires when a node's output
+    count changes. Each rule's Dapr-side route is tied to its persisted id, not its position —
+    inserting, removing, or reordering rules never reassigns an existing rule's route — but changing
+    the rule set still requires a sidecar restart, like adding or removing a subscribe node.
+  </p>
+
+  <h3>Bulk subscribe</h3>
+  <p>
+    Delivers events in batches for higher throughput. Combines with CEL routing rules — daprd groups
+    each batch by its matched route, so each matched route receives its own batches independently
+    (all still emitted from this node's one output). Max messages (1-1000) and max await (1-60000ms)
+    bound how daprd batches; leave blank for Dapr's defaults. These ranges are this package's own
+    safety cap, not a Dapr-imposed limit.
   </p>
 
   <h3>Subscriptions and restart</h3>
   <p>
-    The delivery route is derived from this node's id, so a routine redeploy keeps working without
-    restarting the sidecar. Adding or removing a subscription, or changing pub/sub, topic, metadata,
-    dead-letter topic, or raw-payload, changes the subscription definition and requires a sidecar
-    restart — the connection node shows <code>restart sidecar: subscriptions changed</code> until
-    daprd re-fetches <code>/dapr/subscribe</code>.
+    Each route is derived from this node's id (and each rule's own persisted id, if any), so a
+    routine redeploy keeps working without restarting the sidecar. Adding or removing a
+    subscription, or changing pub/sub, topic, metadata, dead-letter topic, raw-payload, rules, or
+    bulk subscribe, changes the subscription definition and requires a sidecar restart — the
+    connection node shows <code>restart sidecar: subscriptions changed</code> until daprd re-fetches
+    <code>/dapr/subscribe</code>.
   </p>
 </script>

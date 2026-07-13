@@ -152,12 +152,17 @@ module.exports = function registerDaprConnection(RED) {
       }
       const defs = [...subscriptions.values()].map((entry) => entry.definition);
       desiredFingerprint = fingerprint(defs);
-      const deliveryRoutes = [...subscriptions.values()].map(({ definition, handler }) => ({
-        method: 'POST',
-        path: definition.route,
-        kind: 'internal',
-        handler,
-      }));
+      // One app-channel route per subscription route (each CEL rule plus the
+      // default/fallback), all sharing the subscription's single handler — the
+      // handler distinguishes which route matched from ctx.path.
+      const deliveryRoutes = [...subscriptions.values()].flatMap(({ definition, handler }) =>
+        definition.routes.map((route) => ({
+          method: 'POST',
+          path: route.path,
+          kind: 'internal',
+          handler,
+        }))
+      );
       // Service methods are app-channel routes but not part of the Dapr
       // subscription set, so they are neither advertised nor fingerprinted.
       const serviceRoutes = [...services.values()].map(({ definition, handler }) => ({

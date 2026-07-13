@@ -1,0 +1,95 @@
+[
+  {
+    "id": "ex-cel-tab",
+    "type": "tab",
+    "label": "Dapr: CEL routing",
+    "disabled": false,
+    "info": "Subscribes to a topic with two CEL routing rules plus a default fallback. The subscribe node has a single output; msg.dapr.ruleId identifies which rule matched (or null for the default). A standard Switch node branches on msg.dapr.ruleId. Set the connection node's Dapr host/port and app port before deploying, then publish CloudEvents with a \"type\" of \"order\" or \"payment\" to see them branch; anything else falls through to \"other\"."
+  },
+  {
+    "id": "ex-cel-conn",
+    "type": "dapr-connection",
+    "name": "sidecar",
+    "daprHost": "",
+    "daprPort": "",
+    "bindAddress": "127.0.0.1",
+    "appPort": "3000",
+    "bodyLimitMb": "",
+    "requestTimeoutSec": ""
+  },
+  {
+    "id": "ex-cel-sub",
+    "type": "dapr-subscribe",
+    "z": "ex-cel-tab",
+    "name": "orders topic",
+    "connection": "ex-cel-conn",
+    "pubsubName": "pubsub",
+    "topic": "orders",
+    "ackMode": "auto",
+    "rawPayload": false,
+    "deadLetterTopic": "",
+    "metadata": "{}",
+    "rules": [
+      { "id": "ruleOrder", "match": "event.type == \"order\"" },
+      { "id": "rulePayment", "match": "event.type == \"payment\"" }
+    ],
+    "x": 190,
+    "y": 140,
+    "wires": [["ex-cel-switch"]]
+  },
+  {
+    "id": "ex-cel-switch",
+    "type": "switch",
+    "z": "ex-cel-tab",
+    "name": "branch on ruleId",
+    "property": "dapr.ruleId",
+    "propertyType": "msg",
+    "rules": [
+      { "t": "eq", "v": "ruleOrder", "vt": "str" },
+      { "t": "eq", "v": "rulePayment", "vt": "str" },
+      { "t": "null" }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 3,
+    "x": 420,
+    "y": 140,
+    "wires": [["ex-cel-order-debug"], ["ex-cel-payment-debug"], ["ex-cel-other-debug"]]
+  },
+  {
+    "id": "ex-cel-order-debug",
+    "type": "debug",
+    "z": "ex-cel-tab",
+    "name": "order events",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 660,
+    "y": 100
+  },
+  {
+    "id": "ex-cel-payment-debug",
+    "type": "debug",
+    "z": "ex-cel-tab",
+    "name": "payment events",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 660,
+    "y": 140
+  },
+  {
+    "id": "ex-cel-other-debug",
+    "type": "debug",
+    "z": "ex-cel-tab",
+    "name": "other (default) events",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 680,
+    "y": 180
+  }
+]
