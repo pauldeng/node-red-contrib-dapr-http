@@ -1,0 +1,17 @@
+# Reference component for the manual docker-compose.yml stack (redis on its
+# fixed, published port). The automated test harness (test/helpers/integration.js)
+# does NOT read this file — each test file gets its own throwaway Redis on a
+# dynamically allocated port, so it writes this same component shape itself,
+# interpolating that port, into a per-run temp directory.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub
+spec:
+  type: pubsub.redis
+  version: v1
+  metadata:
+    - name: redisHost
+      value: 127.0.0.1:6379
+    - name: redisPassword
+      value: ''

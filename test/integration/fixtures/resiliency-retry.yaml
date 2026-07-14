@@ -1,0 +1,26 @@
+# Bounds pub/sub redelivery to a fast, deterministic count so the retry
+# integration suite completes quickly. Without this, Dapr's default pub/sub
+# retry behavior for a component's inbound (sidecar-to-app) direction is
+# unbounded/slow-backoff — fine in production, too slow for a test.
+#
+# Kept as its own fixture, separate from the dead-letter suite: dead-lettering
+# does NOT require a retry policy (a bare deadLetterTopic sends a failing
+# message straight to the DLT on the very first failure), so mixing the two
+# fixtures would make the DLT suite implicitly depend on retry timing it
+# doesn't actually need.
+apiVersion: dapr.io/v1alpha1
+kind: Resiliency
+metadata:
+  name: retry-test
+spec:
+  policies:
+    retries:
+      fastRetry:
+        policy: constant
+        duration: 250ms
+        maxRetries: 3
+  targets:
+    components:
+      pubsub:
+        inbound:
+          retry: fastRetry

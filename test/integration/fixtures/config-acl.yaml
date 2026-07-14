@@ -1,0 +1,21 @@
+# Denies service invocation by default; allows only "allowed-caller" to POST
+# /orders on our app. Used by the ACL integration suite to confirm a
+# dapr-caller-app-id our own code never rejects is nonetheless rejected by
+# daprd itself before the request ever reaches the app.
+apiVersion: dapr.io/v1alpha1
+kind: Configuration
+metadata:
+  name: acl-test
+spec:
+  accessControl:
+    defaultAction: deny
+    trustDomain: 'public'
+    policies:
+      - appId: allowed-caller
+        defaultAction: deny
+        trustDomain: 'public'
+        namespace: 'default'
+        operations:
+          - name: /orders
+            httpVerb: ['POST']
+            action: allow

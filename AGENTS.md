@@ -82,7 +82,17 @@ These are load-bearing. Each traces to a verified constraint recorded in
   (a mesh caller must not treat internal endpoints as service methods). Preserve
   it for registered service methods so flows can authorize.
 - The app API token authenticates daprd to the app; it does not authorize a
-  caller. Caller authorization requires Dapr access-control policies.
+  caller. Caller authorization requires Dapr access-control policies —
+  **and those policies require mTLS to be enabled between sidecars.** Without
+  mTLS, daprd cannot read a caller's identity from a client cert, evaluates
+  every caller as `id: ""`, and every ACL policy collapses to its
+  `defaultAction` regardless of the caller's real app-id (confirmed against
+  real daprd 1.18.1 in `test/integration/acl.test.js`). This package does not
+  currently stand up mTLS/Sentry anywhere, so **Dapr ACLs are not a usable
+  caller-authorization mechanism as currently deployed** — document this gap
+  to operators rather than presenting ACLs as a working control. Wiring up
+  mTLS (a pinned `daprio/sentry` service plus trust-bundle config) is future
+  work, not yet implemented.
 - Never return stack traces, tokens, Node-RED configuration, or correlation
   state over HTTP.
 

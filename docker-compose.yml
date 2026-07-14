@@ -1,0 +1,38 @@
+# Pinned real-stack environment for manually exercising a flow against real
+# daprd + Redis. NOT what the automated integration tests run — they start
+# their own per-suite daprd, Redis, AND Node-RED containers via `docker run`
+# (test/helpers/integration.js, test/helpers/node-red-container.js), each with
+# the exact component/resiliency/config fixture and flow that suite needs.
+#
+# Node-RED itself is NOT a service here: this stack assumes a human runs it
+# however they like (e.g. `npm start` against this workspace) on port 3000,
+# matching --app-port=3000 below, so daprd needs to reach 127.0.0.1:3000 on
+# the host. `network_mode: host` on daprd is this stack's equivalent of the
+# documented `network_mode: service:node-red` pattern from docs/deployment.md
+# (written for a topology where Node-RED itself runs as a Compose service);
+# either way, daprd ends up sharing a network namespace with the app so the
+# secure 127.0.0.1-only default stays reachable by both processes.
+# Images are pinned by digest, not just tag — see test/helpers/integration.js
+# for the re-pin procedure.
+services:
+  redis:
+    image: redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    ports:
+      - '6379:6379'
+
+  daprd:
+    image: daprio/daprd:1.18.1@sha256:4434e34fd782db17094123be93a78c0b18556b5b1fca1f06448e54df24e51cdf
+    network_mode: host
+    depends_on:
+      - redis
+    volumes:
+      - ./test/integration/fixtures/components:/components:ro
+    command:
+      - './daprd'
+      - '--app-id=node-red-dapr-manual'
+      - '--app-port=3000'
+      - '--app-protocol=http'
+      - '--dapr-http-port=3500'
+      - '--dapr-grpc-port=0'
+      - '--resources-path=/components'
+      - '--log-level=info'

@@ -260,7 +260,12 @@ Use pinned `nodered/node-red:5.0.1-24`, `daprio/daprd:1.18.1`, and Redis images.
 - Test immediate dead-letter forwarding in a separate fixture so DLT behavior does not invalidate retry expectations.
 - Verify explicit SUCCESS, RETRY, DROP, timeout, redeploy interruption, and sidecar recovery.
 - Verify outbound and inbound service invocation round trips, all supported verbs, query strings, headers, binary data, non-2xx responses, timeout, and unknown method 404.
-- Verify app-token success/failure and Dapr ACL allow/deny behavior separately.
+- Verify app-token success/failure separately. For Dapr ACLs: verified against
+  real daprd 1.18.1 that policy enforcement requires mTLS — without it, every
+  caller is evaluated as `id: ""` and gets the policy's `defaultAction`
+  regardless of app-id, so a real allow/deny split needs a Sentry/mTLS setup
+  this package does not yet stand up (documented as a gap in `AGENTS.md`,
+  deferred as future work rather than built in M8).
 - Assert the app-channel port cannot access Node-RED `/flows`, `/settings`, editor assets, or arbitrary HTTP In endpoints.
 - Keep daprd running during an unchanged full flow redeploy and prove delivery resumes without restarting it.
 - Then change a subscription, prove the operator warning appears, restart daprd, and prove the new definition becomes active.
