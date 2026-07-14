@@ -20,7 +20,8 @@ Sinon/Supertest and no `node-red-node-test-helper`).
 - `nodes/*.js` + `nodes/*.html` — thin Node-RED wrappers (runtime + editor/help).
 - `lib/*.js` — all behavior, as directly-testable modules with no Node-RED import.
 - `test/unit/` — module contract tests. `test/runtime/` — real Node-RED
-  child-process black-box tests. `test/integration/` — real daprd + Redis.
+  child-process black-box tests. `test/integration/` — real daprd + Redis or
+  NATS JetStream.
   `test/e2e/` — Playwright editor tests. `test/helpers/`, `test/fixtures/`.
 - `docs/*.md` — architecture, development, testing, security, deployment,
   subscription runbook.
@@ -118,7 +119,7 @@ runtime tests. Target >= 90% line/function and >= 85% branch coverage on `lib/`.
 ## Completion criteria
 
 See `IMPLEMENTATION_PLAN.md` §9 (Completion Gate). In short: unit+coverage,
-real Node-RED black-box, real Dapr/Redis integration (including unchanged-flow
+real Node-RED black-box, real Dapr/Redis and NATS JetStream integration (including unchanged-flow
 redeploy without restarting daprd), Playwright e2e with visual inspection,
 lint + format + `git diff --check` + `npm pack --dry-run`, and confirmation that
 `AGENTS.md` is the only durable AI instruction source. Audit policy: `npm audit

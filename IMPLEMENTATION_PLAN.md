@@ -360,7 +360,139 @@ Every milestone follows red-green-refactor: add a focused failing test, run it a
 - Keep retry and dead-letter scenarios in separate fixtures.
 - Commit: `test: add real Dapr integration coverage`.
 
-### Milestone 9: Editor E2E, examples, and documentation
+### Milestone 9: NATS JetStream pub/sub integration
+
+Scope boundary: single-node, unauthenticated NATS. Durable consumers and the
+competing-consumers pattern (`durableName` + `queueGroupName` — `consumerID`
+is not supported by this component) are in scope; clustering and TLS/token
+authentication are not.
+
+- Add pinned `nats:2.14.3-alpine@sha256:c11af972c99ae542de8925e6a7d9c533aa1eb039660420d2074beed6089b3bf0`
+  (started with `-js`) to the pre-pull list (`test/helpers/pull-images.js`)
+  and a `pubsub.jetstream` component fixture — JetStream only;
+  `pubsub.natsstreaming` is deprecated (NATS Streaming Server itself is EOL)
+  and explicitly out of scope, never added.
+- Add the NATS service to `docker-compose.yml` running by default alongside
+  Redis, not behind a Compose profile: the single unprofiled `daprd` service
+  mounts the whole components directory regardless of which service
+  containers are running, so profiling only the NATS service would still
+  load a JetStream component pointed at a NATS server that may not be up —
+  profiles apply to services, not to files inside a mounted directory.
+  Keeping one shared `daprd` avoids needing a second, NATS-only resources
+  directory and a second app-port to explain. Give the NATS component a
+  distinct name — the existing Redis fixture already names its component
+  `pubsub` in that same directory — and document the manual
+  stream-provisioning step a human must run before deploying a flow against
+  it, mirroring `provisionStream()`: unlike the automated harness, nothing
+  bootstraps the stream for the manual stack on its own.
+- Generalize `test/helpers/integration.js`'s Redis-hardcoded
+  `pubsubComponentYaml()`/`writeResourcesDir()`/`startDaprd()` to accept a
+  broker choice or a pre-rendered component YAML, rather than duplicating the
+  container-lifecycle logic (naming, ports, image ensure, health-wait, log
+  capture, cleanup) in a parallel NATS-specific path.
+- Add `test/helpers/nats.js` (`startNats()`, `provisionStream()`) using the
+  pinned `@nats-io/transport-node@3.4.0` + `@nats-io/jetstream@3.4.0` npm
+  packages (the current v3 modular client pair — do not mix with the legacy
+  unified `nats@2.x` package; `@nats-io/jetstream`'s `jetstreamManager()`
+  requires a connection from `@nats-io/transport-node`, not from `nats`,
+  confirmed via each package's own `dependencies`). Unlike Redis, a JetStream
+  stream must exist before `Publish()`/`Subscribe()` will work (confirmed by
+  reading `dapr/components-contrib`'s `pubsub/jetstream/jetstream.go`:
+  neither call ever creates one) — `provisionStream()` only creates the
+  **stream**, nothing else, never a consumer: the same source confirms this
+  component calls `AddConsumer()` itself, inside `Subscribe()`, with no
+  check for a pre-existing consumer of that durable name, so pre-creating
+  one out of band would conflict with that call, not cooperate with it.
+  `durableName`/`queueGroupName` are component-wide metadata, applied to
+  every topic subscribed through that one component instance — reusing one
+  durable name across the matrix's different topics would make later
+  `AddConsumer()` calls try to rebind that same durable consumer to a
+  different subject filter. Keep the baseline component (used by every
+  suite below except the one that needs it) free of both fields; add a
+  second, dedicated component fixture with them set only for the
+  competing-consumers test.
+- Re-run only the broker-sensitive slice of the Milestone 8 matrix against
+  this component — not the full matrix. Invocation, ACL, and Admin-API
+  isolation don't touch pub/sub at all. The SDK adapter does — `dapr-client.js`'s
+  `ClientRegistry.publish()` calls the SDK's `pubsub.publish()`, Dapr's
+  generic publish API — but its own falsy/Buffer-body serialization concerns
+  are resolved before that call ever reaches whichever broker component is
+  configured, so re-running that matrix against JetStream specifically would
+  add nothing. Re-run: publish/subscribe plus CloudEvents round trip, and raw
+  payload.
+- Bulk subscribe: this component defaults to `concurrency: single`
+  (confirmed in `pubsub/jetstream/metadata.go`), and Dapr's runtime-level
+  fallback bulk adapter blocks each component callback until that message's
+  full bulk-handler round trip completes (confirmed in
+  `pkg/runtime/pubsub/default_bulksub.go`) — with the default, the batch
+  accumulator never sees more than one in-flight message, so batches would
+  always land as singletons and the test would not actually prove batching.
+  Set `concurrency: parallel` explicitly and assert the resulting HTTP
+  delivery to the app contains multiple entries in one request.
+- Competing consumers: two independent Node-RED + daprd pairs, sharing the
+  same app-id, stream, `durableName`, and `queueGroupName` (the dedicated
+  fixture from above), split delivery across them rather than each
+  receiving every message — the mechanism this component uses in place of
+  `consumerID`. Not two `dapr-subscribe` nodes on one connection: that's
+  rejected outright as a duplicate pubsub/topic registration
+  (`nodes/dapr-subscribe.js`'s `registerSubscription`), and the documented
+  pattern itself is "one application or pod, same app-id" distributing
+  across instances, not two subscriptions inside one instance. Don't assert
+  fairness — NATS picks one queue-group member per message at random, with
+  no guarantee a small finite batch splits across both. Assert that every
+  published message appears exactly once across the two instances' combined
+  captures (proving exclusivity, not fan-out to both), then prove the
+  second instance is a genuine, independent participant — not a bystander
+  that just never got picked — by stopping the first and confirming every
+  subsequent message lands on the second.
+- Retry and dead-letter topic, split into two separate, correctly-scoped
+  tests — not one, and not framed as JetStream bypassing Dapr Resiliency,
+  which it does not (confirmed by reading `dapr/dapr`'s
+  `pkg/runtime/subscription/subscription.go`): Dapr's Resiliency retry loop
+  always runs first, at the runtime layer, before the component ever gets a
+  chance to `Nak()` the underlying broker message — these layers stack, they
+  are not alternatives.
+  - Test this component's own `ackWait`/`maxDeliver` consumer-level
+    redelivery with **no** Dapr Resiliency policy configured, isolating that
+    layer specifically.
+  - Test Dapr's `deadLetterTopic` separately — but empirically, this
+    **stalls** with `pubsub.jetstream` in Dapr 1.18.1, it does not fire
+    immediately as the Milestone 8 Redis behavior would suggest. Confirmed
+    twice via real daprd debug logs: the runtime logs the original
+    delivery's failure, then logs "Publishing to topic \<dlq\>" — and logs
+    nothing further within the bounded window waited (up to 45+ seconds in
+    one manual run); removing the DLQ's own subscriber made no difference.
+    The exact cause inside the component is **not confirmed**. What IS
+    confirmed: the runtime creates a 30-second context specifically for the
+    dead-letter publish and passes it in, but this component's own
+    `Publish(ctx, ...)` never uses that context when calling
+    `js.jsc.Publish(...)`, so the runtime's own safety-net timeout never
+    actually bounds this call — that explains why it isn't bounded, not what
+    blocks the underlying NATS call; worth reporting upstream as a
+    reproducer rather than guessing further. Not a bug in this package,
+    since the identical flow shape already works against Redis. Test and
+    document the actual observed behavior with a bounded wait (one delivery
+    attempt, no dead-letter message, within that window), not the
+    originally assumed immediate-DLT-publish behavior or a claim about what
+    happens after the window.
+  - Skip testing `backOff` metadata unless deliberately exercising the
+    acknowledgement-_timeout_ path (the app never responds at all, no
+    explicit ack/nak): confirmed in `jetstream.go` that an explicit
+    error/RETRY response NAKs with `NakWithDelay(ackWait)`, a fixed delay —
+    `backOff`'s progressive schedule is never consulted on that path, only
+    on a real NATS-level ack-wait timeout.
+- One CEL-routing smoke test only (routing is evaluated by the Dapr runtime
+  against the CloudEvent envelope, after the component delivers —
+  broker-agnostic by construction, low risk).
+- Update `AGENTS.md`'s "`test/integration/` — real daprd + Redis" line and
+  `docs/testing.md`'s Integration tier row to reflect NATS support, as part
+  of this milestone's own scope, not deferred — the single source of truth
+  must not describe integration coverage as Redis-only once this lands.
+  Document every other broker-specific vs. broker-agnostic finding in
+  `docs/testing.md`, matching the Milestone 8 precedent.
+- Commit: `test: add NATS JetStream pub/sub integration coverage`.
+
+### Milestone 10: Editor E2E, examples, and documentation
 
 - Complete Node-RED v5 editor help and validation for all nodes.
 - Add Playwright interaction tests and visually inspect every node dialog, including the deferred `dapr-connection` and `dapr-publish` dialogs.
@@ -375,13 +507,14 @@ Before declaring the implementation complete:
 1. Run the Node 24 native unit and coverage suite.
 2. Run real Node-RED black-box tests.
 3. Run real Dapr/Redis Docker integration tests, including unchanged flow redeploy without restarting daprd.
-4. Run Playwright E2E and inspect all captured screenshots.
-5. Run ESLint, Prettier check, and `git diff --check`. For audit: `npm audit --omit=dev` must be clean; the full `npm audit` is reviewed, permitting only the specific advisories explicitly listed in `docs/testing.md` — any other or newly-disclosed advisory fails until individually assessed.
-6. Run `npm pack --dry-run` and inspect the package contents even though publication is out of scope.
-7. Confirm secrets, tokens, temporary credentials, screenshots with sensitive content, coverage output, and test data are excluded from the package and Git where appropriate.
-8. Review every milestone commit for a single coherent purpose and passing state.
-9. Confirm `AGENTS.md` is the only durable AI instruction source and `CLAUDE.md` is exactly `@AGENTS.md`.
-10. Confirm docs state precisely: routine unchanged flow redeploy needs no daprd restart; subscription-definition changes do.
+4. Run real Dapr/NATS JetStream Docker integration tests (Milestone 9).
+5. Run Playwright E2E and inspect all captured screenshots.
+6. Run ESLint, Prettier check, and `git diff --check`. For audit: `npm audit --omit=dev` must be clean; the full `npm audit` is reviewed, permitting only the specific advisories explicitly listed in `docs/testing.md` — any other or newly-disclosed advisory fails until individually assessed.
+7. Run `npm pack --dry-run` and inspect the package contents even though publication is out of scope.
+8. Confirm secrets, tokens, temporary credentials, screenshots with sensitive content, coverage output, and test data are excluded from the package and Git where appropriate.
+9. Review every milestone commit for a single coherent purpose and passing state.
+10. Confirm `AGENTS.md` is the only durable AI instruction source and `CLAUDE.md` is exactly `@AGENTS.md`.
+11. Confirm docs state precisely: routine unchanged flow redeploy needs no daprd restart; subscription-definition changes do.
 
 ## 10. Known Constraints
 

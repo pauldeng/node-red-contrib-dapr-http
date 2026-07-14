@@ -10,14 +10,14 @@ no `node-red-node-test-helper`.
 | ----------- | ------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------- |
 | Unit        | `test/unit/`        | `lib/` module contracts in isolation.                                                                    | Node only.             |
 | Runtime     | `test/runtime/`     | Real Node-RED loads, registers, wires, and runs the nodes; a fake Dapr HTTP sidecar stands in for daprd. | Node + `node-red` CLI. |
-| Integration | `test/integration/` | Behavior against real daprd 1.18.1 + Redis.                                                              | Docker.                |
+| Integration | `test/integration/` | Behavior against real daprd 1.18.1, with Redis or NATS JetStream as the pub/sub broker.                  | Docker.                |
 | E2E         | `test/e2e/`         | Editor dialogs, validation, and a full publish/subscribe + invoke/service flow.                          | Playwright + Node-RED. |
 
 Tiers are introduced by the milestone that first needs them; this file grows
 with them.
 
 Visual inspection of every node's editor dialog (light/dark, multiple viewports)
-is consolidated in the E2E tier (Milestone 9). The `dapr-connection` and
+is consolidated in the E2E tier (Milestone 10). The `dapr-connection` and
 `dapr-publish` dialog checks are explicitly tracked there; the owner deferred
 the connection check from Milestone 3. Runtime tests confirm both nodes load.
 
@@ -26,13 +26,13 @@ the connection check from Milestone 3. Runtime tests confirm both nodes load.
 ```bash
 npm test                 # unit
 npm run test:runtime     # real Node-RED child-process harness
-npm run test:integration # real daprd 1.18.1 + Redis via Docker
+npm run test:integration # real daprd 1.18.1 via Docker (Redis and NATS JetStream)
 ```
 
 (The e2e script is added with its milestone.)
 
 `npm run test:integration` first runs `pretest:integration`
-(`test/helpers/pull-images.js`), which pre-pulls all three pinned images. A
+(`test/helpers/pull-images.js`), which pre-pulls all four pinned images. A
 cold pull can take minutes on a fresh runner — far longer than a single
 integration test's own timeout, which includes its setup — so pulling happens
 once, up front, outside any individual test's clock, not lazily on whichever
@@ -45,22 +45,29 @@ HTTP. A fake Dapr HTTP sidecar (`test/helpers/fake-dapr.js`) stands in for daprd
 
 The integration harness spins up a fresh, isolated set of pinned containers
 per test file via raw `docker run` (not docker-compose, so files stay
-parallel-safe on dynamically allocated ports): `daprio/daprd:1.18.1` and
-`redis:7.4-alpine` (`test/helpers/integration.js`), and — per
-IMPLEMENTATION_PLAN.md's integration-tier requirement — Node-RED itself, as
-the pinned `nodered/node-red:5.0.1-24` image (`test/helpers/node-red-container.js`,
+parallel-safe on dynamically allocated ports): `daprio/daprd:1.18.1`,
+`redis:7.4-alpine` (`test/helpers/integration.js`), `nats:2.14.3-alpine`
+(`test/helpers/nats.js` — JetStream only, started with `-js`; `pubsub.natsstreaming`
+is deprecated and out of scope), and — per IMPLEMENTATION_PLAN.md's
+integration-tier requirement — Node-RED itself, as the pinned
+`nodered/node-red:5.0.1-24` image (`test/helpers/node-red-container.js`,
 `ContainerNodeRed`), not the host child process the runtime tier uses
 (`NodeRed`, `test/helpers/node-red.js` — unchanged, and still exactly what the
-runtime tier runs). All three images are pinned by digest, not just tag; see
-`test/helpers/docker.js` (the shared `execFileP`/`ensureImage` plumbing both
-container helpers use) for the re-pin procedure. Fixtures — the Redis pubsub
-component, and any Resiliency/Configuration/Subscription resources a suite
-needs — live in `test/integration/fixtures/` and are copied into a fresh
-per-run resources directory; `docker-compose.yml` at the repo root is a
-separate, manual-use reference stack, not what the automated tests run.
-Startup order matters (see below): deploy Node-RED first, then start daprd
-once the app answers `/healthz`, because daprd fetches `/dapr/subscribe`
-exactly once at startup.
+runtime tier runs). All four images are pinned by digest, not just tag; see
+`test/helpers/docker.js` (the shared `execFileP`/`ensureImage` plumbing every
+container helper uses) for the re-pin procedure.
+
+`startDaprd()` (`test/helpers/integration.js`) is broker-agnostic: `redisPort`
+is optional, and a `components` array accepts any pre-rendered Component YAML
+a suite needs — the Redis pubsub component and any Resiliency/Configuration/
+Subscription fixtures live in `test/integration/fixtures/` and are copied into
+a fresh per-run resources directory, while `test/helpers/nats.js`'s
+`jetstreamComponentYaml()` renders a NATS one directly, since JetStream needs a
+pre-existing stream (`provisionStream()`) that Redis never does.
+`docker-compose.yml` at the repo root is a separate, manual-use reference
+stack, not what the automated tests run. Startup order matters (see below):
+deploy Node-RED first, then start daprd once the app answers `/healthz`,
+because daprd fetches `/dapr/subscribe` exactly once at startup.
 
 `ContainerNodeRed` exposes the same public surface as `NodeRed`
 (`start`/`deploy`/`waitForHttp`/`stop`/`logText`/`nodeUrl`) so integration test
@@ -165,6 +172,29 @@ test:integration` passes `--test-concurrency=4`. Running all files at
   policy (`test/integration/bulk.test.js`) — when one entry in a bulk batch
   is never acked and the rest resolve SUCCESS/DROP, only the unacked entry is
   redelivered; the entries that already resolved are not sent again.
+- **`deadLetterTopic` stalls with `pubsub.jetstream` in Dapr 1.18.1
+  (integration, Milestone 9):** confirmed twice via real daprd debug logs —
+  the runtime logs the original delivery's failure, then logs "Publishing to
+  topic \<dlq\>", and logs nothing further within the bounded window each
+  test/manual run waited (up to 45+ seconds in one manual run); no
+  redelivery, no dead-letter message, within that window. Removing the DLQ's
+  own subscriber made no difference, ruling that out as the cause. The exact
+  cause inside the component is **not confirmed** — do not treat it as
+  established. What IS confirmed by reading both the pinned Dapr runtime and
+  this component's source: the runtime creates a 30-second context
+  specifically for the dead-letter publish
+  (`pkg/runtime/subscription/subscription.go`'s `deadLetterPublishTimeout`)
+  and passes it in, but this component's own `Publish(ctx, ...)` accepts
+  that context and never uses it when calling `js.jsc.Publish(...)` — so the
+  runtime's own safety-net timeout never actually bounds this call. That
+  doesn't explain what blocks the underlying NATS publish itself; that would
+  need reading the `nats.go` client's own internals, which this project
+  doesn't ship or maintain, and is worth reporting upstream as a reproducer
+  rather than guessing further here. Not a bug in this package: the
+  identical flow shape already works against Redis (Milestone 8's
+  `dead-letter.test.js`). `test/integration/nats-dead-letter.test.js` proves
+  the actual observed behavior (one delivery attempt, no dead-letter
+  message) within a bounded wait, not a claim about what happens after it.
 
 ## Security audit
 

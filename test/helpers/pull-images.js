@@ -11,9 +11,10 @@
 const { ensureImage } = require('./docker');
 const { DAPRD_IMAGE, REDIS_IMAGE } = require('./integration');
 const { NODE_RED_IMAGE } = require('./node-red-container');
+const { NATS_IMAGE } = require('./nats');
 
 async function main() {
-  for (const image of [DAPRD_IMAGE, REDIS_IMAGE, NODE_RED_IMAGE]) {
+  for (const image of [DAPRD_IMAGE, REDIS_IMAGE, NODE_RED_IMAGE, NATS_IMAGE]) {
     process.stdout.write(`ensuring ${image}...\n`);
     await ensureImage(image);
   }

@@ -1,6 +1,7 @@
 # Pinned real-stack environment for manually exercising a flow against real
-# daprd + Redis. NOT what the automated integration tests run — they start
-# their own per-suite daprd, Redis, AND Node-RED containers via `docker run`
+# daprd + Redis + NATS JetStream. NOT what the automated integration tests
+# run — they start their own per-suite daprd, broker, AND Node-RED containers
+# via `docker run`
 # (test/helpers/integration.js, test/helpers/node-red-container.js), each with
 # the exact component/resiliency/config fixture and flow that suite needs.
 #
@@ -14,17 +15,44 @@
 # secure 127.0.0.1-only default stays reachable by both processes.
 # Images are pinned by digest, not just tag — see test/helpers/integration.js
 # for the re-pin procedure.
+#
+# NATS runs by default alongside Redis, not behind a Compose profile: the one
+# unprofiled `daprd` service below mounts the whole components directory
+# regardless of which service containers are running, so profiling only the
+# NATS service would still load a pubsub.jetstream component pointed at a
+# NATS server that isn't up — profiles gate services, not files inside a
+# mounted directory. Its component is named `pubsub-nats`, distinct from
+# Redis's `pubsub`, since both live in the same mounted directory.
+#
+# Unlike Redis, a JetStream stream must exist before pubsub.jetstream will
+# work at all — confirmed by reading dapr/components-contrib's
+# pubsub/jetstream/jetstream.go: neither Publish() nor Subscribe() ever
+# creates one. This stack does not bootstrap it automatically; run this once
+# before deploying a flow against `pubsub-nats` (reuses the same
+# provisionStream() the automated tests use). Topic names must start with
+# "manual." — a bare ">" (capture literally everything) is rejected by NATS
+# itself ("capturing all subjects requires no-ack to be true", confirmed
+# empirically), so this uses a scoped wildcard instead:
+#
+#   node -e "require('./test/helpers/nats').provisionStream(4222, { streamName: 'manual', subjects: ['manual.>'] }).then(() => console.log('stream ready'))"
 services:
   redis:
     image: redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     ports:
       - '6379:6379'
 
+  nats:
+    image: nats:2.14.3-alpine@sha256:c11af972c99ae542de8925e6a7d9c533aa1eb039660420d2074beed6089b3bf0
+    command: ['-js']
+    ports:
+      - '4222:4222'
+
   daprd:
     image: daprio/daprd:1.18.1@sha256:4434e34fd782db17094123be93a78c0b18556b5b1fca1f06448e54df24e51cdf
     network_mode: host
     depends_on:
       - redis
+      - nats
     volumes:
       - ./test/integration/fixtures/components:/components:ro
     command:

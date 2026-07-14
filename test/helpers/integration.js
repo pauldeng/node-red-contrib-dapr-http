@@ -119,23 +119,34 @@ async function startRedis() {
   };
 }
 
-// Writes a fresh per-run resources directory: the pubsub component (pointed
-// at the given Redis port) plus any extra static fixtures a suite needs
-// (e.g. resiliency-retry.yaml, config-acl.yaml — see test/integration/fixtures/).
-// Resiliency/Configuration/Subscription resources are all loaded from this
-// same directory (daprd distinguishes them by each file's own "kind"), so
-// dropping in extra fixture files is enough for Resiliency to take effect;
-// Configuration additionally needs the `--config` flag to point at it.
+// Writes a fresh per-run resources directory: the Redis pubsub component
+// (pointed at the given Redis port, if any), any broker-agnostic pre-rendered
+// components a suite supplies directly (e.g. test/helpers/nats.js's
+// jetstreamComponentYaml() — this function only ever writes bytes, it does
+// not know or care which broker they describe), and any extra static fixtures
+// a suite needs (e.g. resiliency-retry.yaml, config-acl.yaml — see
+// test/integration/fixtures/). Resiliency/Configuration/Subscription
+// resources are all loaded from this same directory (daprd distinguishes them
+// by each file's own "kind"), so dropping in extra fixture files is enough
+// for Resiliency to take effect; Configuration additionally needs the
+// `--config` flag to point at it.
 //
 // The daprd image runs as a non-root, unrelated container UID (65532), so
 // mkdtemp's default 0700 directory (and the host user's normal file modes)
 // are unreadable to it — every path here is explicitly opened up.
-async function writeResourcesDir({ redisPort, extraFixtures = [] }) {
+async function writeResourcesDir({ redisPort, components = [], extraFixtures = [] }) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'nrdapr-it-'));
   await fsp.chmod(dir, 0o755);
-  const pubsubPath = path.join(dir, 'pubsub.yaml');
-  await fsp.writeFile(pubsubPath, pubsubComponentYaml(redisPort));
-  await fsp.chmod(pubsubPath, 0o644);
+  if (redisPort !== undefined) {
+    const pubsubPath = path.join(dir, 'pubsub.yaml');
+    await fsp.writeFile(pubsubPath, pubsubComponentYaml(redisPort));
+    await fsp.chmod(pubsubPath, 0o644);
+  }
+  for (const { filename, yaml } of components) {
+    const dest = path.join(dir, filename);
+    await fsp.writeFile(dest, yaml);
+    await fsp.chmod(dest, 0o644);
+  }
   for (const fixtureFile of extraFixtures) {
     const src = path.join(FIXTURES_DIR, fixtureFile);
     const dest = path.join(dir, fixtureFile);
@@ -152,10 +163,16 @@ async function writeResourcesDir({ redisPort, extraFixtures = [] }) {
 // Pass `httpPort` when the caller must know daprd's port BEFORE daprd starts
 // (e.g. to configure the dapr-connection node's daprPort up front, avoiding a
 // redeploy) — allocate it with freePort() and pass it straight through.
+//
+// `redisPort` is optional (omit it for a NATS-only or otherwise Redis-free
+// daprd); `components` is a broker-agnostic escape hatch for any other
+// pre-rendered Component YAML a suite needs (e.g. test/helpers/nats.js's
+// jetstreamComponentYaml()) — this function never special-cases what's in it.
 async function startDaprd({
   appId,
   appPort,
   redisPort,
+  components = [],
   extraFixtures = [],
   configFixture,
   appApiToken,
@@ -165,6 +182,7 @@ async function startDaprd({
   await ensureImage(DAPRD_IMAGE);
   const resourcesDir = await writeResourcesDir({
     redisPort,
+    components,
     extraFixtures: configFixture ? [...extraFixtures, configFixture] : extraFixtures,
   });
   const httpPort = presetHttpPort || (await freePort());

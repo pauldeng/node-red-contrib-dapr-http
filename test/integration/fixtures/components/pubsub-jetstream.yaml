@@ -1,0 +1,23 @@
+# Reference component for the manual docker-compose.yml stack (NATS on its
+# fixed, published port). The automated test harness (test/helpers/nats.js)
+# does NOT read this file — each test file renders its own jetstreamComponentYaml()
+# against a throwaway NATS server on a dynamically allocated port.
+#
+# Named "pubsub-nats" (not "pubsub" — see ./pubsub.yaml) since both this file
+# and the Redis one live in the same mounted resources directory. Point a
+# flow's pubsubName at "pubsub-nats" to use this one, and prefix topic names
+# with "manual." (e.g. "manual.orders") to match the provisioned stream's
+# subject filter. Requires the "manual" stream to exist first — see
+# docker-compose.yml's header comment for the one-time provisioning command.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub-nats
+spec:
+  type: pubsub.jetstream
+  version: v1
+  metadata:
+    - name: natsURL
+      value: nats://127.0.0.1:4222
+    - name: streamName
+      value: manual
