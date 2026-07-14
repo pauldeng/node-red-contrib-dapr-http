@@ -58,4 +58,11 @@
     <code>msg.dapr</code> through the flow (mutate the message rather than replacing it) so
     <code>ackId</code> reaches this node.
   </p>
+
+  <h3>Example</h3>
+  <p>Decide the outcome in a Function node before this one, then mutate and return the message:</p>
+  <pre>
+// Function node before dapr ack
+msg.dapr.status = msg.payload.orderId ? 'SUCCESS' : 'DROP';
+return msg; // msg.dapr.ackId must survive</pre>
 </script>

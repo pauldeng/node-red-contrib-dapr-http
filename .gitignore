@@ -14,6 +14,10 @@ test/**/*.userdir/
 test-results/
 playwright-report/
 .playwright/
+test/e2e/screenshots/
+
+# Provider-specific agent state — never shipped or committed
+.claude/
 
 # Logs and OS cruft
 *.log

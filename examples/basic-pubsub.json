@@ -1,0 +1,92 @@
+[
+  {
+    "id": "ex-basic-tab",
+    "type": "tab",
+    "label": "Dapr: basic publish and subscribe",
+    "disabled": false,
+    "info": "The smallest complete Dapr flow: an inject node publishes a message, and a subscribe node receives it back. Set the connection node's Dapr host/port and app port before deploying. daprd only reads the subscription list at its own startup, so if this is the first subscribe node on this sidecar, restart daprd once after deploying — redeploying the flow again does not make it refetch (see docs/subscriptions.md)."
+  },
+  {
+    "id": "ex-basic-conn",
+    "type": "dapr-connection",
+    "name": "sidecar",
+    "daprHost": "",
+    "daprPort": "",
+    "bindAddress": "127.0.0.1",
+    "appPort": "3000",
+    "bodyLimitMb": "",
+    "requestTimeoutSec": ""
+  },
+  {
+    "id": "ex-basic-inject",
+    "type": "inject",
+    "z": "ex-basic-tab",
+    "name": "send greeting",
+    "props": [{ "p": "payload" }],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"greeting\":\"hello from Node-RED\"}",
+    "payloadType": "json",
+    "x": 170,
+    "y": 100,
+    "wires": [["ex-basic-publish"]]
+  },
+  {
+    "id": "ex-basic-publish",
+    "type": "dapr-publish",
+    "z": "ex-basic-tab",
+    "name": "greetings topic",
+    "connection": "ex-basic-conn",
+    "pubsubName": "pubsub",
+    "topic": "greetings",
+    "contentType": "",
+    "metadata": "{}",
+    "x": 390,
+    "y": 100,
+    "wires": [["ex-basic-publish-debug"]]
+  },
+  {
+    "id": "ex-basic-publish-debug",
+    "type": "debug",
+    "z": "ex-basic-tab",
+    "name": "publish result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 620,
+    "y": 100
+  },
+  {
+    "id": "ex-basic-sub",
+    "type": "dapr-subscribe",
+    "z": "ex-basic-tab",
+    "name": "greetings topic",
+    "connection": "ex-basic-conn",
+    "pubsubName": "pubsub",
+    "topic": "greetings",
+    "ackMode": "auto",
+    "rawPayload": false,
+    "deadLetterTopic": "",
+    "metadata": "{}",
+    "rules": [],
+    "x": 200,
+    "y": 200,
+    "wires": [["ex-basic-sub-debug"]]
+  },
+  {
+    "id": "ex-basic-sub-debug",
+    "type": "debug",
+    "z": "ex-basic-tab",
+    "name": "received",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 420,
+    "y": 200
+  }
+]

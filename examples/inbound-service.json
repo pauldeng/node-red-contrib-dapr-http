@@ -1,0 +1,59 @@
+[
+  {
+    "id": "ex-service-tab",
+    "type": "tab",
+    "label": "Dapr: inbound service with response",
+    "disabled": false,
+    "info": "Exposes a service method other Dapr apps can invoke through this sidecar. The Function node must mutate and return the same message (never build a new one) so msg.dapr.responseId reaches the dapr response node. Set the connection node's Dapr host/port and app port before deploying, then invoke it from another app-id as POST /orders/echo."
+  },
+  {
+    "id": "ex-service-conn",
+    "type": "dapr-connection",
+    "name": "sidecar",
+    "daprHost": "",
+    "daprPort": "",
+    "bindAddress": "127.0.0.1",
+    "appPort": "3000",
+    "bodyLimitMb": "",
+    "requestTimeoutSec": ""
+  },
+  {
+    "id": "ex-service-in",
+    "type": "dapr-service",
+    "z": "ex-service-tab",
+    "name": "orders/echo",
+    "connection": "ex-service-conn",
+    "verb": "POST",
+    "methodPath": "/orders/echo",
+    "x": 180,
+    "y": 160,
+    "wires": [["ex-service-handle"]]
+  },
+  {
+    "id": "ex-service-handle",
+    "type": "function",
+    "z": "ex-service-tab",
+    "name": "build response",
+    "func": "// mutate and return msg - a new object would drop msg.dapr.responseId\nmsg.payload = { echoed: msg.payload, from: msg.dapr.callerAppId || null };\nmsg.dapr.statusCode = 200;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 410,
+    "y": 160,
+    "wires": [["ex-service-response"]]
+  },
+  {
+    "id": "ex-service-response",
+    "type": "dapr-response",
+    "z": "ex-service-tab",
+    "name": "",
+    "connection": "ex-service-conn",
+    "statusCode": "200",
+    "x": 630,
+    "y": 160,
+    "wires": []
+  }
+]

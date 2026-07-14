@@ -157,10 +157,19 @@
       id="node-input-rawPayload"
       style="display:inline-block; width:auto; vertical-align:top"
     />
-    <span
-      >Topic messages are not CloudEvents; daprd wraps them and the payload arrives as a
-      Buffer</span
-    >
+    <!--
+      A block element, not an inline <span>: a form-row with only inline
+      children (label, checkbox, text) has no block-level child to establish
+      its own width. `max-width` matches Node-RED's own `.form-tips` class
+      (see dapr-connection.html) — without it, Node-RED's tray-sizing measures
+      this div's UNWRAPPED natural width and sets that as the whole dialog's
+      min-width, blowing it out to ~950px and clipping every other row (found
+      empirically: removing the text dropped measured min-width from 953px to
+      480px, matching the core Switch node's own rule-editableList dialog).
+    -->
+    <div style="margin-top: 6px; font-size: 0.85em; color: #888; max-width: 450px">
+      Topic messages are not CloudEvents; daprd wraps them and the payload arrives as a Buffer
+    </div>
   </div>
   <div class="form-row">
     <label for="node-input-deadLetterTopic"><i class="fa fa-inbox"></i> Dead-letter</label>
@@ -177,7 +186,8 @@
   </div>
   <div class="form-row">
     <label><i class="fa fa-random"></i> CEL routing rules</label>
-    <div style="margin-bottom: 6px; font-size: 0.85em; color: #888">
+    <!-- max-width — see the rawPayload description above for why. -->
+    <div style="margin-bottom: 6px; font-size: 0.85em; color: #888; max-width: 450px">
       Evaluated in order (first match wins); every matched event is emitted from this node's one
       output with <code>msg.dapr.ruleId</code> set to the matching rule's id (shown after each
       match, below) or <code>null</code> for no match. Leave empty to skip CEL routing. Combines
@@ -187,7 +197,7 @@
     <ol id="node-input-rules-container"></ol>
   </div>
   <div class="form-row">
-    <label for="node-input-bulkEnabled"><i class="fa fa-layer-group"></i> Bulk subscribe</label>
+    <label for="node-input-bulkEnabled"><i class="fa fa-clone"></i> Bulk subscribe</label>
     <input
       type="checkbox"
       id="node-input-bulkEnabled"
@@ -263,9 +273,9 @@
 
   <h3>Acknowledgement</h3>
   <p>
-    <b>Automatic</b> acknowledges each event as SUCCESS once it is sent into the flow.
-    <b>Manual</b> holds the delivery open until a downstream <code>dapr ack</code> node completes it
-    by <code>msg.dapr.ackId</code>; if no ack arrives before the connection's request timeout, the
+    Automatic acknowledges each event as SUCCESS once it is sent into the flow. Manual holds the
+    delivery open until a downstream <code>dapr ack</code> node completes it by
+    <code>msg.dapr.ackId</code>; if no ack arrives before the connection's request timeout, the
     event is RETRYed and a warning is logged. In bulk subscribe, every event in a batch is
     acknowledged independently, so one batch can resolve as a mix of SUCCESS/RETRY/DROP.
   </p>
@@ -303,4 +313,14 @@
     connection node shows <code>restart sidecar: subscriptions changed</code> until daprd re-fetches
     <code>/dapr/subscribe</code>.
   </p>
+
+  <h3>Example</h3>
+  <p>
+    With Ack mode set to Manual, decide the outcome in a downstream Function node and finish with a
+    <code>dapr ack</code> node:
+  </p>
+  <pre>
+// Function node after dapr subscribe
+msg.dapr.status = msg.payload.orderId ? 'SUCCESS' : 'DROP';
+return msg; // msg.dapr.ackId must survive to the dapr ack node</pre>
 </script>

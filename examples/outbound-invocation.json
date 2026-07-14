@@ -1,0 +1,65 @@
+[
+  {
+    "id": "ex-invoke-tab",
+    "type": "tab",
+    "label": "Dapr: outbound service invocation",
+    "disabled": false,
+    "info": "Invokes a method on another Dapr app-id through this sidecar. Set the connection node's Dapr host/port and app port, and set the invoke node's target app-id to a real service before deploying. msg.dapr.statusCode and msg.dapr.headers carry the response metadata; msg.payload carries the decoded body."
+  },
+  {
+    "id": "ex-invoke-conn",
+    "type": "dapr-connection",
+    "name": "sidecar",
+    "daprHost": "",
+    "daprPort": "",
+    "bindAddress": "127.0.0.1",
+    "appPort": "3000",
+    "bodyLimitMb": "",
+    "requestTimeoutSec": ""
+  },
+  {
+    "id": "ex-invoke-inject",
+    "type": "inject",
+    "z": "ex-invoke-tab",
+    "name": "look up order 42",
+    "props": [{ "p": "payload" }],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 140,
+    "wires": [["ex-invoke-invoke"]]
+  },
+  {
+    "id": "ex-invoke-invoke",
+    "type": "dapr-invoke",
+    "z": "ex-invoke-tab",
+    "name": "orders/42",
+    "connection": "ex-invoke-conn",
+    "appId": "order-service",
+    "method": "orders/42",
+    "verb": "GET",
+    "contentType": "",
+    "timeoutSec": "",
+    "headers": "",
+    "x": 410,
+    "y": 140,
+    "wires": [["ex-invoke-debug"]]
+  },
+  {
+    "id": "ex-invoke-debug",
+    "type": "debug",
+    "z": "ex-invoke-tab",
+    "name": "response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 630,
+    "y": 140
+  }
+]

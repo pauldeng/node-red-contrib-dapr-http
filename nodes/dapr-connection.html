@@ -1,13 +1,26 @@
 <script type="text/javascript">
+  // A field omitted entirely from a hand-authored or re-imported flow is
+  // undefined, not '' — both mean "not set" to every validate function below.
+  function isBlank(v) {
+    return v === undefined || v === null || v === '';
+  }
+
   RED.nodes.registerType('dapr-connection', {
     category: 'config',
     defaults: {
       name: { value: '' },
       daprHost: { value: '' },
+      // A hand-authored or re-imported flow can omit an optional field
+      // entirely rather than set it to '' — Node-RED does not backfill
+      // defaults.value for a missing key on import, so the node's own value
+      // is `undefined`, not ''. Every optional field's validate function must
+      // tolerate both, or the node shows a permanent, non-recoverable
+      // validation error for a value the runtime already defaults fine
+      // (found by driving a real import through a real editor).
       daprPort: {
         value: '',
         validate: function (v) {
-          return v === '' || (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 65535);
+          return isBlank(v) || (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 65535);
         },
       },
       bindAddress: { value: '127.0.0.1', required: true },
@@ -20,16 +33,24 @@
       },
       bodyLimitMb: {
         value: '4',
+        // blank means "use the runtime default of 4" (lib/options.js).
         validate: function (v) {
+          if (isBlank(v)) {
+            return true;
+          }
           const n = Number(v);
-          return v !== '' && Number.isFinite(n) && n >= 1 && n <= 64;
+          return Number.isFinite(n) && n >= 1 && n <= 64;
         },
       },
       requestTimeoutSec: {
         value: '30',
+        // blank means "use the runtime default of 30" (lib/options.js).
         validate: function (v) {
+          if (isBlank(v)) {
+            return true;
+          }
           const n = Number(v);
-          return v !== '' && Number.isFinite(n) && n >= 1 && n <= 300;
+          return Number.isFinite(n) && n >= 1 && n <= 300;
         },
       },
     },
@@ -114,31 +135,45 @@
 
   <h3>Outbound</h3>
   <p>
-    How this app reaches the sidecar's HTTP API. Leave <b>host</b> and <b>port</b> blank to use the
-    sidecar's <code>DAPR_HTTP_ENDPOINT</code> environment discovery; otherwise they default to
-    <code>127.0.0.1:3500</code>. An optional <b>Dapr API token</b> (else
-    <code>DAPR_API_TOKEN</code>) is sent with outbound calls.
+    How this app reaches the sidecar's HTTP API. Leave host and port blank to use the sidecar's
+    <code>DAPR_HTTP_ENDPOINT</code> environment discovery; otherwise they default to
+    <code>127.0.0.1:3500</code>. An optional Dapr API token (else <code>DAPR_API_TOKEN</code>) is
+    sent with outbound calls.
   </p>
 
   <h3>Inbound app channel</h3>
   <p>
     The sidecar delivers subscriptions and service invocations to a dedicated HTTP listener owned by
     this node &mdash; never the Node-RED editor port, so the Admin API is never exposed to the Dapr
-    mesh. Point the sidecar's <code>--app-port</code> at this <b>app port</b> (default
-    <code>3000</code>). The <b>bind address</b> defaults to loopback; binding to a non-loopback
-    address exposes the listener to the network and should be paired with an app API token and Dapr
-    access-control policies.
+    mesh. Point the sidecar's <code>--app-port</code> at this app port (default <code>3000</code>).
+    The bind address defaults to loopback; binding to a non-loopback address exposes the listener to
+    the network and should be paired with an app API token and Dapr access-control policies.
   </p>
   <p>
-    The optional <b>App API token</b> (else <code>APP_API_TOKEN</code>) is required on inbound
-    requests. It authenticates the sidecar to the app; it does not authorize a calling application
-    &mdash; use Dapr access control for that.
+    The optional App API token (else <code>APP_API_TOKEN</code>) is required on inbound requests. It
+    authenticates the sidecar to the app; it does not authorize a calling application &mdash; use
+    Dapr access control for that.
   </p>
 
   <h3>Status</h3>
   <p>
-    The node polls <code>/v1.0/healthz/outbound</code> and shows <b>connected</b> (green) or
-    <b>sidecar unavailable</b> (red). Subscription changes require restarting the sidecar; a routine
-    flow redeploy does not.
+    The node polls <code>/v1.0/healthz/outbound</code> and shows connected (green) or sidecar
+    unavailable (red). Subscription changes require restarting the sidecar; a routine flow redeploy
+    does not.
   </p>
+
+  <h3>Example</h3>
+  <p>
+    The default topology — Node-RED and <code>daprd</code> sharing one network namespace (a
+    Kubernetes pod, or Docker's <code>network_mode: service:node-red</code>) — needs only the app
+    port:
+  </p>
+  <dl class="message-properties">
+    <dt>Dapr host / Dapr port</dt>
+    <dd>left blank</dd>
+    <dt>Bind address</dt>
+    <dd><code>127.0.0.1</code> (the default)</dd>
+    <dt>App port</dt>
+    <dd><code>3000</code>, matching <code>daprd</code>'s own <code>--app-port</code> flag</dd>
+  </dl>
 </script>

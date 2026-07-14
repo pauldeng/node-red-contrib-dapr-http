@@ -29,6 +29,10 @@ function freePort() {
 function settingsSource(uiPort) {
   // Minimal, deterministic settings: fixed port, default admin/node roots,
   // no editor auth, projects/tours off, info logging for readiness detection.
+  // telemetry.enabled=false skips the first-run "Enable Update Notifications"
+  // consent modal entirely — undocumented in a fresh userDir, it otherwise
+  // blocks every editor interaction behind a full-screen shade (found via a
+  // real browser drive while building the e2e tier).
   return `module.exports = {
   uiPort: ${uiPort},
   httpAdminRoot: '/',
@@ -36,6 +40,7 @@ function settingsSource(uiPort) {
   flowFile: 'flows.json',
   logging: { console: { level: 'info', metrics: false, audit: false } },
   editorTheme: { projects: { enabled: false }, tours: false },
+  telemetry: { enabled: false },
   functionGlobalContext: {},
 };
 `;

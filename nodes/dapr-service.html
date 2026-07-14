@@ -80,15 +80,15 @@
     Reserved <code>/dapr</code>, <code>/healthz</code>, and internal delivery paths, path traversal,
     and duplicate method routes are rejected. If no response arrives before the connection's request
     timeout the caller receives HTTP 504; during shutdown or redeploy, pending requests receive 503.
-    The Dapr API token authenticates the sidecar to the app, not the caller — use Dapr access
-    control to authorize callers.
+    The App API token authenticates the sidecar to the app, not the caller — use Dapr access control
+    to authorize callers.
   </p>
 
   <h3>Example</h3>
   <p>
     Wire <code>dapr service</code> &rarr; a Function &rarr; <code>dapr response</code>. In the
-    Function, mutate and <b>return the same message</b> so <code>msg.dapr.responseId</code> is
-    preserved and the reply correlates to this request:
+    Function, mutate and return the same message so <code>msg.dapr.responseId</code> is preserved
+    and the reply correlates to this request:
   </p>
   <pre>
 // Function node between service and response

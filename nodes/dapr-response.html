@@ -7,7 +7,13 @@
       connection: { value: '', type: 'dapr-connection', required: true },
       statusCode: {
         value: '200',
+        // blank (or omitted from a hand-authored/re-imported flow, which
+        // leaves this undefined rather than '') means "use the runtime
+        // default of 200" (nodes/dapr-response.js).
         validate: function (value) {
+          if (value === undefined || value === null || value === '') {
+            return true;
+          }
           const n = Number(value);
           // 1xx codes are interim, not a final response; reject them here too.
           return Number.isInteger(n) && n >= 200 && n <= 599;
