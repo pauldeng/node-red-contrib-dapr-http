@@ -22,6 +22,14 @@ matches and their order, and route paths (default and per-rule). This
 fingerprint — not the flow's layout, wiring, or any other node's config — is
 what decides whether a restart is needed.
 
+## NATS JetStream limitation
+
+With the pinned Dapr 1.18.1 runtime, do not use `deadLetterTopic` with NATS
+JetStream. The real integration test observes one delivery and then a stall
+before the dead-letter message arrives. Use Redis or broker-side dead-letter
+handling instead. The JetStream stream must also exist before the component
+is used; see `docs/deployment.md`.
+
 ## Decision table
 
 | You changed...                                                                          | Restart needed? |

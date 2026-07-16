@@ -280,6 +280,14 @@
     acknowledged independently, so one batch can resolve as a mix of SUCCESS/RETRY/DROP.
   </p>
 
+  <h3>Dead-letter topics</h3>
+  <p>
+    The Dead-letter field sets Dapr's <code>deadLetterTopic</code>. With NATS JetStream on the
+    pinned Dapr 1.18.1 runtime, do not use this setting: real integration testing observes the
+    original delivery stall before the dead-letter message arrives. Use Redis or broker-side
+    dead-letter handling instead.
+  </p>
+
   <h3>CEL routing rules</h3>
   <p>
     Add one rule with a <a href="https://github.com/google/cel-spec" target="_blank">CEL</a> match

@@ -69,6 +69,25 @@ for a topology where Node-RED runs as its own container.
 Either way, images are pinned by digest, not just tag — see
 `test/helpers/integration.js` for the re-pin procedure this project follows.
 
+## NATS JetStream
+
+The `pubsub.jetstream` component binds to an existing stream. The stream
+must exist before the component is used. For this repository's manual
+Compose stack, run:
+
+```bash
+node -e "require('./test/helpers/nats').provisionStream(4222, { streamName: 'manual', subjects: ['manual.>'] }).then(() => console.log('stream ready'))"
+```
+
+The supplied component is named `pubsub-nats`; use topics under `manual.*`
+so they match that stream.
+
+With the pinned Dapr 1.18.1 runtime, do not use `deadLetterTopic` with NATS
+JetStream. The real integration test observes the original delivery stall
+before a dead-letter message arrives. Use Redis or broker-side dead-letter
+handling instead, and reverify this limitation before adopting a later Dapr
+runtime.
+
 ## Kubernetes
 
 Use Dapr's standard sidecar-injection model: annotate the Node-RED pod and

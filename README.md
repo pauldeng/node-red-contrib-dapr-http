@@ -49,6 +49,15 @@ are in `examples/`:
 - `outbound-invocation.json` — call another app-id's method.
 - `inbound-service.json` — expose a method and reply with `dapr-response`.
 
+## NATS JetStream
+
+The JetStream stream must exist before the component is used; see
+`docs/deployment.md` for the repository's provisioning command. With the
+pinned Dapr 1.18.1 runtime, do not use `deadLetterTopic` with NATS JetStream:
+the real integration test observes delivery stall before the dead-letter
+message arrives. Use Redis or broker-side dead-letter handling instead;
+details are in `docs/subscriptions.md`.
+
 ## Listener topology
 
 Each `dapr-connection` node owns two independent HTTP paths, configured on
