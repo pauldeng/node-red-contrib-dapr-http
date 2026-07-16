@@ -147,12 +147,14 @@
     this node &mdash; never the Node-RED editor port, so the Admin API is never exposed to the Dapr
     mesh. Point the sidecar's <code>--app-port</code> at this app port (default <code>3000</code>).
     The bind address defaults to loopback; binding to a non-loopback address exposes the listener to
-    the network and should be paired with an app API token and Dapr access-control policies.
+    the network and must be paired with an app API token and network-level controls.
   </p>
   <p>
     The optional App API token (else <code>APP_API_TOKEN</code>) is required on inbound requests. It
-    authenticates the sidecar to the app; it does not authorize a calling application &mdash; use
-    Dapr access control for that.
+    authenticates the sidecar to the app; it does not authorize a calling application. Dapr
+    service-invocation access control requires mTLS and Sentry, which this package does not
+    configure. Until an operator supplies them, keep the listener on loopback or protect it with
+    network-level controls.
   </p>
 
   <h3>Status</h3>

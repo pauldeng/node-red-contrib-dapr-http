@@ -70,7 +70,10 @@
     <dt>dapr.headers <span class="property-type">object</span></dt>
     <dd>Request headers, with transport and token headers removed.</dd>
     <dt>dapr.callerAppId <span class="property-type">string | null</span></dt>
-    <dd>The calling app's id (for authorization decisions).</dd>
+    <dd>
+      The calling app id reported by daprd. Treat it as an authorization identity only when sidecar
+      mTLS and Sentry are configured.
+    </dd>
     <dt>dapr.responseId <span class="property-type">string</span></dt>
     <dd>Correlation id to pass to a <code>dapr response</code> node.</dd>
   </dl>
@@ -80,8 +83,9 @@
     Reserved <code>/dapr</code>, <code>/healthz</code>, and internal delivery paths, path traversal,
     and duplicate method routes are rejected. If no response arrives before the connection's request
     timeout the caller receives HTTP 504; during shutdown or redeploy, pending requests receive 503.
-    The App API token authenticates the sidecar to the app, not the caller — use Dapr access control
-    to authorize callers.
+    The App API token authenticates the sidecar to the app, not the caller. Dapr service-invocation
+    access control requires mTLS and Sentry, which this package does not configure. In the supplied
+    deployment, rely on loopback binding and network-level controls instead.
   </p>
 
   <h3>Example</h3>
