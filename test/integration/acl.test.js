@@ -6,7 +6,7 @@ const http = require('node:http');
 
 const { freePort } = require('../helpers/node-red');
 const { ContainerNodeRed } = require('../helpers/node-red-container');
-const { httpRequest } = require('../helpers/http');
+const { closeHttpServer, httpRequest } = require('../helpers/http');
 const { startRedis, startDaprd } = require('../helpers/integration');
 const { waitFor } = require('../helpers/wait-for');
 
@@ -26,7 +26,7 @@ async function startStubApp() {
   });
   const port = await freePort();
   await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
-  return { port, stop: () => new Promise((resolve) => server.close(resolve)) };
+  return { port, stop: () => closeHttpServer(server) };
 }
 
 // Without mTLS, daprd cannot read a SPIFFE ID off a client cert to learn the
@@ -42,6 +42,8 @@ test(
   "without mTLS, Dapr's access-control policy denies every caller identically, allow-listed or not",
   { timeout: 60000 },
   async (t) => {
+    const cleanup = new globalThis.AsyncDisposableStack();
+    t.after(() => cleanup.disposeAsync());
     const targetAppId = 'target-app';
     const appPort = await freePort();
     const daprHttpPort = await freePort();
@@ -80,14 +82,14 @@ test(
         },
       ],
     });
-    t.after(() => nr.stop());
+    cleanup.defer(() => nr.stop());
     await waitFor(async () => {
       const r = await httpRequest(`http://127.0.0.1:${appPort}/healthz`, { timeoutMs: 1000 });
       return r.status === 204 ? true : null;
     });
 
     const redis = await startRedis();
-    t.after(() => redis.stop());
+    cleanup.defer(() => redis.stop());
     const targetDaprd = await startDaprd({
       appId: targetAppId,
       appPort,
@@ -95,29 +97,29 @@ test(
       httpPort: daprHttpPort,
       configFixture: 'config-acl.yaml',
     });
-    t.after(() => targetDaprd.stop());
+    cleanup.defer(() => targetDaprd.stop());
 
     // "allowed-caller" matches config-acl.yaml's explicit allow rule for
     // POST /orders; "disallowed-caller" matches nothing. Both sidecars run
     // with mTLS off (the harness default), so neither call actually carries
     // a verifiable identity daprd can match against the policy.
     const allowedStub = await startStubApp();
-    t.after(() => allowedStub.stop());
+    cleanup.defer(() => allowedStub.stop());
     const allowedDaprd = await startDaprd({
       appId: 'allowed-caller',
       appPort: allowedStub.port,
       redisPort: redis.port,
     });
-    t.after(() => allowedDaprd.stop());
+    cleanup.defer(() => allowedDaprd.stop());
 
     const disallowedStub = await startStubApp();
-    t.after(() => disallowedStub.stop());
+    cleanup.defer(() => disallowedStub.stop());
     const disallowedDaprd = await startDaprd({
       appId: 'disallowed-caller',
       appPort: disallowedStub.port,
       redisPort: redis.port,
     });
-    t.after(() => disallowedDaprd.stop());
+    cleanup.defer(() => disallowedDaprd.stop());
 
     const invoke = (daprd) =>
       waitFor(async () => {

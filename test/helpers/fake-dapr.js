@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('node:http');
+const { closeHttpServer } = require('./http');
 
 // Focused fake Dapr HTTP sidecar for tests.
 //
@@ -79,13 +80,7 @@ function createFakeDapr() {
       });
     },
     stop() {
-      // Bounded: force-close any lingering keep-alive sockets (e.g. a Node-RED
-      // HTTP Request agent) so close() resolves promptly instead of waiting on
-      // an idle connection to time out.
-      return new Promise((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections();
-      });
+      return closeHttpServer(server);
     },
   };
 

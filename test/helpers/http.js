@@ -2,6 +2,13 @@
 
 const http = require('node:http');
 
+function closeHttpServer(server) {
+  return new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections();
+  });
+}
+
 // Perform one HTTP request over a fresh, non-pooled connection (`agent: false`)
 // with an ABSOLUTE wall-clock deadline. No keep-alive socket lingers to keep the
 // process alive after tests, and the timer bounds a socket that connects but
@@ -53,4 +60,4 @@ function httpRequest(urlStr, { method = 'GET', headers = {}, body, timeoutMs = 3
   });
 }
 
-module.exports = { httpRequest };
+module.exports = { closeHttpServer, httpRequest };

@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('node:http');
+const { closeHttpServer } = require('./http');
 
 // A throwaway HTTP server that JSON-decodes every POSTed body and appends it
 // to `received`, in arrival order. Shared by every integration test that
@@ -24,7 +25,7 @@ async function startCapture() {
   return {
     received,
     url: `http://127.0.0.1:${server.address().port}/capture`,
-    stop: () => new Promise((resolve) => server.close(resolve)),
+    stop: () => closeHttpServer(server),
   };
 }
 
