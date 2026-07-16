@@ -86,6 +86,56 @@ test(
   }
 );
 
+test('invoke: fails fast while the sidecar is unhealthy', { timeout: 60000 }, async (t) => {
+  const dapr = await createFakeDaprStarted();
+  t.after(() => dapr.stop());
+  const invokePath = '/v1.0/invoke/target/method/echo';
+  dapr.respond('GET', healthPath, (_req, res) => res.writeHead(503).end());
+  dapr.respond('POST', invokePath, (_req, res) => res.writeHead(200).end('called'));
+
+  const appPort = await freePort();
+  const nr = new NodeRed();
+  await nr.start();
+  t.after(() => nr.stop());
+  await nr.deploy([
+    { id: 'tab', type: 'tab', label: 'invoke unavailable' },
+    connectionNode(appPort, dapr.port),
+    { id: 'in', type: 'http in', z: 'tab', url: '/call', method: 'get', wires: [['inv']] },
+    {
+      id: 'inv',
+      type: 'dapr-invoke',
+      z: 'tab',
+      connection: 'c1',
+      appId: 'target',
+      method: 'echo',
+      verb: 'POST',
+      wires: [['res']],
+    },
+    { id: 'res', type: 'http response', z: 'tab' },
+    { id: 'cat', type: 'catch', z: 'tab', scope: ['inv'], wires: [['err']] },
+    {
+      id: 'err',
+      type: 'function',
+      z: 'tab',
+      func: "msg.statusCode = 503; msg.payload = 'unavailable'; return msg;",
+      outputs: 1,
+      wires: [['res']],
+    },
+  ]);
+
+  await waitFor(() => dapr.requests.some((request) => request.path === healthPath));
+  const started = Date.now();
+  const response = await httpRequest(nr.nodeUrl('/call'), { timeoutMs: 4000 });
+
+  assert.equal(response.status, 503);
+  assert.equal(response.text, 'unavailable');
+  assert.ok(Date.now() - started < 1500, 'unhealthy invoke must fail immediately');
+  assert.equal(
+    dapr.requests.some((request) => request.path === invokePath),
+    false
+  );
+});
+
 test('invoke: a per-message timeout override bounds a slow call', { timeout: 60000 }, async (t) => {
   const dapr = await createFakeDaprStarted();
   t.after(() => dapr.stop());

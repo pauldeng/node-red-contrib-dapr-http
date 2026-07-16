@@ -75,7 +75,11 @@ module.exports = function registerDaprInvoke(RED) {
     const node = this;
     const connection = RED.nodes.getNode(config.connection);
 
-    if (!connection?.options) {
+    if (
+      !connection?.options ||
+      typeof connection.isSidecarHealthy !== 'function' ||
+      typeof connection.onSidecarHealth !== 'function'
+    ) {
       node.status({ fill: 'red', shape: 'ring', text: 'missing connection' });
       node.on('input', (_msg, _send, done) => {
         done(new DaprError(ErrorCodes.INVALID_OPTIONS, 'Dapr connection is unavailable'));
@@ -83,20 +87,21 @@ module.exports = function registerDaprInvoke(RED) {
       return;
     }
 
-    const removeHealthListener =
-      typeof connection.onSidecarHealth === 'function'
-        ? connection.onSidecarHealth((healthy) =>
-            node.status(
-              healthy
-                ? { fill: 'green', shape: 'dot', text: 'ready' }
-                : { fill: 'red', shape: 'ring', text: 'sidecar unavailable' }
-            )
-          )
-        : () => {};
+    const removeHealthListener = connection.onSidecarHealth((healthy) =>
+      node.status(
+        healthy
+          ? { fill: 'green', shape: 'dot', text: 'ready' }
+          : { fill: 'red', shape: 'ring', text: 'sidecar unavailable' }
+      )
+    );
 
     const inflight = new Set(); // AbortControllers for outbound calls in flight
 
     node.on('input', async (msg, send, done) => {
+      if (!connection.isSidecarHealthy()) {
+        done(new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'Dapr sidecar is unavailable'));
+        return;
+      }
       const override = msg.dapr && typeof msg.dapr === 'object' ? msg.dapr : {};
       const appId = override.appId ?? config.appId;
       const methodPath = override.method ?? config.method;
