@@ -22,13 +22,13 @@ npm install
 | `npm run test:coverage`    | Unit tests with native coverage thresholds on `lib/`.                       |
 | `npm run test:runtime`     | Real Node-RED child-process harness tests.                                  |
 | `npm run test:integration` | Real daprd + Redis/NATS JetStream Docker tests (pulls pinned images first). |
+| `npm run test:e2e`         | Playwright tests against the real Node-RED editor.                          |
 | `npm run lint`             | ESLint 9 — correctness and security rules.                                  |
 | `npm run lint:fix`         | ESLint with autofix.                                                        |
 | `npm run format`           | Prettier — write.                                                           |
 | `npm run format:check`     | Prettier — verify only (required before commits).                           |
 
-E2e commands are added by the milestone that introduces that tier. Keep this
-table and `package.json` in step.
+Keep this table and `package.json` in step.
 
 ## Test-driven loop
 

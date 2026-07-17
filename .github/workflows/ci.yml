@@ -31,11 +31,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
       - run: npm ci
+      - run: npm audit --omit=dev
+      - run: npm pack --dry-run
+      - run: git diff --check "${{ github.event.pull_request.base.sha || github.event.before }}...HEAD"
+      - run: printf '@AGENTS.md\n' | cmp -s - CLAUDE.md
+      - run: docker compose config --quiet
       - run: npx playwright install --with-deps chromium
       - run: npm run test:integration
         timeout-minutes: 5

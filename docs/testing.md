@@ -27,9 +27,8 @@ the connection check from Milestone 3. Runtime tests confirm both nodes load.
 npm test                 # unit
 npm run test:runtime     # real Node-RED child-process harness
 npm run test:integration # real daprd 1.18.1 via Docker (Redis and NATS JetStream)
+npm run test:e2e         # Playwright tests against the real Node-RED editor
 ```
-
-(The e2e script is added with its milestone.)
 
 `npm run test:integration` first runs `pretest:integration`
 (`test/helpers/pull-images.js`), which pre-pulls all four pinned images. A
