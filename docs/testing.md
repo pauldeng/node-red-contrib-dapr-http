@@ -158,15 +158,17 @@ test:integration` passes `--test-concurrency=4`. Running all files at
   succeeds (204) — daprd passes the raw text through as a plain CloudEvent
   `data` string rather than rejecting it or coercing it. `parseDelivery` must
   expose that as a plain string, not throw and not treat it as binary.
-- **CEL rules must match `event.data.*`, not `event.type`/`event.source`
-  (integration):** real daprd fixes a published CloudEvent's `type` to the
-  constant `com.dapr.event.sent` and `source` to the publishing app-id,
-  regardless of payload content — a rule matching on either never
-  differentiates real published messages. `test/integration/cel-routing.test.js`
-  confirms real daprd's own CEL evaluator resolves overlapping rules by order
-  (first-match-wins) when matching on `event.data.<field>` instead; the
-  runtime tier's CEL test delivers directly to each rule's pre-known route and
-  so never exercises daprd's actual CEL parser or precedence at all.
+- **CEL rules can match CloudEvent attributes or `event.data.*`
+  (integration):** for ordinary publishes, real daprd fixes the generated
+  CloudEvent's `type` to `com.dapr.event.sent` and `source` to the publishing
+  app-id, while placing application fields under `event.data`. Differentiate
+  ordinary `dapr-publish` messages with `event.data.<field>`. A producer-supplied
+  custom CloudEvent can set its own `event.type`, so type-based rules remain
+  valid for that case. `test/integration/cel-routing.test.js` confirms real
+  daprd's own CEL evaluator resolves overlapping rules by order
+  (first-match-wins); the runtime tier's CEL test delivers directly to each
+  rule's pre-known route and so never exercises daprd's actual CEL parser or
+  precedence at all.
 - **Bulk redelivery targets only the failed entry, not the whole batch
   (integration):** confirmed against real daprd with a fastRetry Resiliency
   policy (`test/integration/bulk.test.js`) — when one entry in a bulk batch

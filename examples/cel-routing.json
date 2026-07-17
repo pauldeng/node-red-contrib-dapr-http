@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "Dapr: CEL routing",
     "disabled": false,
-    "info": "Subscribes to a topic with two CEL routing rules plus a default fallback. The subscribe node has a single output; msg.dapr.ruleId identifies which rule matched (or null for the default). A standard Switch node branches on msg.dapr.ruleId. Set the connection node's Dapr host/port and app port before deploying, then publish CloudEvents with a \"type\" of \"order\" or \"payment\" to see them branch; anything else falls through to \"other\"."
+    "info": "Subscribes to a topic with two CEL routing rules plus a default fallback. The subscribe node has a single output; msg.dapr.ruleId identifies which rule matched (or null for the default). A standard Switch node branches on msg.dapr.ruleId. Set the connection node's Dapr host/port and app port before deploying, then publish JSON payloads with a \"kind\" of \"order\" or \"payment\" to see them branch; anything else falls through to \"other\"."
   },
   {
     "id": "ex-cel-conn",
@@ -30,8 +30,8 @@
     "deadLetterTopic": "",
     "metadata": "{}",
     "rules": [
-      { "id": "ruleOrder", "match": "event.type == \"order\"" },
-      { "id": "rulePayment", "match": "event.type == \"payment\"" }
+      { "id": "ruleOrder", "match": "event.data.kind == \"order\"" },
+      { "id": "rulePayment", "match": "event.data.kind == \"payment\"" }
     ],
     "x": 190,
     "y": 140,

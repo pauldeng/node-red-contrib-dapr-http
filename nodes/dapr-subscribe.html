@@ -87,7 +87,7 @@
             $('<input/>', {
               type: 'text',
               class: 'node-input-rule-match',
-              placeholder: 'CEL match, e.g. event.type == "order"',
+              placeholder: 'CEL match, e.g. event.data.kind == "order"',
               style: 'flex:1',
             })
               .val(rule.match || '')
@@ -95,7 +95,8 @@
             // Read-only: this rule's persisted id (see the comment above) is the
             // value a downstream Switch node compares msg.dapr.ruleId against.
             $('<span/>', {
-              style: 'font-family: monospace; font-size: 0.85em; color: #888; white-space: nowrap;',
+              style:
+                'font-family: monospace; font-size: 0.85em; color: var(--red-ui-secondary-text-color); white-space: nowrap;',
               title:
                 "This rule's persisted id — compare msg.dapr.ruleId against it in a Switch node",
               text: `id: ${id}`,
@@ -167,7 +168,14 @@
       empirically: removing the text dropped measured min-width from 953px to
       480px, matching the core Switch node's own rule-editableList dialog).
     -->
-    <div style="margin-top: 6px; font-size: 0.85em; color: #888; max-width: 450px">
+    <div
+      style="
+        margin-top: 6px;
+        font-size: 0.85em;
+        color: var(--red-ui-secondary-text-color);
+        max-width: 450px;
+      "
+    >
       Topic messages are not CloudEvents; daprd wraps them and the payload arrives as a Buffer
     </div>
   </div>
@@ -187,7 +195,14 @@
   <div class="form-row">
     <label><i class="fa fa-random"></i> CEL routing rules</label>
     <!-- max-width — see the rawPayload description above for why. -->
-    <div style="margin-bottom: 6px; font-size: 0.85em; color: #888; max-width: 450px">
+    <div
+      style="
+        margin-bottom: 6px;
+        font-size: 0.85em;
+        color: var(--red-ui-secondary-text-color);
+        max-width: 450px;
+      "
+    >
       Evaluated in order (first match wins); every matched event is emitted from this node's one
       output with <code>msg.dapr.ruleId</code> set to the matching rule's id (shown after each
       match, below) or <code>null</code> for no match. Leave empty to skip CEL routing. Combines
@@ -291,16 +306,19 @@
   <h3>CEL routing rules</h3>
   <p>
     Add one rule with a <a href="https://github.com/google/cel-spec" target="_blank">CEL</a> match
-    expression (e.g. <code>event.type == "order"</code>); daprd evaluates them in order and delivers
-    to the first match, or falls back to the default route if none match. Every delivery — matched
-    or not — is emitted from this node's single output, with <code>msg.dapr.ruleId</code> set to the
-    matching rule's persisted id, or <code>null</code> for the default. To branch a flow by rule,
-    wire a standard Node-RED <code>switch</code> node on <code>msg.dapr.ruleId</code>
-    downstream — this node deliberately keeps one static output rather than one per rule, since
-    Node-RED has no documented public API for safely remapping existing wires when a node's output
-    count changes. Each rule's Dapr-side route is tied to its persisted id, not its position —
-    inserting, removing, or reordering rules never reassigns an existing rule's route — but changing
-    the rule set still requires a sidecar restart, like adding or removing a subscribe node.
+    expression (e.g. <code>event.data.kind == "order"</code>). For an ordinary
+    <code>dapr publish</code>, daprd wraps the payload and application fields are under
+    <code>event.data</code>. Match <code>event.type</code> only when the producer publishes a custom
+    CloudEvent. daprd evaluates rules in order and delivers to the first match, or falls back to the
+    default route if none match. Every delivery — matched or not — is emitted from this node's
+    single output, with <code>msg.dapr.ruleId</code> set to the matching rule's persisted id, or
+    <code>null</code> for the default. To branch a flow by rule, wire a standard Node-RED
+    <code>switch</code> node on <code>msg.dapr.ruleId</code> downstream — this node deliberately
+    keeps one static output rather than one per rule, since Node-RED has no documented public API
+    for safely remapping existing wires when a node's output count changes. Each rule's Dapr-side
+    route is tied to its persisted id, not its position — inserting, removing, or reordering rules
+    never reassigns an existing rule's route — but changing the rule set still requires a sidecar
+    restart, like adding or removing a subscribe node.
   </p>
 
   <h3>Bulk subscribe</h3>
