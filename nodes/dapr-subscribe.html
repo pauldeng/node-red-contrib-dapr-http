@@ -11,7 +11,7 @@
       rawPayload: { value: false },
       deadLetterTopic: { value: '' },
       metadata: {
-        value: '{}',
+        value: '',
         validate: function (value) {
           try {
             const parsed = JSON.parse(value || '{}');
@@ -67,6 +67,10 @@
       return this.name || this.topic || 'dapr subscribe';
     },
     oneditprepare: function () {
+      if ($('#node-input-metadata').val() === '{}') {
+        $('#node-input-metadata').val('');
+      }
+
       // A single static output (see the module docs above the rules template
       // row for why): every rule just needs a persisted id + match text, kept
       // in list order (order is significant — daprd evaluates rules in order,
@@ -128,120 +132,155 @@
 </script>
 
 <script type="text/html" data-template-name="dapr-subscribe">
-  <div class="form-row">
-    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
-    <input type="text" id="node-input-name" placeholder="Name" />
-  </div>
-  <div class="form-row">
-    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
-    <input type="text" id="node-input-connection" />
-  </div>
-  <div class="form-row">
-    <label for="node-input-pubsubName"><i class="fa fa-cubes"></i> Pub/sub</label>
-    <input type="text" id="node-input-pubsubName" placeholder="pubsub" />
-  </div>
-  <div class="form-row">
-    <label for="node-input-topic"><i class="fa fa-rss"></i> Topic</label>
-    <input type="text" id="node-input-topic" placeholder="orders" />
-  </div>
-  <div class="form-row">
-    <label for="node-input-ackMode"><i class="fa fa-handshake-o"></i> Ack mode</label>
-    <select id="node-input-ackMode">
-      <option value="auto">Automatic (ack on send)</option>
-      <option value="manual">Manual (wait for dapr ack)</option>
-    </select>
-  </div>
-  <div class="form-row">
-    <label for="node-input-rawPayload"><i class="fa fa-file-o"></i> Raw payload</label>
-    <input
-      type="checkbox"
-      id="node-input-rawPayload"
-      style="display:inline-block; width:auto; vertical-align:top"
-    />
-    <!--
-      A block element, not an inline <span>: a form-row with only inline
-      children (label, checkbox, text) has no block-level child to establish
-      its own width. `max-width` matches Node-RED's own `.form-tips` class
-      (see dapr-connection.html) — without it, Node-RED's tray-sizing measures
-      this div's UNWRAPPED natural width and sets that as the whole dialog's
-      min-width, blowing it out to ~950px and clipping every other row (found
-      empirically: removing the text dropped measured min-width from 953px to
-      480px, matching the core Switch node's own rule-editableList dialog).
-    -->
-    <div
-      style="
-        margin-top: 6px;
-        font-size: 0.85em;
-        color: var(--red-ui-secondary-text-color);
-        max-width: 450px;
-      "
-    >
-      Topic messages are not CloudEvents; daprd wraps them and the payload arrives as a Buffer
-    </div>
-  </div>
-  <div class="form-row">
-    <label for="node-input-deadLetterTopic"><i class="fa fa-inbox"></i> Dead-letter</label>
-    <input type="text" id="node-input-deadLetterTopic" placeholder="(optional) topic" />
-  </div>
-  <div class="form-row">
-    <label for="node-input-metadata"><i class="fa fa-list"></i> Metadata</label>
-    <textarea
-      id="node-input-metadata"
-      rows="3"
-      placeholder='{"consumerID":"group-1"}'
-      style="width:70%; resize:vertical"
-    ></textarea>
-  </div>
-  <div class="form-row">
-    <label><i class="fa fa-random"></i> CEL routing rules</label>
-    <!-- max-width — see the rawPayload description above for why. -->
-    <div
-      style="
-        margin-bottom: 6px;
-        font-size: 0.85em;
-        color: var(--red-ui-secondary-text-color);
-        max-width: 450px;
-      "
-    >
-      Evaluated in order (first match wins); every matched event is emitted from this node's one
-      output with <code>msg.dapr.ruleId</code> set to the matching rule's id (shown after each
-      match, below) or <code>null</code> for no match. Leave empty to skip CEL routing. Combines
-      with bulk subscribe: each route then receives its own batches. Wire a <code>switch</code> node
-      on <code>msg.dapr.ruleId</code> downstream to branch.
-    </div>
-    <ol id="node-input-rules-container"></ol>
-  </div>
-  <div class="form-row">
-    <label for="node-input-bulkEnabled"><i class="fa fa-clone"></i> Bulk subscribe</label>
-    <input
-      type="checkbox"
-      id="node-input-bulkEnabled"
-      style="display:inline-block; width:auto; vertical-align:top"
-    />
-    <span>Deliver events in batches</span>
-  </div>
-  <div id="node-bulk-fields">
+  <style>
+    .dapr-subscribe-form {
+      --dapr-label-width: 140px;
+    }
+
+    .dapr-subscribe-form .form-row > label {
+      width: var(--dapr-label-width);
+      margin-right: 6px;
+      white-space: nowrap;
+    }
+
+    .dapr-subscribe-form .form-row > input[type='text'],
+    .dapr-subscribe-form .form-row > select,
+    .dapr-subscribe-form .form-row > textarea {
+      box-sizing: border-box;
+      width: calc(100% - var(--dapr-label-width) - 10px);
+    }
+
+    .dapr-field-hint {
+      box-sizing: border-box;
+      width: 100%;
+      margin: 6px 0 0;
+      font-size: 0.85em;
+      color: var(--red-ui-secondary-text-color);
+    }
+
+    .form-row.dapr-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .form-row.dapr-checkbox-row > label {
+      flex: 0 0 var(--dapr-label-width);
+      width: var(--dapr-label-width);
+      margin-right: 0;
+      white-space: nowrap;
+    }
+
+    .form-row.dapr-checkbox-row > input[type='checkbox'] {
+      margin: 0;
+    }
+
+    .form-row.dapr-checkbox-row .dapr-checkbox-copy {
+      line-height: 1;
+    }
+
+    .form-row.dapr-raw-row {
+      flex-wrap: nowrap;
+    }
+
+    .form-row.dapr-raw-row .dapr-field-hint {
+      flex: 1 1 auto;
+      width: auto;
+      margin: 0;
+    }
+
+    .form-row.dapr-cel-row > label {
+      display: block;
+      width: 100%;
+    }
+
+    .form-row.dapr-cel-row .dapr-cel-summary {
+      margin-top: 4px;
+    }
+  </style>
+
+  <div class="dapr-subscribe-form">
     <div class="form-row">
-      <label for="node-input-bulkMaxMessagesCount"
-        ><i class="fa fa-hashtag"></i> Max messages</label
-      >
-      <input
-        type="text"
-        id="node-input-bulkMaxMessagesCount"
-        placeholder="Dapr default (100); 1-1000"
-        style="width: 120px"
-      />
+      <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+      <input type="text" id="node-input-name" placeholder="Name" />
     </div>
     <div class="form-row">
-      <label for="node-input-bulkMaxAwaitDurationMs"
-        ><i class="fa fa-clock-o"></i> Max await (ms)</label
-      >
-      <input
-        type="text"
-        id="node-input-bulkMaxAwaitDurationMs"
-        placeholder="Dapr default (1000); 1-60000"
-        style="width: 120px"
-      />
+      <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+      <input type="text" id="node-input-connection" />
+    </div>
+    <div class="form-row">
+      <label for="node-input-pubsubName"><i class="fa fa-cubes"></i> Pub/sub</label>
+      <input type="text" id="node-input-pubsubName" placeholder="pubsub" />
+    </div>
+    <div class="form-row">
+      <label for="node-input-topic"><i class="fa fa-rss"></i> Topic</label>
+      <input type="text" id="node-input-topic" placeholder="orders" />
+    </div>
+    <div class="form-row">
+      <label for="node-input-ackMode"><i class="fa fa-handshake-o"></i> Ack mode</label>
+      <select id="node-input-ackMode">
+        <option value="auto">Automatic (ack on send)</option>
+        <option value="manual">Manual (wait for dapr ack)</option>
+      </select>
+    </div>
+    <div class="form-row dapr-checkbox-row dapr-raw-row">
+      <label for="node-input-rawPayload"><i class="fa fa-file-o"></i> Raw payload</label>
+      <input type="checkbox" id="node-input-rawPayload" style="display:inline-block; width:auto" />
+      <div class="dapr-field-hint">
+        Raw topic payload is delivered as a Buffer; daprd still wraps it.
+      </div>
+    </div>
+    <div class="form-row">
+      <label for="node-input-deadLetterTopic"><i class="fa fa-inbox"></i> Dead-letter</label>
+      <input type="text" id="node-input-deadLetterTopic" placeholder="(optional) topic" />
+    </div>
+    <div class="form-row">
+      <label for="node-input-metadata"><i class="fa fa-list"></i> Metadata</label>
+      <textarea
+        id="node-input-metadata"
+        rows="3"
+        placeholder='{"consumerID":"group-1"}'
+        style="resize:vertical"
+      ></textarea>
+    </div>
+    <div class="form-row dapr-cel-row">
+      <label><i class="fa fa-random"></i> CEL routing rules</label>
+      <div class="dapr-field-hint dapr-cel-summary">
+        Optional ordered CEL matches. Use <code>msg.dapr.ruleId</code> in a downstream
+        <code>switch</code> node to branch.
+      </div>
+    </div>
+    <div class="form-row">
+      <ol id="node-input-rules-container"></ol>
+    </div>
+    <div class="form-row dapr-checkbox-row">
+      <label for="node-input-bulkEnabled"><i class="fa fa-clone"></i> Bulk subscribe</label>
+      <input type="checkbox" id="node-input-bulkEnabled" style="display:inline-block; width:auto" />
+      <span class="dapr-checkbox-copy">Deliver events in batches</span>
+    </div>
+    <div id="node-bulk-fields">
+      <div class="form-row">
+        <label for="node-input-bulkMaxMessagesCount"
+          ><i class="fa fa-hashtag"></i> Max messages</label
+        >
+        <input
+          type="text"
+          id="node-input-bulkMaxMessagesCount"
+          placeholder="Dapr default (100); 1-1000"
+          style="width: 120px"
+        />
+      </div>
+      <div class="form-row">
+        <label for="node-input-bulkMaxAwaitDurationMs"
+          ><i class="fa fa-clock-o"></i> Max await (ms)</label
+        >
+        <input
+          type="text"
+          id="node-input-bulkMaxAwaitDurationMs"
+          placeholder="Dapr default (1000); 1-60000"
+          style="width: 120px"
+        />
+      </div>
     </div>
   </div>
 </script>
@@ -305,29 +344,37 @@
 
   <h3>CEL routing rules</h3>
   <p>
-    Add one rule with a <a href="https://github.com/google/cel-spec" target="_blank">CEL</a> match
-    expression (e.g. <code>event.data.kind == "order"</code>). For an ordinary
-    <code>dapr publish</code>, daprd wraps the payload and application fields are under
-    <code>event.data</code>. Match <code>event.type</code> only when the producer publishes a custom
-    CloudEvent. daprd evaluates rules in order and delivers to the first match, or falls back to the
-    default route if none match. Every delivery — matched or not — is emitted from this node's
-    single output, with <code>msg.dapr.ruleId</code> set to the matching rule's persisted id, or
-    <code>null</code> for the default. To branch a flow by rule, wire a standard Node-RED
-    <code>switch</code> node on <code>msg.dapr.ruleId</code> downstream — this node deliberately
-    keeps one static output rather than one per rule, since Node-RED has no documented public API
-    for safely remapping existing wires when a node's output count changes. Each rule's Dapr-side
-    route is tied to its persisted id, not its position — inserting, removing, or reordering rules
-    never reassigns an existing rule's route — but changing the rule set still requires a sidecar
-    restart, like adding or removing a subscribe node.
+    CEL rules let Dapr choose a route before the event reaches Node-RED. Add rules only when one
+    topic carries different event shapes and you want to branch by content.
+  </p>
+  <ol>
+    <li>Dapr receives a topic event.</li>
+    <li>Dapr evaluates rules in order and picks the first match.</li>
+    <li>This node emits the event with <code>msg.dapr.ruleId</code> set.</li>
+    <li>A downstream <code>switch</code> node branches by that rule id.</li>
+  </ol>
+  <p>
+    Rules are evaluated in order; the first match wins. For ordinary
+    <code>dapr publish</code> messages, match application fields under <code>event.data</code>, for
+    example <code>event.data.kind == "order"</code>. Match <code>event.type</code> only when the
+    publisher sends a custom CloudEvent.
+  </p>
+  <p>
+    This node always has one output. Use a standard <code>switch</code> node on
+    <code>msg.dapr.ruleId</code> to branch. Rule routes use persisted ids, so reordering rules does
+    not move existing routes. Changing rules still changes the Dapr subscription and requires a
+    sidecar restart.
   </p>
 
   <h3>Bulk subscribe</h3>
   <p>
-    Delivers events in batches for higher throughput. Combines with CEL routing rules — daprd groups
-    each batch by its matched route, so each matched route receives its own batches independently
-    (all still emitted from this node's one output). Max messages (1-1000) and max await (1-60000ms)
-    bound how daprd batches; leave blank for Dapr's defaults. These ranges are this package's own
-    safety cap, not a Dapr-imposed limit.
+    Bulk subscribe asks Dapr to deliver multiple topic events in one HTTP request. Use it for
+    throughput, not for per-message ordering. Each entry is still acknowledged separately.
+  </p>
+  <p>
+    With CEL routing, Dapr batches per matched route, then this node emits all entries from the same
+    single output. Max messages (1-1000) and max await (1-60000ms) are this package's safety caps;
+    leave them blank for Dapr's defaults.
   </p>
 
   <h3>Subscriptions and restart</h3>
@@ -339,6 +386,30 @@
     connection node shows <code>restart sidecar: subscriptions changed</code> until daprd re-fetches
     <code>/dapr/subscribe</code>.
   </p>
+
+  <h3>References</h3>
+  <ul>
+    <li>
+      <a href="https://v1-18.docs.dapr.io/reference/api/pubsub_api/" target="_blank"
+        >Dapr v1.18 pub/sub API</a
+      >
+    </li>
+    <li>
+      <a
+        href="https://v1-18.docs.dapr.io/developing-applications/building-blocks/pubsub/subscription-methods/"
+        target="_blank"
+        >Dapr programmatic subscriptions</a
+      >
+    </li>
+    <li>
+      <a
+        href="https://v1-18.docs.dapr.io/developing-applications/building-blocks/pubsub/pubsub-bulk/"
+        target="_blank"
+        >Dapr bulk subscribe</a
+      >
+    </li>
+    <li><a href="https://github.com/google/cel-spec" target="_blank">CEL language spec</a></li>
+  </ul>
 
   <h3>Example</h3>
   <p>

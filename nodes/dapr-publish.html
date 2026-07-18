@@ -9,7 +9,7 @@
       topic: { value: '', required: true },
       contentType: { value: '' },
       metadata: {
-        value: '{}',
+        value: '',
         validate: function (value) {
           try {
             const parsed = JSON.parse(value || '{}');
@@ -37,6 +37,11 @@
     paletteLabel: 'dapr publish',
     label: function () {
       return this.name || this.topic || 'dapr publish';
+    },
+    oneditprepare: function () {
+      if ($('#node-input-metadata').val() === '{}') {
+        $('#node-input-metadata').val('');
+      }
     },
   });
 </script>
@@ -98,7 +103,14 @@
     Automatic mode publishes Buffers as <code>application/octet-stream</code>, strings as
     <code>text/plain</code>, and objects, arrays, numbers, booleans, and <code>null</code> as
     <code>application/json</code>. A configured MIME type may be any value supported by the Dapr
-    component.
+    component. See Dapr's
+    <a href="https://v1-18.docs.dapr.io/reference/api/pubsub_api/" target="_blank"
+      >pub/sub API reference</a
+    >
+    and the official
+    <a href="https://www.iana.org/assignments/media-types/media-types.xhtml" target="_blank"
+      >IANA media types registry</a
+    >.
   </p>
   <p>
     To publish a custom CloudEvent envelope, set the content type to

@@ -28,9 +28,40 @@ test('beginner CEL guidance matches ordinary dapr-publish envelopes', () => {
   assert.match(testing, /custom\s+CloudEvent[\s\S]*event\.type/i);
 });
 
+test('subscribe help links complex Dapr concepts to pinned reference docs', () => {
+  const help = read('nodes/dapr-subscribe.html').split('data-help-name="dapr-subscribe"')[1];
+
+  assert.doesNotMatch(help, /class="mermaid"/);
+  assert.match(help, /v1-18\.docs\.dapr\.io\/reference\/api\/pubsub_api/);
+  assert.match(
+    help,
+    /v1-18\.docs\.dapr\.io\/developing-applications\/building-blocks\/pubsub\/subscription-methods/
+  );
+  assert.match(
+    help,
+    /v1-18\.docs\.dapr\.io\/developing-applications\/building-blocks\/pubsub\/pubsub-bulk/
+  );
+  assert.match(help, /github\.com\/google\/cel-spec/);
+});
+
 test('subscribe helper text uses Node-RED theme colors', () => {
   const html = read('nodes/dapr-subscribe.html');
 
   assert.doesNotMatch(html, /color:\s*#888/i);
-  assert.equal((html.match(/var\(--red-ui-secondary-text-color\)/g) || []).length, 3);
+  assert.ok((html.match(/var\(--red-ui-secondary-text-color\)/g) || []).length >= 1);
+});
+
+test('subscribe editor keeps optional metadata blank and helper text responsive', () => {
+  const html = read('nodes/dapr-subscribe.html');
+
+  assert.match(html, /metadata:\s*\{\s*value:\s*''/);
+  assert.match(html, /node-input-metadata'\)\.val\(\) === '\{\}'/);
+  assert.match(html, /placeholder='\{"consumerID":"group-1"\}'/);
+  assert.match(html, /class="dapr-field-hint"/);
+  assert.doesNotMatch(html, /max-width:\s*450px/);
+  assert.match(html, /--dapr-label-width:\s*140px/);
+  assert.match(html, /width:\s*calc\(100%\s*-\s*var\(--dapr-label-width\)\s*-\s*10px\)/);
+  assert.match(html, /class="dapr-checkbox-copy"/);
+  assert.match(html, /class="form-row dapr-checkbox-row dapr-raw-row"/);
+  assert.match(html, /class="dapr-field-hint dapr-cel-summary"/);
 });

@@ -17,6 +17,14 @@ test('publish editor registers its dialog, fields, and help', () => {
   }
 });
 
+test('publish editor leaves optional metadata absent by default', () => {
+  const html = fs.readFileSync(editorPath, 'utf8');
+
+  assert.match(html, /metadata:\s*\{\s*value:\s*''/);
+  assert.match(html, /node-input-metadata'\)\.val\(\) === '\{\}'/);
+  assert.match(html, /placeholder='\{"ttlInSeconds":"60"\}'/);
+});
+
 test('publish help explicitly documents metadata merge precedence and message preservation', () => {
   const html = fs.readFileSync(editorPath, 'utf8');
   assert.match(html, /shallow merge/i);
@@ -27,4 +35,6 @@ test('publish help explicitly documents metadata merge precedence and message pr
   assert.match(html, /undefined.*rejected/i);
   assert.match(html, /application\/cloudevents\+json/);
   assert.match(html, /rawPayload/);
+  assert.match(html, /iana\.org\/assignments\/media-types\/media-types\.xhtml/);
+  assert.match(html, /v1-18\.docs\.dapr\.io\/reference\/api\/pubsub_api/);
 });

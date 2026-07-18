@@ -78,9 +78,12 @@
   <div class="form-row">
     <label for="node-input-timeoutSec"><i class="fa fa-clock-o"></i> Timeout</label>
     <input
-      type="text"
+      type="number"
       id="node-input-timeoutSec"
-      placeholder="connection default"
+      placeholder="30"
+      min="1"
+      max="300"
+      step="1"
       style="width:120px"
     />
     <span>&nbsp;seconds (1–300)</span>

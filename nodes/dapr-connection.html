@@ -61,69 +61,157 @@
     label: function () {
       return this.name || 'dapr sidecar';
     },
+    oneditprepare: function () {
+      $('#node-config-input-name').closest('.red-ui-tray-body').addClass('dapr-connection-tray');
+    },
   });
 </script>
 
 <script type="text/html" data-template-name="dapr-connection">
-  <div class="form-row">
-    <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
-    <input type="text" id="node-config-input-name" placeholder="Name" />
-  </div>
+  <style>
+    .dapr-config-form {
+      --dapr-label-width: 170px;
+      width: calc(100% - 60px);
+      min-width: 0;
+    }
 
-  <h4 style="margin-bottom:0">Outbound (app &rarr; sidecar)</h4>
-  <div class="form-tips" style="margin:6px 0">
-    Leave host and port blank to use the sidecar's <code>DAPR_HTTP_ENDPOINT</code>
-    environment discovery.
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-daprHost"><i class="fa fa-server"></i> Dapr host</label>
-    <input type="text" id="node-config-input-daprHost" placeholder="127.0.0.1" />
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-daprPort"><i class="fa fa-plug"></i> Dapr port</label>
-    <input type="text" id="node-config-input-daprPort" placeholder="3500" />
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-daprApiToken"><i class="fa fa-key"></i> Dapr API token</label>
-    <input type="password" id="node-config-input-daprApiToken" placeholder="(optional)" />
-  </div>
+    .red-ui-tray-body.dapr-connection-tray,
+    .red-ui-tray-body.dapr-connection-tray .red-ui-tabs {
+      min-width: 0 !important;
+      width: auto !important;
+    }
 
-  <h4 style="margin-bottom:0">Inbound (sidecar &rarr; app channel)</h4>
-  <div class="form-tips" style="margin:6px 0">
-    A dedicated HTTP listener for Dapr, separate from the Node-RED editor. Keep the bind address on
-    <code>127.0.0.1</code> unless the sidecar runs on another host &mdash; a non-loopback bind
-    exposes it to the network.
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-bindAddress"><i class="fa fa-sitemap"></i> Bind address</label>
-    <input type="text" id="node-config-input-bindAddress" placeholder="127.0.0.1" />
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-appPort"><i class="fa fa-plug"></i> App port</label>
-    <input type="text" id="node-config-input-appPort" placeholder="3000" />
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-appApiToken"><i class="fa fa-key"></i> App API token</label>
-    <input type="password" id="node-config-input-appApiToken" placeholder="(optional)" />
-  </div>
+    .dapr-config-form .form-row label {
+      width: var(--dapr-label-width);
+      white-space: nowrap;
+    }
 
-  <h4 style="margin-bottom:0">Advanced</h4>
-  <div class="form-row">
-    <label for="node-config-input-bodyLimitMb"
-      ><i class="fa fa-arrows-h"></i> Body limit (MB)</label
-    >
-    <input type="text" id="node-config-input-bodyLimitMb" placeholder="4" style="width:80px" />
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-requestTimeoutSec"
-      ><i class="fa fa-clock-o"></i> Request timeout (s)</label
-    >
-    <input
-      type="text"
-      id="node-config-input-requestTimeoutSec"
-      placeholder="30"
-      style="width:80px"
-    />
+    .dapr-config-form .form-row input {
+      box-sizing: border-box;
+      width: calc(100% - var(--dapr-label-width) - 10px);
+    }
+
+    .dapr-config-form .form-row input.dapr-short-input {
+      width: 80px;
+    }
+
+    .dapr-config-form .dapr-number-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dapr-config-form .dapr-number-row > label {
+      flex: 0 0 var(--dapr-label-width);
+      margin-right: 0;
+    }
+
+    .dapr-config-form .dapr-number-row > input.dapr-short-input {
+      flex: 0 0 80px;
+      width: 80px;
+    }
+
+    .dapr-unit-label {
+      color: var(--red-ui-secondary-text-color);
+      white-space: nowrap;
+    }
+
+    .dapr-config-form .dapr-form-tip {
+      box-sizing: border-box;
+      display: block;
+      width: auto !important;
+      min-width: 0;
+      max-width: none !important;
+      margin: 6px 0;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+  </style>
+
+  <div class="dapr-config-form">
+    <div class="form-row">
+      <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+      <input type="text" id="node-config-input-name" placeholder="Name" />
+    </div>
+
+    <h4 style="margin-bottom:0">Outbound (app &rarr; sidecar)</h4>
+    <div class="form-tips dapr-form-tip">
+      Leave host and port blank to use <code>DAPR_HTTP_ENDPOINT</code> discovery.
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-daprHost"><i class="fa fa-server"></i> Dapr host</label>
+      <input type="text" id="node-config-input-daprHost" placeholder="127.0.0.1" />
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-daprPort"><i class="fa fa-plug"></i> Dapr port</label>
+      <input
+        type="number"
+        id="node-config-input-daprPort"
+        placeholder="3500"
+        min="1"
+        max="65535"
+        step="1"
+      />
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-daprApiToken"><i class="fa fa-key"></i> Dapr API token</label>
+      <input type="password" id="node-config-input-daprApiToken" placeholder="(optional)" />
+    </div>
+
+    <h4 style="margin-bottom:0">Inbound (sidecar &rarr; app channel)</h4>
+    <div class="form-tips dapr-form-tip">
+      Dedicated Dapr listener, separate from the Node-RED editor. Keep <code>127.0.0.1</code> unless
+      the sidecar runs elsewhere.
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-bindAddress"><i class="fa fa-sitemap"></i> Bind address</label>
+      <input type="text" id="node-config-input-bindAddress" placeholder="127.0.0.1" />
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-appPort"><i class="fa fa-plug"></i> App port</label>
+      <input
+        type="number"
+        id="node-config-input-appPort"
+        placeholder="3000"
+        min="1"
+        max="65535"
+        step="1"
+      />
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-appApiToken"><i class="fa fa-key"></i> App API token</label>
+      <input type="password" id="node-config-input-appApiToken" placeholder="(optional)" />
+    </div>
+
+    <h4 style="margin-bottom:0">Advanced</h4>
+    <div class="form-row dapr-number-row">
+      <label for="node-config-input-bodyLimitMb"><i class="fa fa-arrows-h"></i> Body limit</label>
+      <input
+        type="number"
+        id="node-config-input-bodyLimitMb"
+        placeholder="4"
+        min="1"
+        max="64"
+        step="1"
+        class="dapr-short-input"
+      />
+      <span class="dapr-unit-label">MB (1-64)</span>
+    </div>
+    <div class="form-row dapr-number-row">
+      <label for="node-config-input-requestTimeoutSec"
+        ><i class="fa fa-clock-o"></i> Request timeout</label
+      >
+      <input
+        type="number"
+        id="node-config-input-requestTimeoutSec"
+        placeholder="30"
+        min="1"
+        max="300"
+        step="1"
+        class="dapr-short-input"
+      />
+      <span class="dapr-unit-label">seconds (1-300)</span>
+    </div>
   </div>
 </script>
 

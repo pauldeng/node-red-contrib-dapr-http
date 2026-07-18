@@ -42,7 +42,15 @@
   </div>
   <div class="form-row">
     <label for="node-input-statusCode"><i class="fa fa-hashtag"></i> Status</label>
-    <input type="text" id="node-input-statusCode" placeholder="200" style="width:80px" />
+    <input
+      type="number"
+      id="node-input-statusCode"
+      placeholder="200"
+      min="200"
+      max="599"
+      step="1"
+      style="width:80px"
+    />
   </div>
 </script>
 
@@ -72,7 +80,12 @@
     The first response for an id wins; a later, expired, or foreign-generation id is rejected with
     an error. Preserve <code>msg.dapr</code> through the flow so <code>responseId</code> reaches
     this node. Framing and hop-by-hop response headers (e.g. <code>content-length</code>) are
-    dropped and computed by the runtime.
+    dropped and computed by the runtime. Status codes use the official
+    <a
+      href="https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml"
+      target="_blank"
+      >IANA HTTP status code registry</a
+    >.
   </p>
 
   <h3>Example</h3>

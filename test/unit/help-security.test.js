@@ -19,3 +19,9 @@ test('connection and service help explain the mTLS requirement for caller author
 
   assert.match(readNode('dapr-service'), /callerAppId[\s\S]*only when[\s\S]*mTLS/);
 });
+
+test('response help links the official HTTP status code registry', () => {
+  const html = readNode('dapr-response');
+
+  assert.match(html, /iana\.org\/assignments\/http-status-codes\/http-status-codes\.xhtml/);
+});
