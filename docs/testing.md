@@ -111,7 +111,9 @@ trick — resolves inside the container too.
   runs as its own non-root `node-red` user too (UID 1000, which happens to
   match a common host dev-user UID but must not be relied on); its bind-mounted
   `userDir` is opened fully (0777) for the same reason, and because the
-  container also needs to _write_ its own runtime state there.
+  container also needs to _write_ its own runtime state there. Host-side
+  removal of that directory is best-effort; cleanup permission mismatches must
+  not fail an otherwise completed integration test.
 - **Node-RED containers use `docker stop`, not `SIGINT` (integration):** the
   `nodered/node-red` image's `entrypoint.sh` traps both `SIGINT` and `SIGTERM`
   and always forwards a bare `kill` (`SIGTERM`) to the actual node-red process

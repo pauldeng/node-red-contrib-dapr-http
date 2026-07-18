@@ -93,8 +93,8 @@ class ContainerNodeRed {
       this.userDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'nrdapr-container-'));
       // The container's node-red user is a different uid than whatever
       // created this directory; open it fully so the container can write its
-      // own runtime state into it, and so the host can always clean it up
-      // afterward regardless of which uid wrote what.
+      // own runtime state into it. Cleanup stays best-effort because a
+      // GitHub runner's host uid may still differ from files the image wrote.
       await fsp.chmod(this.userDir, 0o777);
 
       const nodeModules = path.join(this.userDir, 'node_modules');
@@ -241,7 +241,7 @@ class ContainerNodeRed {
       this._logProc = null;
     }
     if (this.userDir) {
-      await fsp.rm(this.userDir, { recursive: true, force: true });
+      await fsp.rm(this.userDir, { recursive: true, force: true }).catch(() => {});
       this.userDir = null;
     }
   }
