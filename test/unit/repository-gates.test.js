@@ -16,6 +16,9 @@ test('durable docs list every test tier and CI enforces cheap completion gates',
 
   const workflow = read('.github/workflows/ci.yml');
   assert.match(workflow, /fetch-depth: 0/);
+  assert.match(workflow, /docker:\n[\s\S]*?timeout-minutes: 20/);
+  assert.match(workflow, /npm run test:integration\n\s+timeout-minutes: 10/);
+  assert.match(workflow, /npm run test:e2e\n\s+timeout-minutes: 6/);
   for (const command of [
     'npm audit --omit=dev',
     'npm pack --dry-run',
