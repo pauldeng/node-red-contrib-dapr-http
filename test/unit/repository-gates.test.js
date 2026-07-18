@@ -15,6 +15,11 @@ test('durable docs list every test tier and CI enforces cheap completion gates',
   }
 
   const workflow = read('.github/workflows/ci.yml');
+  const pkg = JSON.parse(read('package.json'));
+  assert.equal(
+    pkg.scripts['test:integration'],
+    'node --test --test-concurrency=1 "test/integration/**/*.test.js"'
+  );
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /docker:\n[\s\S]*?timeout-minutes: 20/);
   assert.match(workflow, /npm run test:integration\n\s+timeout-minutes: 10/);

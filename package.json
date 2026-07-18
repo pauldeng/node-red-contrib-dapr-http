@@ -27,7 +27,7 @@
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='lib/**' --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=85 \"test/unit/**/*.test.js\"",
     "test:runtime": "node --test \"test/runtime/**/*.test.js\"",
     "pretest:integration": "node test/helpers/pull-images.js",
-    "test:integration": "node --test --test-concurrency=4 \"test/integration/**/*.test.js\"",
+    "test:integration": "node --test --test-concurrency=1 \"test/integration/**/*.test.js\"",
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

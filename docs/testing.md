@@ -119,14 +119,12 @@ trick — resolves inside the container too.
   graceful shutdown — so `docker stop --time <n>` reaches the same close
   handlers the host-process tier's explicit `SIGINT` does, then escalates to
   `SIGKILL` automatically past the timeout.
-- **Integration test-file concurrency is capped (integration):** `npm run
-test:integration` passes `--test-concurrency=4`. Running all files at
-  `node:test`'s default (higher) concurrency was observed to intermittently
-  time out one test under load — containerizing Node-RED means every
-  integration file now runs 2-3 containers at once instead of daprd/Redis
-  alone, and this host's 6 cores can't sustain the higher default
-  concurrency's peak container count reliably. Re-measure if this becomes a
-  bottleneck on faster CI hardware.
+- **Integration test-file concurrency is serialized (integration):** `npm run
+test:integration` passes `--test-concurrency=1`. Each file starts real Docker
+  services (Node-RED plus daprd plus Redis or NATS), and GitHub-hosted runners
+  were observed to fail and then hang before printing diagnostics when four
+  files ran at once. Re-measure before raising this; local speed is not worth
+  losing CI failure output.
 - **No `--rm` on daprd containers (integration):** a container that crashes at
   startup (a bad `--config` path, a malformed fixture) would otherwise delete
   itself before `docker logs` can read why. The harness always removes
