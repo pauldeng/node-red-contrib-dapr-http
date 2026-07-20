@@ -328,7 +328,7 @@ test(
     // (resolves as RETRY via the connection's short request timeout).
     await nr.deploy([
       { id: 'tab', type: 'tab', label: 'bulk-manual' },
-      connectionNode(appPort, dapr.port, { requestTimeoutSec: '2' }),
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '1' }),
       {
         id: 'sub1',
         type: 'dapr-subscribe',

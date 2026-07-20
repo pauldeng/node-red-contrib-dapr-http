@@ -40,7 +40,7 @@ test(
           appPort: String(appPort),
           // Short so the ack-timeout scenario below doesn't need to wait out
           // a long default — this is the ONLY thing it changes.
-          requestTimeoutSec: '2',
+          requestTimeoutSec: '1',
         },
         {
           id: 'sub-drop',
@@ -160,7 +160,7 @@ return msg;`,
       'a DROPped delivery must not be redelivered'
     );
 
-    // No ack: our own ack timeout (~1.75s, from requestTimeoutSec: 2) fires
+    // No ack: our own short ack timeout fires
     // RETRY on its own, and real daprd redelivers because of it.
     await publish('noack-topic', JSON.stringify({ n: 2 }));
     await waitFor(

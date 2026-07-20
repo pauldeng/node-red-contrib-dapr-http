@@ -36,6 +36,8 @@ target, not permission to scaffold empty files.
 - `npm test` — native unit tests (`node --test "test/unit/**/*.test.js"`).
 - `npm run test:coverage` — unit tests with native coverage thresholds on `lib/`.
 - `npm run test:runtime` — real Node-RED child-process harness tests.
+- `npm run test:runtime:parallel` — same runtime tests without serialized
+  test-file execution, for local iteration when the host has enough headroom.
 - `npm run test:integration` — real daprd + Redis/NATS JetStream Docker tests.
 - `npm run test:e2e` — Playwright tests against the real Node-RED editor.
 - `npm run lint` / `npm run lint:fix` — ESLint 9 (correctness + security rules).

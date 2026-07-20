@@ -29,11 +29,10 @@ async function gotoEditor(page, nr, { theme = 'light' } = {}) {
     window.localStorage.setItem('view-dark-theme', t);
   }, theme);
   await page.goto(nr.adminUrl('/'));
-  // The palette/workspace render asynchronously after the initial HTML
-  // response; the connection node's canvas group is a reliable readiness
-  // signal for any flow that includes one (every fixture flow below does).
   await page.waitForSelector('#red-ui-workspace', { state: 'visible' });
-  await page.waitForTimeout(500);
+  await page.waitForSelector('#red-ui-palette-network [data-palette-type="dapr-publish"]', {
+    state: 'visible',
+  });
 }
 
 // Opens a node's edit dialog by double-clicking its canvas representation.
@@ -43,12 +42,24 @@ async function gotoEditor(page, nr, { theme = 'light' } = {}) {
 // The tray slides in over a CSS transition; "visible" is true well before the
 // slide finishes, and clicking a button mid-slide is exactly what Playwright's
 // actionability check flags as "not stable" (found by driving this for real).
-const TRAY_ANIMATION_MS = 400;
+async function waitForTraySettled(page) {
+  await page.waitForFunction(() => {
+    const trays = Array.from(document.querySelectorAll('.red-ui-tray')).filter((tray) => {
+      const rect = tray.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    return trays.every((tray) =>
+      tray
+        .getAnimations({ subtree: true })
+        .every((animation) => animation.playState === 'finished' || animation.playState === 'idle')
+    );
+  });
+}
 
 async function openNodeDialog(page, nodeId) {
   await page.locator(`g#${nodeId} rect.red-ui-flow-node`).first().dblclick();
   await page.waitForSelector('#node-dialog-ok', { state: 'visible' });
-  await page.waitForTimeout(TRAY_ANIMATION_MS);
+  await waitForTraySettled(page);
 }
 
 // Opens the referenced dapr-connection config node's own edit dialog, nested
@@ -62,7 +73,7 @@ async function openNodeDialog(page, nodeId) {
 async function openConnectionDialog(page) {
   await page.locator('#node-input-btn-connection-edit').click();
   await page.waitForSelector('#node-config-dialog-ok', { state: 'visible' });
-  await page.waitForTimeout(TRAY_ANIMATION_MS);
+  await waitForTraySettled(page);
 }
 
 // `config: true` closes a nested config-node dialog (`node-config-dialog-*`
@@ -72,12 +83,8 @@ async function closeDialog(page, { save = true, config = false } = {}) {
   const prefix = config ? '#node-config-dialog-' : '#node-dialog-';
   const selector = prefix + (save ? 'ok' : 'cancel');
   await page.click(selector);
-  // The tray slides out over a CSS transition; the next action (closing a
-  // parent tray, or opening a different node's dialog) must wait for it to
-  // finish, or Playwright's own actionability check flags the closing
-  // button as "not stable"/detaches mid-click.
   await page.waitForSelector(selector, { state: 'detached' });
-  await page.waitForTimeout(TRAY_ANIMATION_MS);
+  await waitForTraySettled(page);
 }
 
 // A complete flow exercising all seven node types together: publish,
@@ -231,20 +238,20 @@ const HELP_LABELS = {
 // collapsed "Global Configuration Nodes > dapr-connection" category row).
 async function openHelpFor(page, type) {
   await page.click('#red-ui-header-button-sidemenu');
-  await page.waitForTimeout(200);
+  await page.waitForSelector('#red-ui-header-button-sidemenu-submenu', { state: 'visible' });
   await page
     .locator('#red-ui-header-button-sidemenu-submenu a', { hasText: 'View' })
     .first()
     .hover();
-  await page.waitForTimeout(200);
+  await page.waitForSelector('#menu-item-view-menu-help', { state: 'visible' });
   await page.click('#menu-item-view-menu-help');
-  await page.waitForTimeout(300);
+  await page.waitForSelector('input[placeholder="Search help"]', { state: 'visible' });
   await page.fill('input[placeholder="Search help"]', type);
   await page.press('input[placeholder="Search help"]', 'Enter');
-  await page.waitForTimeout(400);
-  await page.locator('.red-ui-treeList-label', { hasText: HELP_LABELS[type] }).last().click();
+  const helpItem = page.locator('.red-ui-treeList-label', { hasText: HELP_LABELS[type] }).last();
+  await helpItem.waitFor({ state: 'visible' });
+  await helpItem.click();
   await page.waitForSelector('.red-ui-help .red-ui-help-title', { state: 'visible' });
-  await page.waitForTimeout(TRAY_ANIMATION_MS);
 }
 
 module.exports = {

@@ -519,7 +519,7 @@ test('service: no response before the timeout returns 504', { timeout: 60000 }, 
   t.after(() => nr.stop());
   await nr.deploy([
     { id: 'tab', type: 'tab', label: 'slow' },
-    connectionNode(appPort, dapr.port, { requestTimeoutSec: '2' }),
+    connectionNode(appPort, dapr.port, { requestTimeoutSec: '1' }),
     {
       id: 'svc',
       type: 'dapr-service',
@@ -868,7 +868,7 @@ test(
       // Short response timeout so the rejected reply resolves as a 504 quickly
       // instead of the default 30s: rejecting the response node's input does not
       // itself fail the caller's pending request, only the app-channel deadline does.
-      connectionNode(appPort, dapr.port, { requestTimeoutSec: '2' }),
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '1' }),
       {
         id: 'svc',
         type: 'dapr-service',

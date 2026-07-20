@@ -41,7 +41,7 @@ test(
           appPort: String(appPort),
           // Short so entry n=3 (never acked) resolves its internal RETRY
           // timeout quickly, instead of waiting out a long default.
-          requestTimeoutSec: '2',
+          requestTimeoutSec: '1',
         },
         {
           id: 'sub1',

@@ -202,7 +202,7 @@ test('manual ack: a delivery with no ack times out as RETRY', { timeout: 60000 }
   const { appPort } = await bootstrap(t, {
     ackMode: 'manual',
     withAck: false,
-    requestTimeoutSec: 2,
+    requestTimeoutSec: 1,
   });
 
   const started = Date.now();
@@ -210,7 +210,7 @@ test('manual ack: a delivery with no ack times out as RETRY', { timeout: 60000 }
   assert.deepEqual(JSON.parse(res.text), { status: 'RETRY' });
   const elapsed = Date.now() - started;
   assert.ok(
-    elapsed >= 700 && elapsed < 3500,
+    elapsed >= 700 && elapsed < 2500,
     `RETRY should arrive near the ack timeout, took ${elapsed}ms`
   );
 });
