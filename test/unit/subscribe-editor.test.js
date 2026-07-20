@@ -60,7 +60,14 @@ test('subscribe editor keeps optional metadata blank and helper text responsive'
   assert.match(html, /class="dapr-field-hint"/);
   assert.doesNotMatch(html, /max-width:\s*450px/);
   assert.match(html, /--dapr-label-width:\s*140px/);
+  assert.match(html, /addClass\('dapr-subscribe-tray'\)/);
+  assert.match(html, /\.red-ui-tray-body\.dapr-subscribe-tray/);
+  assert.match(html, /\.red-ui-tray-body\.dapr-subscribe-tray[\s\S]*min-width:\s*0/);
+  assert.match(html, /\.dapr-subscribe-form[\s\S]*min-width:\s*0/);
   assert.match(html, /width:\s*calc\(100%\s*-\s*var\(--dapr-label-width\)\s*-\s*10px\)/);
+  assert.match(html, /#node-input-rules-container[\s\S]*min-width:\s*0\s*!important/);
+  assert.match(html, /\.css\('min-width', '0'\)/);
+  assert.match(html, /\.css\('width', '100%'\)/);
   assert.match(html, /class="dapr-checkbox-copy"/);
   assert.match(html, /class="form-row dapr-checkbox-row dapr-raw-row"/);
   assert.match(html, /class="dapr-field-hint dapr-cel-summary"/);

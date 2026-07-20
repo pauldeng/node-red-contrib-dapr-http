@@ -67,6 +67,8 @@
       return this.name || this.topic || 'dapr subscribe';
     },
     oneditprepare: function () {
+      $('#node-input-name').closest('.red-ui-tray-body').addClass('dapr-subscribe-tray');
+
       if ($('#node-input-metadata').val() === '{}') {
         $('#node-input-metadata').val('');
       }
@@ -80,7 +82,8 @@
       // route (see lib/subscriptions.js normalizeRules for why that matters).
       const list = $('#node-input-rules-container')
         .css('min-height', '120px')
-        .css('min-width', '450px')
+        .css('min-width', '0')
+        .css('width', '100%')
         .editableList({
           addItem: (container, _index, rule) => {
             const id = rule.id || 'r' + Math.random().toString(36).slice(2, 10);
@@ -135,6 +138,13 @@
   <style>
     .dapr-subscribe-form {
       --dapr-label-width: 140px;
+      min-width: 0;
+    }
+
+    .red-ui-tray-body.dapr-subscribe-tray,
+    .red-ui-tray-body.dapr-subscribe-tray .red-ui-tabs {
+      min-width: 0 !important;
+      width: auto !important;
     }
 
     .dapr-subscribe-form .form-row > label {
@@ -196,6 +206,12 @@
 
     .form-row.dapr-cel-row .dapr-cel-summary {
       margin-top: 4px;
+    }
+
+    .dapr-subscribe-form #node-input-rules-container {
+      box-sizing: border-box;
+      width: 100% !important;
+      min-width: 0 !important;
     }
   </style>
 
