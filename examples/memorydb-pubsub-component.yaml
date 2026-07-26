@@ -1,0 +1,62 @@
+# AWS MemoryDB for Redis as the pub/sub broker.
+#
+# There is deliberately no accompanying example FLOW: the nodes never see the
+# broker, so the flow for MemoryDB is examples/basic-pubsub.json unchanged. Only
+# the Dapr component differs, which is what this file is.
+#
+# Copy this into the directory daprd loads resources from (--resources-path), fill
+# in the three placeholders, and set MEMORYDB_PASSWORD in daprd's own environment.
+# Verified against real MemoryDB (Redis 7.2.4) and Dapr 1.18.1 by
+# test/integration/memorydb-pubsub.test.js.
+#
+# Before it will work:
+#   * Routing. MemoryDB has no public endpoint. daprd must run inside the
+#     cluster's VPC (or reach it over VPN/peering) — from outside, the endpoint
+#     does not even resolve.
+#   * An ACL user. Give it access to the topic keys your flows use; Dapr keeps one
+#     Redis stream per topic, named after the topic, and needs read/write plus
+#     consumer-group commands (XADD, XREADGROUP, XGROUP, XACK) on them.
+#   * The password in daprd's environment, not in this file. See the secret store
+#     below.
+
+# Exposes daprd's own environment variables as secrets, so the password below is
+# referenced rather than written down. A component file is mounted where the
+# container user can read it; a real credential does not belong in one.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: envvars
+spec:
+  type: secretstores.local.env
+  version: v1
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub # the name dapr-publish/dapr-subscribe reference as "Pub/sub"
+spec:
+  type: pubsub.redis
+  version: v1
+  metadata:
+    # The cluster's CONFIGURATION endpoint (the "clustercfg." one).
+    - name: redisHost
+      value: clustercfg.your-cluster.abcdef.memorydb.your-region.amazonaws.com:6379
+    # MemoryDB authenticates a Redis ACL user, so a username is required as well
+    # as a password — unlike a bare local Redis, where neither is.
+    - name: redisUsername
+      value: your-acl-user
+    - name: redisPassword
+      secretKeyRef:
+        name: MEMORYDB_PASSWORD # the env var daprd reads
+        key: MEMORYDB_PASSWORD
+    # MemoryDB requires TLS in transit. Without this the component never becomes
+    # ready and every publish fails.
+    - name: enableTLS
+      value: 'true'
+    # MemoryDB is always a cluster — its clustercfg endpoint reports
+    # cluster_state:ok even with a single shard — so the default node-mode client
+    # would talk to the configuration endpoint as if it were a single server.
+    - name: redisType
+      value: cluster
+auth:
+  secretStore: envvars

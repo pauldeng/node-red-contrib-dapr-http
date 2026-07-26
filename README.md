@@ -67,6 +67,12 @@ are in `examples/`:
 - `outbound-invocation.json` — call another app-id's method.
 - `inbound-service.json` — expose a method and reply with `dapr-response`.
 
+`examples/memorydb-pubsub-component.yaml` is a Dapr **component**, not a flow:
+AWS MemoryDB as the pub/sub broker, with the TLS, Redis ACL, and cluster-mode
+settings a managed cluster needs. There is no MemoryDB example flow because the
+nodes never see the broker — `basic-pubsub.json` works against it unchanged, which
+is the point. See `docs/deployment.md`.
+
 ## NATS JetStream
 
 The JetStream stream must exist before the component is used; see

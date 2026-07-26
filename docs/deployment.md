@@ -88,6 +88,41 @@ before a dead-letter message arrives. Use Redis or broker-side dead-letter
 handling instead, and reverify this limitation before adopting a later Dapr
 runtime.
 
+## AWS MemoryDB for Redis
+
+A managed cluster instead of a Redis container. Copy
+`examples/memorydb-pubsub-component.yaml` into your resources path, fill in the
+endpoint and ACL user, and put the password in daprd's environment as
+`MEMORYDB_PASSWORD`. Nothing in a flow changes — the nodes never see the broker,
+so `examples/basic-pubsub.json` works against it as-is.
+
+Three settings differ from a local Redis and all three are required:
+
+| Setting              | Why                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------- |
+| `enableTLS: 'true'`  | MemoryDB requires TLS in transit. Without it the component never becomes ready and every publish fails. |
+| `redisUsername`      | MemoryDB authenticates a Redis ACL user, so a username is needed as well as a password.                 |
+| `redisType: cluster` | MemoryDB is always a cluster; its `clustercfg` endpoint reports `cluster_state:ok` even with one shard. |
+
+Two operational constraints that are easy to miss:
+
+- **The endpoint is VPC-only.** MemoryDB publishes no public endpoint, so daprd
+  must run inside the cluster's VPC or reach it over VPN/peering. From outside,
+  the hostname does not resolve at all — which is a clearer symptom than it
+  sounds, since it fails at DNS rather than at the TLS handshake.
+- **The ACL user needs stream permissions on your topics.** Dapr's Redis pub/sub
+  keeps one Redis stream per topic, named after the topic, and drives it with
+  `XADD`/`XREADGROUP`/`XGROUP`/`XACK`. A user scoped to the wrong key pattern
+  authenticates fine and then silently delivers nothing.
+
+The password belongs in daprd's environment rather than the component file: the
+component is a file daprd's container user must be able to read, and a real
+credential does not belong in one. The example wires this up with Dapr's own
+`secretstores.local.env` store and a `secretKeyRef`.
+
+`npm run test:integration:memorydb` exercises this configuration against a real
+cluster; see `docs/testing.md` for how that optional tier is gated.
+
 ## Kubernetes
 
 Use Dapr's standard sidecar-injection model: annotate the Node-RED pod and

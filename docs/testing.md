@@ -6,12 +6,13 @@ no `node-red-node-test-helper`.
 
 ## Tiers
 
-| Tier        | Location            | What it proves                                                                                           | Needs                  |
-| ----------- | ------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------- |
-| Unit        | `test/unit/`        | `lib/` module contracts in isolation.                                                                    | Node only.             |
-| Runtime     | `test/runtime/`     | Real Node-RED loads, registers, wires, and runs the nodes; a fake Dapr HTTP sidecar stands in for daprd. | Node + `node-red` CLI. |
-| Integration | `test/integration/` | Behavior against real daprd 1.18.1, with Redis or NATS JetStream as the pub/sub broker.                  | Docker.                |
-| E2E         | `test/e2e/`         | Editor dialogs, validation, and a full publish/subscribe + invoke/service flow.                          | Playwright + Node-RED. |
+| Tier        | Location                                   | What it proves                                                                                           | Needs                                        |
+| ----------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Unit        | `test/unit/`                               | `lib/` module contracts in isolation.                                                                    | Node only.                                   |
+| Runtime     | `test/runtime/`                            | Real Node-RED loads, registers, wires, and runs the nodes; a fake Dapr HTTP sidecar stands in for daprd. | Node + `node-red` CLI.                       |
+| Integration | `test/integration/`                        | Behavior against real daprd 1.18.1, with Redis or NATS JetStream as the pub/sub broker.                  | Docker.                                      |
+| E2E         | `test/e2e/`                                | Editor dialogs, validation, and a full publish/subscribe + invoke/service flow.                          | Playwright + Node-RED.                       |
+| MemoryDB    | `test/integration/memorydb-pubsub.test.js` | The same chain against a real AWS MemoryDB cluster: TLS, Redis ACL auth, cluster mode.                   | **Optional** — a live cluster + VPC routing. |
 
 Tiers are introduced by the milestone that first needs them; this file grows
 with them.
@@ -28,6 +29,8 @@ npm test                 # unit
 npm run test:runtime     # real Node-RED child-process harness
 npm run test:integration # real daprd 1.18.1 via Docker (Redis and NATS JetStream)
 npm run test:e2e         # Playwright tests against the real Node-RED editor
+
+npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
 
 `npm run test:integration` first runs `pretest:integration`
@@ -36,6 +39,72 @@ cold pull can take minutes on a fresh runner — far longer than a single
 integration test's own timeout, which includes its setup — so pulling happens
 once, up front, outside any individual test's clock, not lazily on whichever
 test happens to need an image first.
+
+## The optional MemoryDB tier
+
+Every other tier is hermetic: it creates what it needs and destroys it. This one
+cannot — AWS MemoryDB has no public endpoint, so it needs a live cluster,
+credentials, and network routing into that cluster's VPC. It therefore **skips
+itself** unless the environment supplies all of:
+
+| Variable            | Notes                                           |
+| ------------------- | ----------------------------------------------- |
+| `MEMORYDB_ENDPOINT` | The cluster's configuration endpoint host.      |
+| `MEMORYDB_PORT`     | Optional, defaults to `6379`.                   |
+| `MEMORYDB_USERNAME` | A Redis ACL user with access to the topic keys. |
+| `MEMORYDB_PASSWORD` | That user's password.                           |
+
+`npm run test:integration` includes the file and reports it as skipped, so the
+default gate stays green without any of this.
+
+**Credentials never live in the repository.** They are read from the environment
+only; `.gitignore` excludes `*.env` so a local credential file cannot be committed
+by accident. A password containing shell metacharacters is easiest to pass by
+sourcing a file rather than typing it on a command line:
+
+```bash
+cat > memorydb.env <<'ENV'
+MEMORYDB_ENDPOINT=clustercfg.example.abcdef.memorydb.ap-southeast-2.amazonaws.com
+MEMORYDB_USERNAME=your-acl-user
+MEMORYDB_PASSWORD='the password, single-quoted so the shell leaves it alone'
+ENV
+set -a && . ./memorydb.env && set +a
+npm run test:integration:memorydb
+```
+
+### What it proves, and what it deliberately does not
+
+A managed cluster differs from the local Redis container in three ways, all of
+which live between daprd and the broker rather than in this package's code:
+
+- **TLS in transit** (`enableTLS: 'true'`) — MemoryDB requires it; without it the
+  component never becomes ready.
+- **Redis ACL authentication** — a username _and_ a password, so `redisUsername`
+  is required alongside `redisPassword`.
+- **Cluster mode** (`redisType: cluster`) — MemoryDB is always a cluster, and its
+  `clustercfg` endpoint reports `cluster_state:ok` even with a single shard.
+
+So this tier proves the _component configuration_ an operator needs, plus that
+the whole chain (`dapr-publish` → daprd → MemoryDB → daprd → `dapr-subscribe`)
+carries a CloudEvent and a raw payload correctly. It does not re-run the
+broker-agnostic node matrix already covered against Redis and JetStream.
+
+The password reaches daprd through Dapr's own env secret store
+(`secretstores.local.env` plus a `secretKeyRef`), not the component YAML:
+`writeResourcesDir` chmods the mounted `/components` files to `0644` so the
+container user can read them, which would leave a real credential world-readable
+for the life of the test. That is also the pattern an operator should use in
+production.
+
+Two things this tier learned the hard way, both encoded in
+`test/helpers/memorydb.js`:
+
+- Each run uses a **unique topic**. The cluster is shared and long-lived, so a
+  fixed topic inherits an earlier run's stream, consumer group, and backlog.
+- Cleanup runs **after daprd stops**, because a live Dapr subscriber recreates a
+  deleted stream on its next poll. `node:test` runs `after` hooks in registration
+  order, so the cleanup hook is registered last, and it verifies the keys are
+  actually gone instead of swallowing the error.
 
 The runtime harness (`test/helpers/node-red.js`) drives a real `node-red@5.0.1`
 process in a throwaway user directory with this package symlinked into its

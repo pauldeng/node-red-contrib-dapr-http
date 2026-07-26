@@ -39,6 +39,11 @@ target, not permission to scaffold empty files.
 - `npm run test:runtime:parallel` — same runtime tests without serialized
   test-file execution, for local iteration when the host has enough headroom.
 - `npm run test:integration` — real daprd + Redis/NATS JetStream Docker tests.
+- `npm run test:integration:memorydb` — **optional** tier against a real AWS
+  MemoryDB cluster (TLS, Redis ACL auth, cluster mode). Skips itself unless
+  `MEMORYDB_ENDPOINT`/`MEMORYDB_USERNAME`/`MEMORYDB_PASSWORD` are set, because it
+  needs a live cluster and VPC routing this repository cannot create. Never commit
+  those credentials: pass them through the environment, never a fixture.
 - `npm run test:e2e` — Playwright tests against the real Node-RED editor.
 - `npm run lint` / `npm run lint:fix` — ESLint 9 (correctness + security rules).
 - `npm run format` / `npm run format:check` — Prettier.

@@ -168,6 +168,12 @@ async function writeResourcesDir({ redisPort, components = [], extraFixtures = [
 // daprd); `components` is a broker-agnostic escape hatch for any other
 // pre-rendered Component YAML a suite needs (e.g. test/helpers/nats.js's
 // jetstreamComponentYaml()) — this function never special-cases what's in it.
+//
+// `env` sets extra environment variables on the daprd container. Its reason to
+// exist is credentials: a component that needs a real secret should reference it
+// through Dapr's own env secret store (see test/helpers/memorydb.js) so the
+// secret reaches daprd's process environment instead of being written into a
+// world-readable component file under /components.
 async function startDaprd({
   appId,
   appPort,
@@ -177,6 +183,7 @@ async function startDaprd({
   configFixture,
   appApiToken,
   daprApiToken,
+  env = {},
   httpPort: presetHttpPort,
 }) {
   await ensureImage(DAPRD_IMAGE);
@@ -198,6 +205,11 @@ async function startDaprd({
     }
     if (daprApiToken) {
       args.push('-e', `DAPR_API_TOKEN=${daprApiToken}`);
+    }
+    // execFileP runs docker without a shell, so a value containing shell
+    // metacharacters (a generated password, say) is passed through verbatim.
+    for (const [key, value] of Object.entries(env)) {
+      args.push('-e', `${key}=${value}`);
     }
     args.push(
       DAPRD_IMAGE,
