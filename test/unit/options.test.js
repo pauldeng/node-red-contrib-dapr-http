@@ -84,7 +84,12 @@ test('inbound: defaults to loopback bind and port 3000', () => {
 });
 
 test('inbound: honors configured bind address and app port', () => {
-  const opts = resolveOptions({ config: { bindAddress: '0.0.0.0', appPort: '3005' } });
+  // A non-loopback bind additionally requires an app API token — see the
+  // dedicated test below.
+  const opts = resolveOptions({
+    config: { bindAddress: '0.0.0.0', appPort: '3005' },
+    credentials: { appApiToken: 'secret' },
+  });
   assert.equal(opts.inbound.bindAddress, '0.0.0.0');
   assert.equal(opts.inbound.port, 3005);
 });
@@ -165,4 +170,37 @@ test('limits: request timeout is bounded to 1..300 seconds', () => {
     resolveOptions({ config: { requestTimeoutSec: '300' } }).limits.requestTimeoutMs,
     300000
   );
+});
+
+test('a non-loopback bind requires an app API token, and loopback variants do not', () => {
+  // Fail closed: exposing the app channel beyond this host without a token would
+  // let anything that can reach the interface post deliveries into flows.
+  assert.throws(
+    () => resolveOptions({ config: { bindAddress: '0.0.0.0', appPort: '3000' } }),
+    (err) => err.code === ErrorCodes.INVALID_OPTIONS && /app API token/i.test(err.message)
+  );
+  assert.throws(
+    () => resolveOptions({ config: { bindAddress: '10.1.2.3' } }),
+    (err) => err.code === ErrorCodes.INVALID_OPTIONS
+  );
+
+  // With a token, a non-loopback bind is allowed (explicit operator choice).
+  assert.equal(
+    resolveOptions({
+      config: { bindAddress: '0.0.0.0' },
+      credentials: { appApiToken: 'secret' },
+    }).inbound.bindAddress,
+    '0.0.0.0'
+  );
+  // ...including a token supplied via the environment.
+  assert.equal(
+    resolveOptions({ config: { bindAddress: '0.0.0.0' }, env: { APP_API_TOKEN: 'secret' } }).inbound
+      .appApiToken,
+    'secret'
+  );
+
+  // Every loopback form stays zero-config.
+  for (const bindAddress of ['127.0.0.1', '127.0.0.5', 'localhost', '::1', '[::1]']) {
+    assert.equal(resolveOptions({ config: { bindAddress } }).inbound.bindAddress, bindAddress);
+  }
 });

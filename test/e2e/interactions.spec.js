@@ -178,3 +178,37 @@ for (const type of Object.keys(HELP_LABELS)) {
     await expect(page.locator('h3', { hasText: 'Example' }).first()).toBeVisible();
   });
 }
+
+test('the bind-address warning appears only when the value stops being loopback', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'sub');
+  await openConnectionDialog(page);
+
+  const warning = page.locator('#dapr-bind-warning');
+  // The deployed flow binds loopback, so the dialog opens without a warning.
+  await expect(warning).toBeHidden();
+
+  await page.fill('#node-config-input-bindAddress', '0.0.0.0');
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText('Not loopback');
+
+  // Blank means "use the 127.0.0.1 default", which is not a warning either.
+  await page.fill('#node-config-input-bindAddress', '');
+  await expect(warning).toBeHidden();
+
+  await page.fill('#node-config-input-bindAddress', '10.1.2.3');
+  await expect(warning).toBeVisible();
+
+  await page.fill('#node-config-input-bindAddress', '127.0.0.1');
+  await expect(warning).toBeHidden();
+
+  await closeDialog(page, { save: false, config: true });
+  await closeDialog(page, { save: false });
+});

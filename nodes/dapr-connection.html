@@ -63,6 +63,29 @@
     },
     oneditprepare: function () {
       $('#node-config-input-name').closest('.red-ui-tray-body').addClass('dapr-connection-tray');
+      // Warn as soon as the bind address stops being loopback: a non-loopback
+      // listener is reachable from the network, and the runtime then also
+      // requires an app API token (lib/options.js fails closed without one).
+      // Blank means the 127.0.0.1 default, so it is not a warning.
+      const bindInput = $('#node-config-input-bindAddress');
+      const warning = $('#dapr-bind-warning');
+      const isLoopback = function (value) {
+        const v = String(value || '')
+          .trim()
+          .toLowerCase();
+        return (
+          v === '' ||
+          v === 'localhost' ||
+          v === '::1' ||
+          v === '[::1]' ||
+          /^127\.\d+\.\d+\.\d+$/.test(v)
+        );
+      };
+      const refresh = function () {
+        warning.toggle(!isLoopback(bindInput.val()));
+      };
+      bindInput.on('input change', refresh);
+      refresh();
     },
   });
 </script>
@@ -116,6 +139,18 @@
       white-space: nowrap;
     }
 
+    /* Warning colors come from the editor theme, so they track light/dark and
+       meet contrast in both. */
+    .dapr-config-form .dapr-bind-warning {
+      border-left: 3px solid var(--red-ui-form-input-border-selected-color);
+      color: var(--red-ui-primary-text-color);
+      padding-left: 8px;
+    }
+
+    .dapr-config-form .dapr-bind-warning .fa-warning {
+      color: var(--red-ui-node-status-changed-color, #eb9b34);
+    }
+
     .dapr-config-form .dapr-form-tip {
       box-sizing: border-box;
       display: block;
@@ -166,6 +201,15 @@
     <div class="form-row">
       <label for="node-config-input-bindAddress"><i class="fa fa-sitemap"></i> Bind address</label>
       <input type="text" id="node-config-input-bindAddress" placeholder="127.0.0.1" />
+    </div>
+    <div
+      class="form-tips dapr-form-tip dapr-bind-warning"
+      id="dapr-bind-warning"
+      style="display: none"
+    >
+      <i class="fa fa-warning"></i> <strong>Not loopback.</strong> This exposes the Dapr app channel
+      to every network this host can be reached on. An App API token is required below, and pair it
+      with network-level controls.
     </div>
     <div class="form-row">
       <label for="node-config-input-appPort"><i class="fa fa-plug"></i> App port</label>
@@ -235,14 +279,19 @@
     this node &mdash; never the Node-RED editor port, so the Admin API is never exposed to the Dapr
     mesh. Point the sidecar's <code>--app-port</code> at this app port (default <code>3000</code>).
     The bind address defaults to loopback; binding to a non-loopback address exposes the listener to
-    the network and must be paired with an app API token and network-level controls.
+    the network, so it <em>requires</em> an app API token (the node refuses to start without one)
+    and should be paired with network-level controls. The editor warns as soon as the value stops
+    being loopback.
   </p>
   <p>
-    The optional App API token (else <code>APP_API_TOKEN</code>) is required on inbound requests. It
-    authenticates the sidecar to the app; it does not authorize a calling application. Dapr
-    service-invocation access control requires mTLS and Sentry, which this package does not
-    configure. Until an operator supplies them, keep the listener on loopback or protect it with
-    network-level controls.
+    When an App API token is set (credential, else <code>APP_API_TOKEN</code>) it is enforced on
+    every inbound request except <code>/healthz</code>.
+    <strong>With no token, the app channel authenticates nobody</strong> &mdash; anything that can
+    reach the listener can read the subscription list and post deliveries into flows, so it is
+    allowed only on loopback, and the node warns on every deploy. The token authenticates the
+    sidecar to the app; it does not authorize a calling application. Dapr service-invocation access
+    control requires mTLS and Sentry, which this package does not configure. Until an operator
+    supplies them, keep the listener on loopback or protect it with network-level controls.
   </p>
 
   <h3>Status</h3>

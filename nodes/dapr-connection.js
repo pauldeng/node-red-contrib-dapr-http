@@ -72,6 +72,16 @@ module.exports = function registerDaprConnection(RED) {
     }
     node.options = options;
 
+    // An unset app API token means the app channel enforces no authentication at
+    // all (lib/app-channel.js). resolveOptions already refuses a non-loopback
+    // bind without one; on loopback it is allowed but never silent, because
+    // anything sharing this host/namespace can then post deliveries into flows.
+    if (!options.inbound.appApiToken) {
+      node.warn(
+        `no app API token configured: the Dapr app channel on ${options.inbound.bindAddress}:${options.inbound.port} accepts unauthenticated requests from anything that can reach it — set the App API token credential or APP_API_TOKEN`
+      );
+    }
+
     // The base URL is validated in resolveOptions, so this is always parseable.
     const healthUrl = `${options.outbound.baseUrl}/v1.0/healthz/outbound`;
     // Dapr requires the API token on API requests when token auth is enabled;
@@ -83,17 +93,44 @@ module.exports = function registerDaprConnection(RED) {
     let backoff = INITIAL_BACKOFF_MS;
     let stopped = false;
     let healthy = false;
+    let healthReported = false;
     const healthListeners = new Set();
 
+    // Resolves once the first health probe has settled (or the listener failed to
+    // start). Until then `healthy` is only a default, not an observation — a
+    // message that arrives in that window must not be failed as "sidecar down"
+    // when the sidecar is in fact up.
+    let markHealthKnown;
+    const healthKnown = new Promise((resolve) => {
+      markHealthKnown = resolve;
+    });
+
     node.isSidecarHealthy = () => healthy;
+    node.whenHealthKnown = () => healthKnown;
     node.onSidecarHealth = (listener) => {
       healthListeners.add(listener);
       listener(healthy);
       return () => healthListeners.delete(listener);
     };
+    // Health state drives node status AND one log line per transition. Status
+    // alone is invisible to a headless deployment: without this, a sidecar that
+    // goes down while no messages happen to flow leaves no trace at all. Logging
+    // on transition (and on the first observation, so a sidecar that is already
+    // down at deploy is reported too) cannot spam the way per-probe logging would.
     const setHealthy = (next) => {
-      if (healthy !== next) {
-        healthy = next;
+      const changed = healthy !== next;
+      healthy = next;
+      if (!stopped && (changed || !healthReported)) {
+        healthReported = true;
+        if (healthy) {
+          node.log('Dapr sidecar is available');
+        } else {
+          node.warn(
+            `Dapr sidecar is unavailable (${healthUrl}); publishes and invocations fail until it recovers`
+          );
+        }
+      }
+      if (changed) {
         for (const listener of healthListeners) {
           listener(healthy);
         }
@@ -257,9 +294,11 @@ module.exports = function registerDaprConnection(RED) {
         nextHealthy = false;
       }
       if (stopped) {
+        markHealthKnown();
         return;
       }
       setHealthy(nextHealthy);
+      markHealthKnown();
       if (healthy) {
         backoff = INITIAL_BACKOFF_MS;
         schedule(HEALTHY_INTERVAL_MS);
@@ -298,6 +337,9 @@ module.exports = function registerDaprConnection(RED) {
           err.code === ErrorCodes.DUPLICATE_LISTENER ? 'app port in use' : 'listen failed';
         node.status({ fill: 'red', shape: 'ring', text });
         node.error(err.message);
+        // No listener means no health poll will ever run — release anything
+        // waiting on the first probe instead of hanging it forever.
+        markHealthKnown();
       });
 
     node.on('close', async (removed, done) => {
@@ -305,6 +347,7 @@ module.exports = function registerDaprConnection(RED) {
       stopped = true;
       setHealthy(false);
       healthListeners.clear();
+      markHealthKnown(); // never leave an input handler awaiting a probe that will not run
       if (pollTimer) {
         clearTimeout(pollTimer);
       }
@@ -323,6 +366,10 @@ module.exports = function registerDaprConnection(RED) {
         // grace window so the replacement node reacquires it; on delete keep
         // nothing.
         node.lease.release({ graceMs: removed ? 0 : options.limits.leaseGraceMs });
+        // Drop the reference with the lease: a subscribe/service node closing
+        // after us must not reach applyActivation() and re-activate a released
+        // generation.
+        node.lease = null;
       }
       done();
     });

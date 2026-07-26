@@ -179,3 +179,57 @@ test('the health probe carries the configured Dapr API token', { timeout: 60000 
     return probe && probe.headers['dapr-api-token'] === token ? probe : null;
   });
 });
+
+test(
+  'warns when no app API token is configured, and logs each sidecar health transition',
+  { timeout: 60000 },
+  async (t) => {
+    const dapr = await createFakeDaprStarted();
+    t.after(() => dapr.stop());
+    // Start unhealthy: the first observation must be logged too, otherwise a
+    // sidecar that is already down at deploy leaves no trace at all.
+    dapr.respond('GET', '/v1.0/healthz/outbound', (_req, res) => res.writeHead(503).end());
+
+    const appPort = await freePort();
+    const nr = new NodeRed();
+    await nr.start();
+    t.after(() => nr.stop());
+
+    await nr.deploy(connectionFlow({ appPort, daprPort: dapr.port }));
+    await waitFor(healthzOk(appPort));
+
+    // An untokenized app channel is allowed on loopback, but never silent.
+    await waitFor(() => (/no app API token configured/i.test(nr.logText()) ? true : null));
+    await waitFor(() => (/sidecar is unavailable/i.test(nr.logText()) ? true : null));
+
+    // ...and recovery is logged as well, so an operator can see the transition.
+    dapr.respond('GET', '/v1.0/healthz/outbound', (_req, res) => res.writeHead(204).end());
+    await waitFor(() => (/sidecar is available/i.test(nr.logText()) ? true : null));
+  }
+);
+
+test(
+  'refuses to start a non-loopback listener with no app API token',
+  { timeout: 60000 },
+  async (t) => {
+    const appPort = await freePort();
+    const nr = new NodeRed();
+    await nr.start();
+    t.after(() => nr.stop());
+
+    await nr.deploy([
+      {
+        id: 'c1',
+        type: 'dapr-connection',
+        name: 'exposed',
+        bindAddress: '0.0.0.0',
+        appPort: String(appPort),
+      },
+    ]);
+
+    await waitFor(() => (/app API token is required/i.test(nr.logText()) ? true : null));
+    // Fail closed: nothing is listening at all, on any interface.
+    await assert.rejects(httpRequest(`http://127.0.0.1:${appPort}/healthz`, { timeoutMs: 1000 }));
+    assert.equal((await httpRequest(nr.adminUrl('/settings'), { timeoutMs: 2000 })).status, 200);
+  }
+);

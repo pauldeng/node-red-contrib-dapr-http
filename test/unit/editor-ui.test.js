@@ -71,3 +71,17 @@ test('response status editor uses a native number input', () => {
   assert.match(input, /max="599"/);
   assert.match(input, /step="1"/);
 });
+
+test('the connection editor wires a live non-loopback bind warning', () => {
+  const html = readNode('dapr-connection');
+
+  // The warning element exists, starts hidden, and is toggled from the value —
+  // docs/security.md promises the editor warns, so this must not silently
+  // become a static paragraph again.
+  assert.match(html, /id="dapr-bind-warning"[\s\S]*?style="display: none"/);
+  assert.match(html, /Not loopback/);
+  assert.match(html, /bindInput\.on\('input change', refresh\)/);
+  assert.match(html, /warning\.toggle\(!isLoopback\(bindInput\.val\(\)\)\)/);
+  // Blank (the 127.0.0.1 default) and every loopback form must not warn.
+  assert.match(html, /v === ''[\s\S]*?v === 'localhost'[\s\S]*?\/\^127\\\./);
+});
