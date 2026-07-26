@@ -1,6 +1,6 @@
 'use strict';
 
-const { sharedClients } = require('../lib/dapr-client');
+const { publish } = require('../lib/dapr-client');
 const { DaprError, ErrorCodes } = require('../lib/errors');
 const { preparePublish } = require('../lib/messages');
 
@@ -13,6 +13,7 @@ module.exports = function registerDaprPublish(RED) {
     if (
       !connection?.options ||
       typeof connection.isSidecarHealthy !== 'function' ||
+      typeof connection.whenHealthKnown !== 'function' ||
       typeof connection.onSidecarHealth !== 'function'
     ) {
       node.status({ fill: 'red', shape: 'ring', text: 'missing connection' });
@@ -22,7 +23,6 @@ module.exports = function registerDaprPublish(RED) {
       return;
     }
 
-    const client = sharedClients.acquire(connection.options);
     const updateStatus = (healthy) => {
       node.status(
         healthy
@@ -32,13 +32,29 @@ module.exports = function registerDaprPublish(RED) {
     };
     const removeHealthListener = connection.onSidecarHealth(updateStatus);
 
+    const inflight = new Set(); // AbortControllers for publishes in flight
+
     node.on('input', async (msg, send, done) => {
+      // Wait for the connection's first health probe to land before judging the
+      // sidecar down, so a message sent immediately after deploy is not failed
+      // against a sidecar that is actually up.
+      await connection.whenHealthKnown();
       if (!connection.isSidecarHealthy()) {
         done(new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'Dapr sidecar is unavailable'));
         return;
       }
+      const controller = new AbortController();
+      inflight.add(controller);
       try {
-        await client.publish(preparePublish(config, msg));
+        await publish(
+          {
+            baseUrl: connection.options.outbound.baseUrl,
+            token: connection.options.daprApiToken,
+            timeoutMs: connection.options.limits.requestTimeoutMs,
+            signal: controller.signal,
+          },
+          preparePublish(config, msg)
+        );
         updateStatus(true);
         send(msg);
         done();
@@ -46,17 +62,21 @@ module.exports = function registerDaprPublish(RED) {
         const text = err.code === ErrorCodes.INVALID_MESSAGE ? 'invalid message' : 'publish failed';
         node.status({ fill: 'red', shape: 'ring', text });
         done(err);
+      } finally {
+        inflight.delete(controller);
       }
     });
 
-    node.on('close', async (_removed, done) => {
+    node.on('close', (_removed, done) => {
       removeHealthListener();
-      try {
-        await client.release();
-        done();
-      } catch (err) {
-        done(err);
+      // Abort any publish still in flight so it cannot outlive the node. The
+      // message fails (reaching a Catch node if one is wired) rather than being
+      // silently completed after the node is gone — same contract as dapr-invoke.
+      for (const controller of inflight) {
+        controller.abort();
       }
+      inflight.clear();
+      done();
     });
   }
 

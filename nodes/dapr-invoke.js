@@ -1,9 +1,7 @@
 'use strict';
 
-const http = require('node:http');
-
 const { invoke, encodeBody, decodeBody } = require('../lib/invoke-client');
-const { validateContentType } = require('../lib/http-headers');
+const { validateContentType, parseRequestHeaders } = require('../lib/http-headers');
 const { DaprError, ErrorCodes } = require('../lib/errors');
 const { SUPPORTED_VERBS } = require('../lib/services');
 
@@ -42,33 +40,6 @@ function parseQuery(value) {
   return value;
 }
 
-// Validate each name/value with Node's own HTTP validators so a malformed
-// header (illegal token, CRLF injection) is rejected here as INVALID_MESSAGE,
-// not left to throw synchronously from http.request() later — where it would
-// be caught by the outbound try/catch and misclassified as SIDECAR_UNAVAILABLE
-// even though the sidecar was never contacted.
-function parseHeaders(value) {
-  if (value === undefined || value === null || value === '') {
-    return {};
-  }
-  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new DaprError(ErrorCodes.INVALID_MESSAGE, 'headers must be a JSON object');
-  }
-  const headers = {};
-  for (const [key, item] of Object.entries(parsed)) {
-    const str = String(item);
-    try {
-      http.validateHeaderName(key);
-      http.validateHeaderValue(key, str);
-    } catch (err) {
-      throw new DaprError(ErrorCodes.INVALID_MESSAGE, `invalid header ${key}: ${err.message}`);
-    }
-    headers[key] = str;
-  }
-  return headers;
-}
-
 module.exports = function registerDaprInvoke(RED) {
   function DaprInvokeNode(config) {
     RED.nodes.createNode(this, config);
@@ -78,6 +49,7 @@ module.exports = function registerDaprInvoke(RED) {
     if (
       !connection?.options ||
       typeof connection.isSidecarHealthy !== 'function' ||
+      typeof connection.whenHealthKnown !== 'function' ||
       typeof connection.onSidecarHealth !== 'function'
     ) {
       node.status({ fill: 'red', shape: 'ring', text: 'missing connection' });
@@ -98,6 +70,10 @@ module.exports = function registerDaprInvoke(RED) {
     const inflight = new Set(); // AbortControllers for outbound calls in flight
 
     node.on('input', async (msg, send, done) => {
+      // Wait for the connection's first health probe to land before judging the
+      // sidecar down, so a message sent immediately after deploy is not failed
+      // against a sidecar that is actually up.
+      await connection.whenHealthKnown();
       if (!connection.isSidecarHealthy()) {
         done(new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'Dapr sidecar is unavailable'));
         return;
@@ -128,7 +104,10 @@ module.exports = function registerDaprInvoke(RED) {
       try {
         // A message override of headers is validated exactly like the configured
         // headers (object shape + string coercion), never spread raw.
-        headers = { ...parseHeaders(config.headers), ...parseHeaders(override.headers) };
+        headers = {
+          ...parseRequestHeaders(config.headers, 'headers'),
+          ...parseRequestHeaders(override.headers, 'msg.dapr.headers'),
+        };
         contentType = validateContentType(override.contentType ?? config.contentType);
         query = parseQuery(override.query);
         // encodeBody can throw on a non-serializable payload (BigInt, circular);

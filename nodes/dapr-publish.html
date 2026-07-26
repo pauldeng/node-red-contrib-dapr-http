@@ -96,6 +96,13 @@
     <dd>Overrides the configured or inferred content type.</dd>
     <dt class="optional">dapr.metadata <span class="property-type">object</span></dt>
     <dd>Per-message Dapr publish metadata.</dd>
+    <dt class="optional">dapr.headers <span class="property-type">object</span></dt>
+    <dd>
+      Extra HTTP request headers for this publish. The main use is trace context: set
+      <code>traceparent</code> so a subscribe &rarr; publish hop stays in one W3C trace. Header
+      names and values are validated; <code>content-type</code> and the Dapr API token cannot be set
+      this way.
+    </dd>
   </dl>
 
   <h3>Content types</h3>
@@ -133,6 +140,21 @@
     <code>done(error)</code> so a Catch node can handle it; messages are not queued while the
     sidecar is unavailable.
   </p>
+  <p>
+    A publish still in flight when the flow is redeployed is aborted rather than finished after the
+    node is gone, so it fails (reaching a Catch node if one is wired) instead of completing
+    silently. Redeploy while publishing at a high rate only if losing an in-flight message is
+    acceptable, or quiesce the source first.
+  </p>
+  <h3>Trace context</h3>
+  <p>
+    A delivery arrives with the sidecar's own request headers in
+    <code>msg.dapr.metadata</code>, including <code>traceparent</code>. Forward it explicitly to
+    keep one trace across the hop:
+  </p>
+  <pre>
+msg.dapr = { headers: { traceparent: msg.dapr.metadata.traceparent } };
+return msg;</pre>
 
   <h3>Example</h3>
   <pre>

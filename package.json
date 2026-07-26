@@ -5,11 +5,23 @@
   "private": true,
   "license": "UNLICENSED",
   "keywords": [
-    "dapr"
+    "node-red",
+    "dapr",
+    "pubsub",
+    "service-invocation"
   ],
   "engines": {
     "node": ">=24"
   },
+  "files": [
+    "lib/",
+    "nodes/",
+    "examples/",
+    "docs/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "node-red": {
     "version": ">=5.0.1 <6",
     "nodes": {
@@ -34,9 +46,6 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
-  },
-  "dependencies": {
-    "@dapr/dapr": "3.18.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",

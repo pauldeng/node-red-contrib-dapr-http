@@ -6,8 +6,10 @@ const assert = require('node:assert/strict');
 const {
   sanitizeResponseHeaders,
   validateContentType,
+  parseRequestHeaders,
   HOP_BY_HOP,
 } = require('../../lib/http-headers');
+const { ErrorCodes } = require('../../lib/errors');
 
 test('sanitizeResponseHeaders drops hop-by-hop and framing headers', () => {
   const out = sanitizeResponseHeaders({
@@ -54,6 +56,24 @@ test('validateContentType rejects non-string values and illegal header values', 
   assert.throws(() => validateContentType(42), /string/i);
   assert.throws(() => validateContentType({ type: 1 }), /string/i);
   assert.throws(() => validateContentType('bad\r\nvalue'), /invalid|contentType/i);
+});
+
+test('parseRequestHeaders accepts an object or a JSON string and coerces values', () => {
+  assert.deepEqual(parseRequestHeaders({ 'x-a': 'v', 'x-n': 7 }), { 'x-a': 'v', 'x-n': '7' });
+  assert.deepEqual(parseRequestHeaders('{"x-a":"v"}'), { 'x-a': 'v' });
+  assert.deepEqual(parseRequestHeaders(undefined), {});
+  assert.deepEqual(parseRequestHeaders(null), {});
+  assert.deepEqual(parseRequestHeaders(''), {});
+});
+
+test('parseRequestHeaders rejects bad shapes and illegal names or values', () => {
+  for (const value of ['[1,2]', '{bad json', 42, ['a'], { 'x bad': 'v' }, { 'x-a': 'a\r\nb: 1' }]) {
+    assert.throws(
+      () => parseRequestHeaders(value, 'msg.dapr.headers'),
+      (err) => err.code === ErrorCodes.INVALID_MESSAGE,
+      `${JSON.stringify(value)} must be rejected`
+    );
+  }
 });
 
 test('HOP_BY_HOP covers the full hop-by-hop and framing header set', () => {

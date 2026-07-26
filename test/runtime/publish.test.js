@@ -108,7 +108,7 @@ function post(nr, payload, publishOptions) {
 }
 
 test(
-  'real Node-RED publishes through the SDK, preserves msg, and survives full redeploy',
+  'real Node-RED publishes over HTTP, preserves msg, and survives full redeploy',
   { timeout: 60000 },
   async (t) => {
     const dapr = await createFakeDaprStarted();
@@ -186,6 +186,31 @@ test(
       'metadata.ttlInSeconds': '60',
     });
 
+    // A flow can carry trace context (or any other request header) through the
+    // publish, so a subscribe → publish hop keeps one W3C trace.
+    const traceparent = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+    assert.equal(
+      (await post(nr, { traced: true }, { headers: { traceparent }, metadata: {} })).status,
+      200
+    );
+    const tracedPublish = dapr.requests.filter((request) => request.path === publishPath).at(-1);
+    assert.equal(tracedPublish.headers.traceparent, traceparent);
+
+    // A malformed header is rejected as an invalid message, before any socket
+    // to the sidecar is opened.
+    const publishCountBefore = dapr.requests.filter(
+      (request) => request.path === publishPath
+    ).length;
+    assert.equal(
+      (await post(nr, { bad: true }, { headers: { 'x bad name': 'v' }, metadata: {} })).status,
+      503
+    );
+    assert.equal(
+      dapr.requests.filter((request) => request.path === publishPath).length,
+      publishCountBefore,
+      'an invalid header must never reach the sidecar'
+    );
+
     const previousHealthCount = dapr.requests.filter(
       (request) => request.path === healthPath
     ).length;
@@ -220,7 +245,7 @@ test(
     assert.equal(unavailable.status, 503);
     assert.ok(
       Date.now() - started < 1500,
-      'unhealthy sidecar must fail without the SDK readiness wait'
+      'an unhealthy sidecar must fail fast, with no readiness wait'
     );
     assert.equal(
       dapr.requests.some((request) => request.path === publishPath),
@@ -240,7 +265,7 @@ test(
 
     dapr.respond('POST', publishPath, (_req, res) => res.writeHead(500).end('publish rejected'));
     const rejected = await post(nr, { orderId: 2 });
-    assert.equal(rejected.status, 503, 'SDK error responses must reach a Catch node');
+    assert.equal(rejected.status, 503, 'a sidecar error response must reach a Catch node');
 
     dapr.respond('POST', publishPath, (_req, res) => res.writeHead(204).end());
     const recovered = await post(nr, { orderId: 2 });

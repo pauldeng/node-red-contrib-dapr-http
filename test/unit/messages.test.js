@@ -123,3 +123,51 @@ test('a blank message override is rejected rather than silently falling back to 
     (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_MESSAGE
   );
 });
+
+test('preparePublish carries validated msg.dapr.headers through for trace propagation', () => {
+  const traceparent = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+  const request = preparePublish(baseConfig, {
+    payload: { a: 1 },
+    dapr: { headers: { traceparent } },
+  });
+  assert.deepEqual(request.headers, { traceparent });
+
+  // No headers at all is the common case and must stay an empty object.
+  assert.deepEqual(preparePublish(baseConfig, { payload: 'x' }).headers, {});
+});
+
+test('preparePublish rejects headers that are not a valid header object', () => {
+  for (const headers of ['[1,2]', 42, { 'x bad': 'v' }, { 'x-a': 'a\r\nb: 1' }]) {
+    assert.throws(
+      () => preparePublish(baseConfig, { payload: 'x', dapr: { headers } }),
+      (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_MESSAGE
+    );
+  }
+});
+
+test('an illegal contentType is rejected as an invalid message, not left for the socket', () => {
+  // Reaching node:http with a CRLF or illegal-token value throws ERR_INVALID_CHAR
+  // there, which the publish client can only report as a transport failure — a
+  // fake sidecar outage for what is really a bad message.
+  const illegal = ['bad\r\nvalue', 'application/json\r\nX-Injected: 1'];
+  for (const contentType of illegal) {
+    assert.throws(
+      () => preparePublish(baseConfig, { payload: { a: 1 }, dapr: { contentType } }),
+      (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_MESSAGE
+    );
+    // A configured (not per-message) value is validated the same way.
+    assert.throws(
+      () => preparePublish({ ...baseConfig, contentType }, { payload: 'x' }),
+      (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_MESSAGE
+    );
+  }
+
+  // A legitimate parameterized type still passes through untouched.
+  assert.equal(
+    preparePublish(baseConfig, {
+      payload: { a: 1 },
+      dapr: { contentType: 'application/json; charset=utf-8' },
+    }).options.contentType,
+    'application/json; charset=utf-8'
+  );
+});

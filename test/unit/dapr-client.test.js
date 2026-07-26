@@ -2,173 +2,301 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('node:http');
 
-const { ClientRegistry, toSdkOptions } = require('../../lib/dapr-client');
+const { publish } = require('../../lib/dapr-client');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 
-function options(over = {}) {
+async function fakeSidecar(handler) {
+  const server = http.createServer(handler);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   return {
-    outbound: {
-      mode: 'explicit',
-      host: '127.0.0.1',
-      port: 3500,
-      baseUrl: 'http://127.0.0.1:3500',
-    },
-    daprApiToken: 'token',
-    limits: { bodyLimitBytes: 8 * 1024 * 1024 },
-    keepAlive: true,
-    ...over,
+    baseUrl: `http://127.0.0.1:${server.address().port}`,
+    stop: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections();
+        server.close(resolve);
+      }),
   };
 }
 
-function fakeFactory() {
-  const clients = [];
-  const factory = (sdkOptions) => {
-    const calls = [];
-    const client = {
-      sdkOptions,
-      calls,
-      initialized: [],
-      stopCalls: 0,
-      response: {},
-      daprClient: {
-        setIsInitialized(value) {
-          client.initialized.push(value);
-        },
-      },
-      pubsub: {
-        async publish(...args) {
-          calls.push(args);
-          return client.response;
-        },
-      },
-      async stop() {
-        client.stopCalls += 1;
-      },
-    };
-    clients.push(client);
-    return client;
-  };
-  return { factory, clients };
+// Records every request and answers with the queued status (204 by default).
+async function recordingSidecar(status = 204, body = '') {
+  const requests = [];
+  const state = { status, body };
+  const sidecar = await fakeSidecar((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const url = new URL(req.url, 'http://localhost');
+      requests.push({
+        method: req.method,
+        path: url.pathname,
+        query: Object.fromEntries(url.searchParams),
+        headers: req.headers,
+        body: Buffer.concat(chunks),
+      });
+      res.writeHead(state.status, { 'content-type': 'application/json' }).end(state.body);
+    });
+  });
+  return { ...sidecar, requests, state };
 }
 
-test('SDK options omit host and port in environment-endpoint mode', () => {
-  const result = toSdkOptions(
-    options({ outbound: { mode: 'env', baseUrl: 'http://sidecar:3600' } })
+const request = (over = {}) => ({
+  pubsubName: 'pubsub',
+  topic: 'orders',
+  data: { id: 1 },
+  options: { contentType: 'application/json', metadata: {} },
+  ...over,
+});
+
+test('publish POSTs to the sidecar pub/sub API with metadata as query parameters', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
+
+  await publish(
+    { baseUrl: sidecar.baseUrl, token: 'realtoken', timeoutMs: 5000 },
+    request({ options: { contentType: 'application/json', metadata: { ttlInSeconds: '10' } } })
   );
-  assert.equal('daprHost' in result, false);
-  assert.equal('daprPort' in result, false);
-  assert.equal(result.daprApiToken, 'token');
-  assert.equal(result.isKeepAlive, true);
-  assert.equal(result.maxBodySizeMb, 8);
+
+  const [received] = sidecar.requests;
+  assert.equal(received.method, 'POST');
+  assert.equal(received.path, '/v1.0/publish/pubsub/orders');
+  assert.deepEqual(received.query, { 'metadata.ttlInSeconds': '10' });
+  assert.equal(received.headers['content-type'], 'application/json');
+  assert.equal(received.headers['dapr-api-token'], 'realtoken');
+  assert.equal(received.headers['content-length'], '8');
+  assert.equal(received.body.toString(), '{"id":1}');
 });
 
-test('SDK options include explicit HTTP endpoint settings', () => {
-  const result = toSdkOptions(options());
-  assert.equal(result.daprHost, '127.0.0.1');
-  assert.equal(result.daprPort, '3500');
-  assert.equal(typeof result.communicationProtocol, 'number');
+test('publish sends no dapr-api-token header when no token is configured', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
+
+  await publish({ baseUrl: sidecar.baseUrl }, request());
+  assert.equal('dapr-api-token' in sidecar.requests[0].headers, false);
 });
 
-test('registry shares a client and does not stop it while another lease is active', async () => {
-  const fake = fakeFactory();
-  const registry = new ClientRegistry(fake.factory);
-  const first = registry.acquire(options());
-  const second = registry.acquire(options());
+test('publish serializes falsy payloads as themselves, never as an omitted body', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
 
-  assert.equal(fake.clients.length, 1);
-  assert.deepEqual(fake.clients[0].initialized, [true]);
+  for (const data of [0, false, null]) {
+    await publish(
+      { baseUrl: sidecar.baseUrl },
+      request({ data, options: { contentType: 'application/json', metadata: {} } })
+    );
+    assert.equal(sidecar.requests.at(-1).body.toString(), JSON.stringify(data));
+  }
 
-  await first.release();
-  assert.equal(fake.clients[0].stopCalls, 0);
-  await second.release();
-  assert.equal(fake.clients[0].stopCalls, 1);
+  await publish(
+    { baseUrl: sidecar.baseUrl },
+    request({ data: '', options: { contentType: 'text/plain', metadata: {} } })
+  );
+  assert.equal(sidecar.requests.at(-1).body.toString(), '');
+  assert.equal(sidecar.requests.at(-1).headers['content-length'], '0');
 });
 
-test('closing one endpoint does not stop global SDK agents used by another endpoint', async () => {
-  const fake = fakeFactory();
-  const registry = new ClientRegistry(fake.factory);
-  const first = registry.acquire(options());
-  const second = registry.acquire(
-    options({
-      outbound: {
-        mode: 'explicit',
-        host: '127.0.0.1',
-        port: 3600,
-        baseUrl: 'http://127.0.0.1:3600',
+test('publish sends a Buffer payload byte for byte and a text payload verbatim', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
+
+  const bytes = Buffer.from([0, 1, 255]);
+  await publish(
+    { baseUrl: sidecar.baseUrl },
+    request({ data: bytes, options: { contentType: 'application/octet-stream', metadata: {} } })
+  );
+  assert.deepEqual(sidecar.requests.at(-1).body, bytes);
+
+  await publish(
+    { baseUrl: sidecar.baseUrl },
+    request({ data: 'plain text', options: { contentType: 'text/plain', metadata: {} } })
+  );
+  assert.equal(sidecar.requests.at(-1).body.toString(), 'plain text');
+});
+
+test('publish encodes pubsub and topic so neither can escape the publish route', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
+
+  await publish(
+    { baseUrl: sidecar.baseUrl },
+    request({ pubsubName: 'pub sub', topic: '../../v1.0/metadata' })
+  );
+  assert.equal(sidecar.requests[0].path, '/v1.0/publish/pub%20sub/..%2F..%2Fv1.0%2Fmetadata');
+});
+
+test('publish forwards caller headers, dropping hop-by-hop and token overrides', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
+
+  await publish(
+    { baseUrl: sidecar.baseUrl, token: 'realtoken' },
+    request({
+      headers: {
+        traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+        'transfer-encoding': 'chunked',
+        'dapr-api-token': 'HACK',
+        'content-type': 'text/plain',
       },
     })
   );
 
-  assert.equal(fake.clients.length, 2);
-  await first.release();
-  assert.equal(fake.clients[0].stopCalls, 0);
-  assert.equal(fake.clients[1].stopCalls, 0);
-
-  await second.release();
-  assert.equal(
-    fake.clients.reduce((sum, client) => sum + client.stopCalls, 0),
-    1
-  );
+  const { headers } = sidecar.requests[0];
+  assert.equal(headers.traceparent, '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01');
+  assert.equal(headers['transfer-encoding'], undefined);
+  assert.equal(headers['dapr-api-token'], 'realtoken');
+  assert.equal(headers['content-type'], 'application/json', 'the resolved content type wins');
 });
 
-test('publish forwards SDK options and treats an SDK error response as failure', async () => {
-  const fake = fakeFactory();
-  const registry = new ClientRegistry(fake.factory);
-  const lease = registry.acquire(options());
-  const request = {
-    pubsubName: 'pubsub',
-    topic: 'orders',
-    data: { id: 1 },
-    options: { contentType: 'application/json', metadata: { ttlInSeconds: '10' } },
-  };
+test('a non-2xx sidecar response becomes PUBLISH_FAILED carrying the status', async (t) => {
+  const sidecar = await recordingSidecar(500, '{"errorCode":"ERR_PUBSUB_PUBLISH_MESSAGE"}');
+  t.after(() => sidecar.stop());
 
-  await lease.publish(request);
-  assert.deepEqual(fake.clients[0].calls[0], ['pubsub', 'orders', request.data, request.options]);
-
-  const cause = new Error('sidecar rejected publish');
-  fake.clients[0].response = { error: cause };
   await assert.rejects(
-    lease.publish(request),
+    publish({ baseUrl: sidecar.baseUrl }, request()),
     (err) =>
-      err instanceof DaprError && err.code === ErrorCodes.PUBLISH_FAILED && err.cause === cause
+      err instanceof DaprError &&
+      err.code === ErrorCodes.PUBLISH_FAILED &&
+      /500/.test(err.message) &&
+      /ERR_PUBSUB_PUBLISH_MESSAGE/.test(err.message)
   );
-  await lease.release();
 });
 
-test('falsy JSON values are wrapped so the pinned SDK does not omit their body', async () => {
-  const fake = fakeFactory();
-  const registry = new ClientRegistry(fake.factory);
-  const lease = registry.acquire(options());
+test('a transport failure becomes SIDECAR_UNAVAILABLE, not PUBLISH_FAILED', async () => {
+  const sidecar = await recordingSidecar();
+  await sidecar.stop(); // nothing is listening any more
 
-  for (const data of [0, false, null]) {
-    await lease.publish({
-      pubsubName: 'pubsub',
-      topic: 'values',
-      data,
-      options: { contentType: 'application/json', metadata: {} },
-    });
-    const sdkData = fake.clients[0].calls.at(-1)[2];
-    assert.ok(sdkData, `SDK data must be truthy for ${String(data)}`);
-    assert.equal(JSON.stringify(sdkData), JSON.stringify(data));
+  await assert.rejects(
+    publish({ baseUrl: sidecar.baseUrl }, request()),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.SIDECAR_UNAVAILABLE
+  );
+});
+
+test('publish rejects when it exceeds its deadline', async (t) => {
+  const sidecar = await fakeSidecar((req) => req.resume()); // never responds
+  t.after(() => sidecar.stop());
+
+  await assert.rejects(
+    publish({ baseUrl: sidecar.baseUrl, timeoutMs: 200 }, request()),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.SIDECAR_UNAVAILABLE
+  );
+});
+
+test('publish aborts in flight when its signal is aborted', async (t) => {
+  const sidecar = await fakeSidecar((req) => req.resume()); // never responds
+  t.after(() => sidecar.stop());
+
+  const controller = new AbortController();
+  const pending = publish(
+    { baseUrl: sidecar.baseUrl, timeoutMs: 5000, signal: controller.signal },
+    request()
+  );
+  controller.abort();
+  await assert.rejects(pending, (err) => err instanceof DaprError);
+});
+
+test('publish reuses a pooled keep-alive socket across sequential calls', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
+
+  await publish({ baseUrl: sidecar.baseUrl }, request());
+  await publish({ baseUrl: sidecar.baseUrl }, request());
+  assert.equal(
+    new Set(sidecar.requests.map((r) => r.headers.connection)).size,
+    1,
+    'both calls should keep the same connection policy'
+  );
+  assert.equal(sidecar.requests.length, 2);
+});
+
+test('publish tolerates an absent payload, metadata, and error body', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
+
+  await publish(
+    { baseUrl: sidecar.baseUrl },
+    { pubsubName: 'pubsub', topic: 't', data: undefined, options: { contentType: 'text/plain' } }
+  );
+  assert.equal(sidecar.requests[0].body.length, 0);
+  assert.deepEqual(sidecar.requests[0].query, {});
+
+  // An unresolved content type is omitted rather than sent as "undefined",
+  // which node:http would reject outright.
+  await publish(
+    { baseUrl: sidecar.baseUrl },
+    { pubsubName: 'pubsub', topic: 't', data: 'x', options: {} }
+  );
+  assert.equal('content-type' in sidecar.requests[1].headers, false);
+
+  sidecar.state.status = 404;
+  sidecar.state.body = '';
+  await assert.rejects(
+    publish({ baseUrl: sidecar.baseUrl }, request()),
+    (err) => err.code === ErrorCodes.PUBLISH_FAILED && /404/.test(err.message)
+  );
+});
+
+test('a payload that cannot be serialized is an invalid message, not a sidecar outage', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
+
+  // An explicit JSON content type bypasses inferContentType's payload-shape
+  // check, so these only fail at serialization time — and that is a local defect
+  // in the message, not the sidecar being unreachable.
+  const circular = { name: 'loop' };
+  circular.self = circular;
+
+  for (const data of [1n, circular]) {
+    await assert.rejects(
+      publish(
+        { baseUrl: sidecar.baseUrl },
+        request({ data, options: { contentType: 'application/json', metadata: {} } })
+      ),
+      (err) =>
+        err instanceof DaprError &&
+        err.code === ErrorCodes.INVALID_MESSAGE &&
+        /serialize/i.test(err.message)
+    );
+  }
+  assert.equal(sidecar.requests.length, 0, 'no request should reach the sidecar');
+});
+
+test('every JSON media type serializes as JSON, including parameters and +json suffixes', async (t) => {
+  const sidecar = await recordingSidecar();
+  t.after(() => sidecar.stop());
+
+  // Media types carry parameters and are case-insensitive (RFC 9110 section 8.3),
+  // and any "+json" structured suffix is JSON (RFC 6839 section 3.1). Exact-string
+  // matching silently serialized object payloads as "[object Object]".
+  for (const contentType of [
+    'application/json',
+    'application/json; charset=utf-8',
+    'APPLICATION/JSON',
+    'application/cloudevents+json',
+    'application/cloudevents+json; charset=utf-8',
+    'application/vnd.example+json',
+  ]) {
+    await publish(
+      { baseUrl: sidecar.baseUrl },
+      request({ data: { id: 1 }, options: { contentType, metadata: {} } })
+    );
+    assert.equal(
+      sidecar.requests.at(-1).body.toString(),
+      '{"id":1}',
+      `${contentType} must serialize as JSON`
+    );
+    // Matching is normalized; the header itself is sent exactly as configured.
+    assert.equal(sidecar.requests.at(-1).headers['content-type'], contentType);
   }
 
-  await lease.publish({
-    pubsubName: 'pubsub',
-    topic: 'values',
-    data: '',
-    options: { contentType: 'text/plain', metadata: {} },
-  });
-  assert.ok(fake.clients[0].calls.at(-1)[2]);
-  assert.equal(fake.clients[0].calls.at(-1)[2].toString(), '');
-  await lease.release();
-});
-
-test('release is idempotent', async () => {
-  const fake = fakeFactory();
-  const registry = new ClientRegistry(fake.factory);
-  const lease = registry.acquire(options());
-  await lease.release();
-  await lease.release();
-  assert.equal(fake.clients[0].stopCalls, 1);
+  // A non-JSON type is still text, parameters and all.
+  await publish(
+    { baseUrl: sidecar.baseUrl },
+    request({
+      data: 'raw text',
+      options: { contentType: 'text/plain; charset=utf-8', metadata: {} },
+    })
+  );
+  assert.equal(sidecar.requests.at(-1).body.toString(), 'raw text');
 });
