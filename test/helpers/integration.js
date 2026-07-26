@@ -186,44 +186,75 @@ async function startDaprd({
     extraFixtures: configFixture ? [...extraFixtures, configFixture] : extraFixtures,
   });
   const httpPort = presetHttpPort || (await freePort());
-  const name = `nrdapr-it-daprd-${runId()}`;
-  const args = ['--name', name, '--network', 'host', '-v', `${resourcesDir}:/components:ro`];
-  if (appApiToken) {
-    args.push('-e', `APP_API_TOKEN=${appApiToken}`);
-  }
-  if (daprApiToken) {
-    args.push('-e', `DAPR_API_TOKEN=${daprApiToken}`);
-  }
-  args.push(
-    DAPRD_IMAGE,
-    './daprd',
-    `--app-id=${appId}`,
-    `--app-port=${appPort}`,
-    '--app-protocol=http',
-    `--dapr-http-port=${httpPort}`,
-    '--dapr-grpc-port=0',
-    '--resources-path=/components',
-    '--log-level=info',
-    // --network host means every sidecar in a test binds the same interface;
-    // the default metrics port (9090) collides once more than one sidecar
-    // runs at a time (see acl.test.js). Nothing here reads metrics.
-    '--enable-metrics=false'
-  );
-  if (configFixture) {
-    args.push(`--config=/components/${configFixture}`);
-  }
-
-  await dockerRun(args);
   const healthHeaders = daprApiToken ? { 'dapr-api-token': daprApiToken } : undefined;
+
+  // One attempt: bind every port daprd needs explicitly, then wait for the
+  // sidecar API. Returns the container name, or throws with daprd's logs.
+  const attempt = async () => {
+    const name = `nrdapr-it-daprd-${runId()}`;
+    const args = ['--name', name, '--network', 'host', '-v', `${resourcesDir}:/components:ro`];
+    if (appApiToken) {
+      args.push('-e', `APP_API_TOKEN=${appApiToken}`);
+    }
+    if (daprApiToken) {
+      args.push('-e', `DAPR_API_TOKEN=${daprApiToken}`);
+    }
+    args.push(
+      DAPRD_IMAGE,
+      './daprd',
+      `--app-id=${appId}`,
+      `--app-port=${appPort}`,
+      '--app-protocol=http',
+      `--dapr-http-port=${httpPort}`,
+      '--dapr-grpc-port=0',
+      // The INTERNAL gRPC port (sidecar-to-sidecar) must be allocated as
+      // deliberately as the HTTP one: --network host puts every sidecar in the
+      // suite in one port space, and daprd exits FATALLY if it cannot bind this
+      // port ("failed to start internal gRPC server"), failing the test for a
+      // reason that has nothing to do with the code under test.
+      `--dapr-internal-grpc-port=${await freePort()}`,
+      '--resources-path=/components',
+      '--log-level=info',
+      // --network host means every sidecar in a test binds the same interface;
+      // the default metrics port (9090) collides once more than one sidecar
+      // runs at a time (see acl.test.js). Nothing here reads metrics.
+      '--enable-metrics=false'
+    );
+    if (configFixture) {
+      args.push(`--config=/components/${configFixture}`);
+    }
+
+    await dockerRun(args);
+    try {
+      await waitForHttp(`http://127.0.0.1:${httpPort}/v1.0/healthz/outbound`, {
+        headers: healthHeaders,
+      });
+    } catch (err) {
+      const logs = await dockerLogs(name);
+      await dockerStop(name);
+      throw new Error(`${err.message}\n--- daprd logs ---\n${logs}`);
+    }
+    return name;
+  };
+
+  // freePort() is inherently a check-then-bind race: the port is free when
+  // asked for and can be taken before daprd binds it. One retry (with freshly
+  // allocated ports) turns that rare loss into a slower start rather than a
+  // failed suite; a second failure is reported as the real defect it then is.
+  let name;
   try {
-    await waitForHttp(`http://127.0.0.1:${httpPort}/v1.0/healthz/outbound`, {
-      headers: healthHeaders,
-    });
-  } catch (err) {
-    const logs = await dockerLogs(name);
-    await dockerStop(name);
-    await fsp.rm(resourcesDir, { recursive: true, force: true });
-    throw new Error(`${err.message}\n--- daprd logs ---\n${logs}`);
+    name = await attempt();
+  } catch (first) {
+    if (!/address already in use|could not listen/i.test(first.message)) {
+      await fsp.rm(resourcesDir, { recursive: true, force: true });
+      throw first;
+    }
+    try {
+      name = await attempt();
+    } catch (second) {
+      await fsp.rm(resourcesDir, { recursive: true, force: true });
+      throw new Error(`daprd failed to start twice (port contention?): ${second.message}`);
+    }
   }
 
   return {

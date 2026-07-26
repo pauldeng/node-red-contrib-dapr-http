@@ -12,5 +12,9 @@ module.exports = defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: 'list',
   timeout: 60000,
+  // Keep a trace for any failure. These tests drive a real editor against a real
+  // Node-RED process, so a timing failure under load can be hard to reproduce on
+  // demand — without a retained trace the one occurrence you get is unusable.
+  use: { trace: 'retain-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

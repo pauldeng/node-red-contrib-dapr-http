@@ -2,6 +2,8 @@
 
 const path = require('node:path');
 
+const { expect } = require('@playwright/test');
+
 // Three viewports required by IMPLEMENTATION_PLAN.md's e2e tier: a wide
 // desktop size, Node-RED's own commonly-documented minimum-comfortable size,
 // and a narrower size still wide enough for the editor's three-pane layout
@@ -56,9 +58,20 @@ async function waitForTraySettled(page) {
   });
 }
 
+// The gesture is retried because the editor redraws the canvas on its own
+// schedule — notably right after a config-node save — and a redraw between the
+// two clicks replaces the target SVG element, so the browser sees two unrelated
+// single clicks: the node ends up merely SELECTED and no dialog opens. Waiting
+// longer cannot fix that (nothing is pending), and re-issuing the double-click
+// on the redrawn element does. Reproduced at 2/10 with --repeat-each before this
+// retry, 0/20 after; the diagnosis came from a retained trace showing the node's
+// quick-action toolbar (selection) and no tray in the DOM.
 async function openNodeDialog(page, nodeId) {
-  await page.locator(`g#${nodeId} rect.red-ui-flow-node`).first().dblclick();
-  await page.waitForSelector('#node-dialog-ok', { state: 'visible' });
+  const node = page.locator(`g#${nodeId} rect.red-ui-flow-node`).first();
+  await expect(async () => {
+    await node.dblclick();
+    await page.waitForSelector('#node-dialog-ok', { state: 'visible', timeout: 2000 });
+  }).toPass({ timeout: 30000 });
   await waitForTraySettled(page);
 }
 
