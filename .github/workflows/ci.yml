@@ -4,11 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Dependency advisories are disclosed on their own schedule, not ours: without
+  # a periodic run, a new advisory in the reviewed (dev) tree stays invisible
+  # until someone happens to open a PR. See docs/testing.md "Security audit".
+  schedule:
+    - cron: '17 6 * * 1'
 
 jobs:
   unit:
     name: Unit/coverage/lint/format (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         node-version: ['24', '26']
@@ -24,6 +30,7 @@ jobs:
       - run: npm test
       - run: npm run test:coverage
       - run: npm run test:runtime
+        timeout-minutes: 10
 
   docker:
     name: Integration + e2e (Docker, Node 24)
@@ -40,7 +47,9 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm pack --dry-run
-      - run: git diff --check "${{ github.event.pull_request.base.sha || github.event.before }}...HEAD"
+      # HEAD^ is the fallback for a scheduled run, which carries neither a PR
+      # base nor a push "before" sha.
+      - run: git diff --check "${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}...HEAD"
       - run: printf '@AGENTS.md\n' | cmp -s - CLAUDE.md
       - run: docker compose config --quiet
       - run: npx playwright install --with-deps chromium
@@ -53,5 +62,15 @@ jobs:
         with:
           name: e2e-screenshots
           path: test/e2e/screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
+      # Playwright traces for failures (playwright.config.js retain-on-failure).
+      # A timing failure in this tier can be hard to reproduce; without the trace
+      # the one occurrence CI catches is not diagnosable after the fact.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces
+          path: test-results/
           if-no-files-found: ignore
           retention-days: 7

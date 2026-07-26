@@ -1,0 +1,65 @@
+name: Release
+
+# Publishing happens ONLY from CI, authenticated by GitHub's OIDC identity for
+# this workflow run (npm trusted publishing). There is deliberately:
+#   - no NPM_TOKEN secret,
+#   - no NODE_AUTH_TOKEN,
+#   - no .npmrc credential,
+#   - and no `npm login` / `npm publish` from anyone's machine.
+# The registry verifies the short-lived OIDC token minted for this repository and
+# this workflow file, so there is no long-lived publish credential to leak,
+# rotate, or accidentally use locally. Provenance is attested from the same
+# identity.
+#
+# One-time owner prerequisites before the first release (deliberate decisions
+# this workflow must not make silently):
+#   1. Register this repository + `.github/workflows/release.yml` as a trusted
+#      publisher for the package on the registry.
+#   2. Remove `private: true` from package.json, and scope the name to the
+#      publishing org (e.g. @your-org/node-red-contrib-dapr) so the package stays
+#      restricted — an unscoped name on the public registry cannot be private.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # the OIDC identity npm trusted publishing authenticates
+
+jobs:
+  publish:
+    name: Verify and publish
+    # Tags only — including for workflow_dispatch, which can be pointed at a tag
+    # ref but must never publish from a branch, where there is no tag to check the
+    # version against.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      # Trusted publishing (OIDC token exchange) requires npm >= 11.5.1.
+      - run: npm install -g npm@^11
+      - run: npm ci
+      # The same gates CI enforces on every change: a tag must not be able to
+      # ship something that would have failed a pull request.
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run test:coverage
+      - run: npm run test:runtime
+        timeout-minutes: 10
+      - run: npm audit --omit=dev
+      - run: npm pack --dry-run
+      # The tag must match the version being published, so an installed build is
+      # always identifiable from its version alone.
+      - name: Check tag matches package version
+        run: test "v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}"
+      # No token env var by design — npm exchanges the OIDC id-token above for a
+      # short-lived publish credential.
+      - run: npm publish --provenance
