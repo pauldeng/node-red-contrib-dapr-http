@@ -392,6 +392,15 @@
     single output. Max messages (1-1000) and max await (1-60000ms) are this package's safety caps;
     leave them blank for Dapr's defaults.
   </p>
+  <p>
+    <strong>Tuning max messages with manual acknowledgement:</strong> each entry awaiting an ack
+    holds one slot in the connection's shared pending-ack budget (1000 per
+    <code>dapr-connection</code>, shared by every subscribe node on it). A batch of 1000 can
+    therefore fill the budget on its own, and entries of a batch that arrives while it is full are
+    answered <code>RETRY</code> until slots free up. If several topics use manual ack, size max
+    messages so the batches you expect in flight together stay well inside that budget &mdash; or
+    use automatic acknowledgement, which holds no slots.
+  </p>
 
   <h3>Subscriptions and restart</h3>
   <p>

@@ -59,8 +59,17 @@ about which fields matter.
 - **waiting for sidecar discovery** (yellow) — a fresh Node-RED process with
   no observed `/dapr/subscribe` fetch yet. This is not a claim that daprd is
   out of date; it's simply that this process has no record of what daprd
-  last saw (e.g. right after a Node-RED restart). It clears once daprd (or
-  your own probe) hits `/dapr/subscribe` again.
+  last saw (e.g. right after a Node-RED restart). It clears when daprd (or
+  your own probe) next fetches `/dapr/subscribe`.
+
+  **This state can persist indefinitely on a perfectly healthy system.** daprd
+  fetches `/dapr/subscribe` once, at its own startup — so if Node-RED restarts
+  while daprd keeps running, delivery continues working (the routes are derived
+  from persisted ids and never move) but nothing re-fetches, and the status stays
+  yellow until daprd itself is next restarted. Do not alert on it as a fault, and
+  do not restart daprd just to clear it: check whether deliveries are arriving.
+  `curl` the app channel's `/dapr/subscribe` yourself if you want the status to
+  reflect the current set immediately.
 
 The warning only clears after daprd actually re-fetches `/dapr/subscribe` and
 receives the new definition — never optimistically, right after you deploy.

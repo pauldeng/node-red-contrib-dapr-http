@@ -67,8 +67,9 @@ nodes/dapr-service.js      inbound service wrapper
 nodes/dapr-response.js     invocation response wrapper
 lib/options.js             config/env precedence and validation
 lib/messages.js            content-type inference and CloudEvent conversion
-lib/dapr-client.js         SDK publish client and shared HTTP-agent lifecycle
-lib/invoke-client.js       native outbound invocation adapter
+lib/sidecar-http.js        the one outbound HTTP request path to the sidecar
+lib/dapr-client.js         pub/sub publish client (paths, metadata, serialization)
+lib/invoke-client.js       outbound service-invocation client
 lib/http-headers.js        header allow-listing/normalization shared by both directions
 lib/app-channel.js         listener registry, router, auth, limits, sockets
 lib/subscriptions.js       subscription definitions, canonical fingerprints, generations
@@ -81,12 +82,22 @@ lib/errors.js              stable internal error types and safe (no-stack-trace)
 modules with no Node-RED import, so they're directly unit-testable. See
 `docs/testing.md` for how each tier exercises this split.
 
-## Why HTTP-only and one keep-alive policy
+## Why HTTP-only, no SDK, and one keep-alive policy
 
-The `@dapr/dapr` SDK's HTTP agents are process-global, not per-node — so
-keep-alive is owned centrally in `lib/dapr-client.js` rather than configured
-per node instance. The SDK version is pinned (no caret) because
-`lib/dapr-client.js` relies on specific 3.18.0 HTTP-client behavior (fail-fast
-readiness, falsy-body handling, agent reuse); any upgrade needs re-verifying
-those three behaviors against the new version's source plus a real `daprd`
-before the pin moves.
+Everything this package sends to the sidecar is a handful of documented HTTP
+endpoints: `POST /v1.0/publish/<pubsub>/<topic>`,
+`/v1.0/invoke/<app-id>/method/<method>`, and `GET /v1.0/healthz/outbound`. They
+all go through `lib/sidecar-http.js`, on Node's process-global keep-alive agent,
+so keep-alive is owned centrally rather than per node instance and there is
+exactly one place where deadlines, aborts, Content-Length framing, and error
+mapping are implemented.
+
+Publishing used to go through the `@dapr/dapr` SDK. That cost 140 transitive
+runtime packages (including `express`, `@grpc/grpc-js`, `protobufjs`, and
+`node-fetch@2`) for a single call, plus a private-API poke to skip the SDK's
+readiness wait and a truthy-wrapper workaround for its falsy-body handling — and
+it made every SDK bump a re-verification exercise against real `daprd`. Calling
+the endpoint directly removed all of it: the package now has **zero runtime
+dependencies**. The wire format is pinned by the runtime tier (exact bodies,
+headers, and query parameters against a fake sidecar) and by the integration
+tier (the same publishes against real `daprd`).

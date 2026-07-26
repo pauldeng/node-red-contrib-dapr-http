@@ -10,10 +10,10 @@ verbatim (`@AGENTS.md`) — do not duplicate guidance elsewhere.
 
 ## Stack (pinned)
 
-Node.js >= 24 · Node-RED 5.0.1 (`>=5.0.1 <6`) · Dapr runtime 1.18.1 ·
-`@dapr/dapr` 3.18.0 (exact, no caret — pinned for reproducible runtime
-behavior). Tests use the native `node:test` runner (no Mocha/Jest/Vitest/
-Sinon/Supertest and no `node-red-node-test-helper`).
+Node.js >= 24 · Node-RED 5.0.1 (`>=5.0.1 <6`) · Dapr runtime 1.18.1 · **zero
+runtime dependencies** — every call to the sidecar goes over `node:http`
+(`lib/sidecar-http.js`). Tests use the native `node:test` runner (no Mocha/Jest/
+Vitest/Sinon/Supertest and no `node-red-node-test-helper`).
 
 ## Layout
 
@@ -56,8 +56,10 @@ These are load-bearing. Each traces to a verified constraint recorded in
   `RED.httpNode`, or the editor port — doing so would expose the Node-RED Admin
   API to the Dapr mesh (remote flow read/deploy) and let admin routes shadow
   service methods.
-- **Loopback by default.** The listener binds `127.0.0.1`. A non-loopback bind
-  is allowed only by explicit configuration and must warn in the editor and docs.
+- **Loopback by default.** The listener binds `127.0.0.1`. A non-loopback bind is
+  allowed only by explicit configuration, requires an app API token
+  (`lib/options.js` fails closed without one), and must warn in the editor and
+  docs.
 - **One listener per connection.** Reject duplicate bind address/port with a
   clear node status, never a crash.
 - **Stable delivery paths.** Derive delivery routes from persisted node/rule
@@ -71,17 +73,27 @@ These are load-bearing. Each traces to a verified constraint recorded in
 - **Fail fast when the sidecar is down.** Do not queue; fail the current message
   via `done(error)` and drive status from a bounded-backoff health poll of
   `/v1.0/healthz/outbound` (outbound excludes the app channel — the right probe).
-- **HTTP-only, one keep-alive policy.** The SDK's HTTP agents are process-global;
-  keep-alive is centrally owned, not per-node.
-- **Pinned SDK adapter.** `lib/dapr-client.js` relies on pinned 3.18.0 HTTP-client
-  behavior for fail-fast readiness, falsy bodies, and agent reuse. Reverify all
-  three against source plus real daprd before any `@dapr/dapr` upgrade.
+- **HTTP-only, one outbound path.** Every outbound call (publish, service
+  invocation) goes through `lib/sidecar-http.js` on Node's process-global
+  keep-alive agent: keep-alive is centrally owned, never a per-node agent, and
+  there is one place where deadlines, aborts, and framing are correct. Do not add
+  a second HTTP client or a runtime dependency to talk to the sidecar — the wire
+  format is a handful of documented endpoints, and the previous `@dapr/dapr`
+  dependency cost 140 transitive packages plus two workarounds for one call.
+- **Sidecar paths are built, never interpolated.** Any app id, method, pubsub
+  name, or topic that reaches a URL is validated and percent-encoded
+  (`buildInvokePath`, `publish`), so a `..` segment can never redirect a
+  token-bearing request to another Dapr control-plane API.
 
 ## Security boundaries
 
-- Require the app API token (configured credential, else `APP_API_TOKEN`) on
+- Enforce the app API token (configured credential, else `APP_API_TOKEN`) on
   discovery, delivery, and service routes; compare in constant time. `/healthz`
-  stays unauthenticated for app health probes.
+  stays unauthenticated for app health probes. **With no token configured the app
+  channel authenticates nobody** — that is allowed only on a loopback bind, and
+  the connection node warns every deploy. A non-loopback bind without a token is
+  rejected outright. Say this plainly in docs and help; never write that the token
+  is "required" without that qualification.
 - Reject `dapr-caller-app-id` on `/dapr/subscribe` and internal delivery routes
   (a mesh caller must not treat internal endpoints as service methods). Preserve
   it for registered service methods so flows can authorize.
@@ -116,6 +128,12 @@ runtime tests. Target >= 90% line/function and >= 85% branch coverage on `lib/`.
 
 - Conventional commit subjects (`feat:`, `test:`, `docs:`, `chore:`). One
   coherent purpose per commit; never mix unrelated cleanup into a feature commit.
+- **Releases publish only from CI, authenticated by GitHub OIDC** (npm trusted
+  publishing, `.github/workflows/release.yml`). Never `npm login`, `npm publish`,
+  or otherwise publish from a developer machine, and never add an `NPM_TOKEN` /
+  `NODE_AUTH_TOKEN` secret — the release identity is the workflow's own
+  short-lived OIDC token. Every user-visible change gets a `CHANGELOG.md` entry,
+  and the tag must match `package.json`'s version.
 - **Reaching a milestone is a hard stop.** Do not make the milestone's closing
   commit and do not start the next milestone. Present results (tests run and
   outcomes, coverage, staged diff) and wait for explicit human approval. Apply

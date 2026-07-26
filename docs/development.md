@@ -50,3 +50,24 @@ Put behavior in `lib/` and keep `nodes/*.js` wrappers thin.
 - **Milestone gate:** reaching a milestone is a hard stop. Present results and
   wait for explicit human approval before making the milestone commit and before
   starting the next milestone. See `IMPLEMENTATION_PLAN.md` §8.
+
+## Releasing
+
+Releases are cut from a tag by `.github/workflows/release.yml` and authenticated
+by **GitHub OIDC** (npm trusted publishing). Nobody publishes from a laptop:
+there is no `NPM_TOKEN` secret, no `NODE_AUTH_TOKEN`, and no `npm login` — the
+registry verifies a short-lived token minted for this repository and this
+workflow file, and the same identity attests provenance.
+
+1. Add the change under `## Unreleased` in `CHANGELOG.md` as you make it.
+2. Bump `version` in `package.json` and move the `Unreleased` entries under the
+   new version heading.
+3. Tag `v<version>` and push the tag. The workflow re-runs the full gate
+   (lint, format, unit, coverage, runtime, audit, pack) and refuses to publish if
+   the tag and `package.json` version disagree.
+
+Two one-time prerequisites are the repository owner's call and are deliberately
+not pre-decided here: registering this repo + workflow as the package's trusted
+publisher, and removing `private: true` (scoping the name to the publishing org,
+since an unscoped name on the public registry cannot stay private). Until then
+the package is installed from a path — see the README.

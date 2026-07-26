@@ -6,11 +6,27 @@ fits into the rest of the system.
 
 ## App API token
 
-Every app-channel route except `GET /healthz` requires the app API token
-(configured credential, else `APP_API_TOKEN`), compared with
-`crypto.timingSafeEqual` rather than `===` so a timing side-channel can't
-leak the token byte by byte. `/healthz` stays unauthenticated because
-container/orchestrator health probes generally can't attach a token.
+When an app API token is configured (credential on the `dapr-connection` node,
+else `APP_API_TOKEN`), every app-channel route except `GET /healthz` requires
+it, compared with `crypto.timingSafeEqual` rather than `===` so a timing
+side-channel can't leak the token byte by byte. `/healthz` stays
+unauthenticated because container/orchestrator health probes generally can't
+attach a token.
+
+**With no token configured, the app channel authenticates nobody.** Subscription
+discovery (`GET /dapr/subscribe`) answers with the full subscription set, and
+anything that can reach the listener can POST a forged CloudEvent to a delivery
+route and inject it into a flow. That is why:
+
+- a **non-loopback** bind without a token is rejected outright at deploy
+  (`INVALID_OPTIONS` from `lib/options.js`) — the listener never starts;
+- on **loopback** it is allowed, because the reachable set is this host only and
+  local development needs a zero-config path, but the connection node logs a
+  warning on every deploy so it is never a silent default.
+
+Treat "loopback and untokenized" as trusting every process in the host or pod
+network namespace — which, in the documented topology, includes anything sharing
+a namespace with `daprd`. Set the token for anything beyond local development.
 
 This token authenticates **daprd to the app** — it proves the caller knows a
 secret shared with this app's operator. It does not authorize a specific
@@ -72,10 +88,16 @@ over them.
 ## Non-loopback binding
 
 The app-channel listener binds `127.0.0.1` by default. A non-loopback bind is
-only reachable through explicit configuration, and the editor shows a
-security warning when set — binding beyond loopback exposes the listener to
-whatever can reach that interface, so it should be paired with an app API
-token and the network-level controls described above.
+only reachable through explicit configuration, and:
+
+- the editor shows a warning next to the field as soon as the value stops being
+  loopback (`127.0.0.0/8`, `localhost`, `::1`);
+- the runtime **requires** an app API token for it, and refuses to start the
+  listener without one;
+- binding beyond loopback still exposes the listener to whatever can reach that
+  interface, so pair it with the network-level controls described above.
+
+`0.0.0.0` is not loopback: it binds every interface, including public ones.
 
 ## Request limits
 

@@ -4,5 +4,5 @@ test-results/
 playwright-report/
 package-lock.json
 
-# Plan-review working notes (gitignored) are not formatter-owned.
+# Review working notes (gitignored) are not formatter-owned.
 PLAN_REVIEW_*.md

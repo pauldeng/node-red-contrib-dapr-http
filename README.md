@@ -35,6 +35,24 @@ node's own dialog rather than dragged from the palette.
 | `dapr-service`    | Expose a method other Dapr apps can invoke.                                              |
 | `dapr-response`   | Reply to a `dapr-service` invocation.                                                    |
 
+## Scope
+
+Two Dapr building blocks, over HTTP only, with **zero runtime dependencies** —
+every call to the sidecar is a plain `node:http` request:
+
+- **Pub/sub** — publish, subscribe (CEL routing rules, bulk delivery, raw
+  payloads, dead-letter topics), and explicit SUCCESS/RETRY/DROP
+  acknowledgement.
+- **Service invocation** — calling another app-id's method, and exposing methods
+  other apps can call.
+
+Deliberately **not** covered: state management, bindings, secrets,
+configuration, actors, workflows, distributed lock, jobs, the conversation API,
+gRPC transport, and bulk _publish_ (bulk _subscribe_ is supported; the bulk
+publish API is still alpha in Dapr 1.18.1). A flow that needs one of those can
+reach it with a `dapr-invoke` node or a core `http request` node against the
+sidecar's own API in the meantime.
+
 ## A minimal flow
 
 Import `examples/basic-pubsub.json` (menu → Import → paste or select the
@@ -84,14 +102,20 @@ See `docs/deployment.md` for worked examples.
 
 ## Tokens
 
-Two independent, optional tokens, each set either as a credential on the
+Two independent tokens, each set either as a credential on the
 `dapr-connection` node or via an environment variable:
 
-- **Dapr API token** (credential, else `DAPR_API_TOKEN`) — sent on outbound
-  calls to the sidecar, if the sidecar requires one.
-- **App API token** (credential, else `APP_API_TOKEN`) — required on inbound
-  requests from the sidecar. This authenticates the sidecar to the app; it
-  does **not** authorize a calling application.
+- **Dapr API token** (credential, else `DAPR_API_TOKEN`) — optional; sent on
+  outbound calls to the sidecar, if the sidecar requires one.
+- **App API token** (credential, else `APP_API_TOKEN`) — enforced on every
+  inbound request except `/healthz` when it is set. It authenticates the
+  sidecar to the app; it does **not** authorize a calling application.
+
+  **If it is not set, the app channel authenticates nobody**: anything that can
+  reach the listener can read the subscription list and post deliveries into
+  flows. That is allowed only on a loopback bind (and the connection node warns
+  on every deploy); a non-loopback bind without a token is rejected and the
+  listener does not start. Set it for anything past local development.
 
 ## Dapr access-control guidance
 

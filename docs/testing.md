@@ -202,18 +202,47 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
 Two-part policy:
 
 - **Package gate:** `npm audit --omit=dev` must report zero vulnerabilities. It
-  covers everything the package ships.
+  covers everything the package ships — which, since the package has **no runtime
+  dependencies at all**, is nothing. This gate can only start failing if a runtime
+  dependency is ever added.
 - **Full audit review:** `npm audit` is reviewed but need not be empty. Only the
   specific advisories listed below are permitted; any advisory not on the list —
   including a newly-disclosed one reached through `node-red` — fails the review
   until it is individually assessed and added here. `node-red` is pinned
   deliberately and never shipped.
 
-  Permitted advisories (dev-only):
-  - [GHSA-86vw-mfpg-wwv9](https://github.com/advisories/GHSA-86vw-mfpg-wwv9) —
-    `jsonata` < 2.2.0 resource exhaustion via `$toMillis`, reached only through
-    the dev-only `node-red@5.0.1` test dependency.
+  Every permitted advisory below is reached only through a **dev-only** path
+  (`node-red@5.0.1`, `eslint`, or the `npm` CLI bundled inside
+  `@node-red/registry`). None of them is in the published package, and none is
+  reachable from a flow at runtime: `node-red` here exists to run the runtime and
+  e2e tiers, and the bundled `npm` only ever runs when the Node-RED editor
+  installs a palette module, which these tests never do.
+
+  Permitted advisories (dev-only), last reviewed 2026-07-26:
+
+  | Advisory                                                                 | Package           | Reached through                                        |
+  | ------------------------------------------------------------------------ | ----------------- | ------------------------------------------------------ |
+  | [GHSA-86vw-mfpg-wwv9](https://github.com/advisories/GHSA-86vw-mfpg-wwv9) | `jsonata` < 2.2.0 | `node-red` → `@node-red/util`                          |
+  | [GHSA-v422-hmwv-36x6](https://github.com/advisories/GHSA-v422-hmwv-36x6) | `body-parser`     | `node-red` → `@node-red/editor-api`, `@node-red/nodes` |
+  | [GHSA-v2hh-gcrm-f6hx](https://github.com/advisories/GHSA-v2hh-gcrm-f6hx) | `fast-uri`        | `node-red` → `@node-red/nodes` → `ajv`                 |
+  | [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg) | `brace-expansion` | `eslint` → `minimatch`; `npm` (bundled)                |
+  | [GHSA-r292-9mhp-454m](https://github.com/advisories/GHSA-r292-9mhp-454m) | `tar`             | `node-red` → `@node-red/registry` → `npm` (bundled)    |
+  | axios advisories (10, see below)                                         | `axios` 1.16.0    | `node-red` → `node-red-admin`                          |
+
+  The `axios` advisories (GHSA-42h9-826w-cgv3, GHSA-xj6q-8x83-jv6g,
+  GHSA-pmv8-rq9r-6j72, GHSA-jqh4-m9w3-8hp9, GHSA-mmx7-hfxf-jppx,
+  GHSA-f4gw-2p7v-4548, GHSA-gcfj-64vw-6mp9, GHSA-hcpx-6fm6-wx23,
+  GHSA-7q8q-rj6j-mhjq, GHSA-mwf2-3pr3-8698) are all reached through
+  `node-red-admin`, the CLI shipped alongside `node-red`. Nothing in this
+  repository invokes `node-red-admin`, and it is never installed by a consumer of
+  this package.
+
+CI runs `npm audit --omit=dev` on every push/PR **and on a weekly schedule**
+(`.github/workflows/ci.yml`), so a newly-disclosed advisory surfaces without
+waiting for someone to open a pull request. The full-audit review above stays
+manual: it is a judgement about reachability, not something a zero-exit check can
+express.
 
 Do **not** run `npm audit fix --force` — its suggested `node-red` downgrade
-breaks the pin. Revisit when a Node-RED 5.x that bumps `jsonata` to >= 2.2.0
-ships.
+breaks the pin. Revisit the whole list when a Node-RED 5.x with refreshed
+transitives ships.

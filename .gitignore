@@ -23,5 +23,7 @@ test/e2e/screenshots/
 *.log
 .DS_Store
 
-# Process artifacts — plan reviews are working notes, not shipped docs
+# Process artifacts — plan and implementation reviews are working notes, not
+# shipped docs
 PLAN_REVIEW_*.md
+IMPLEMENTATION_REVIEW_*.md
