@@ -2,9 +2,11 @@
 
 **Goal:** Build a small, reliable Node-RED node package that publishes and receives Dapr pub/sub messages and invokes and exposes Dapr services through a Dapr sidecar.
 
-**Architecture:** Outbound pub/sub uses `@dapr/dapr`; outbound service invocation uses Node's native HTTP client so status, headers, query strings, and binary bodies are preserved. Each `dapr-connection` owns a dedicated, loopback-by-default app-channel listener managed by a process-wide registry, so the Node-RED Admin API is never exposed to Dapr and unchanged flows can be redeployed without restarting daprd.
+**Architecture:** Every outbound call to the sidecar — publish, service invocation, and the health poll — goes over `node:http` through one shared path (`lib/sidecar-http.js`), so status, headers, query strings, and binary bodies are preserved and the package carries **zero runtime dependencies**. Each `dapr-connection` owns a dedicated, loopback-by-default app-channel listener managed by a process-wide registry, so the Node-RED Admin API is never exposed to Dapr and unchanged flows can be redeployed without restarting daprd.
 
-**Tech stack:** Node.js 24+, Node-RED 5.0.1, Dapr runtime 1.18.1, `@dapr/dapr` 3.18.0, Node's `node:test`, Docker Compose, Redis, and Playwright.
+**Tech stack:** Node.js 24+, Node-RED 5.0.1, Dapr runtime 1.18.1, zero runtime dependencies, Node's `node:test`, Docker, Redis, NATS JetStream, and Playwright.
+
+> Publishing originally went through the `@dapr/dapr` SDK (3.18.0). It was removed in `5717ca6` — 140 transitive packages plus two workarounds for a single HTTP POST. Sections below are normative and describe the shipped design; §8's milestone entries are a historical record and are not (see the note there).
 
 ## 1. Confirmed Scope And Decisions
 
@@ -38,8 +40,9 @@ A Node-RED configuration node that owns one relationship with one Dapr sidecar.
   - Store a configured app API token as a password credential; fall back to `APP_API_TOKEN`.
   - Default to a 4 MiB body limit, 16 KiB aggregate header limit, 30-second request/acknowledgement timeout, 5-second drain timeout, 2-second redeploy lease grace, and 1,000 pending correlations per connection.
   - Put only the body limit and request/acknowledgement timeout in the advanced editor section. Keep header, drain, redeploy, and pending-correlation limits fixed until a demonstrated deployment need justifies more UI and configuration.
-- Omit host and port options entirely in SDK environment-endpoint mode; empty values must not override SDK environment discovery.
-- Keep HTTP keep-alive enabled and non-configurable because the Dapr SDK's HTTP agents are process-global.
+- Omit host and port options entirely in environment-endpoint mode; empty values must not override `DAPR_HTTP_ENDPOINT` discovery.
+- Keep HTTP keep-alive enabled and non-configurable: publish and invocation share Node's process-global agent through `lib/sidecar-http.js`, so it is centrally owned rather than per node instance. The health poll is the one caller that opts out (`agent: false`), so a sidecar going down leaves no pooled socket behind.
+- Bound a single HTTP body in both directions with the same configured body limit — an invoked app's response is the one body an operator does not control. Over-size is `RESPONSE_TOO_LARGE`, never `SIDECAR_UNAVAILABLE`.
 - Coordinate shared client and agent shutdown centrally. Closing one config node must not break another active config node.
 - Health-check `/v1.0/healthz/outbound` with bounded exponential backoff for node status.
 - Do not queue messages while the sidecar is unavailable. Fail the current message through `done(error)` and let the flow decide how to retry.
@@ -187,8 +190,11 @@ nodes/dapr-response.js              invocation response wrapper
 nodes/dapr-response.html            response editor and help
 lib/options.js                      config/env precedence and validation
 lib/messages.js                     content inference and CloudEvent conversion
-lib/dapr-client.js                  SDK publish client and shared lifecycle
-lib/invoke-client.js                native outbound invocation adapter
+lib/sidecar-http.js                 the one outbound HTTP request path to the sidecar
+lib/dapr-client.js                  pub/sub publish client (paths, metadata, serialization)
+lib/invoke-client.js                outbound service-invocation client
+lib/http-headers.js                 header validation/filtering shared by both directions
+lib/services.js                     registered dapr-service method table
 lib/app-channel.js                  listener registry, router, auth, limits, sockets
 lib/subscriptions.js                definitions, canonical fingerprints, generations
 lib/pending.js                      bounded first-wins ack/response correlations
@@ -219,7 +225,7 @@ The layout is a target, not permission to add empty scaffolding. Create a file o
 
 Use `node:test`, `node:assert/strict`, native mocks, and fake timers.
 
-- Validate config and environment precedence, including omission of empty SDK host/port options.
+- Validate config and environment precedence, including omission of empty host/port options.
 - Cover serialization and parsing for every supported payload type.
 - Cover CloudEvents, `data_base64`, raw payloads, malformed envelopes, and size limits.
 - Cover constant-time token comparison without exposing token values in errors.
@@ -296,6 +302,14 @@ Use pinned `nodered/node-red:5.0.1-24`, `daprio/daprd:1.18.1`, and Redis images.
   - inbound service with `dapr-response`.
 
 ## 8. Milestones And Auditable Commits
+
+> **These entries are a historical record, not current design.** They describe
+> what each milestone set out to build at the time, and Milestones 4, 8, and 9
+> were written against the `@dapr/dapr` publish path that `5717ca6` later
+> removed — so their references to an SDK adapter, `ClientRegistry`, and a
+> readiness-wait bypass describe code that no longer exists. They are left
+> as-written because a milestone log that gets edited after the fact stops being
+> an audit trail. For the shipped design read §1-§7, §10, and `AGENTS.md`.
 
 Every milestone follows red-green-refactor: add a focused failing test, run it and record the expected failure, implement the smallest passing change, run focused and affected tests, format and lint, inspect `git diff --check` and the staged diff, then commit. Never combine unrelated cleanup with a feature commit.
 
@@ -522,15 +536,15 @@ Before declaring the implementation complete:
 - A Node-RED process restart loses the in-memory record of what the existing sidecar last fetched. Until a new `/dapr/subscribe` request arrives, status must remain `waiting for sidecar discovery` rather than infer synchronization.
 - The secure loopback default requires Node-RED and daprd to share a network namespace. Other container layouts must explicitly configure and secure a non-loopback listener.
 - Bulk behavior depends on the pubsub component. Redis still validates batching between daprd and the application but does not demonstrate broker-native batching.
-- The Dapr SDK's HTTP agents are process-global. The package therefore uses one keep-alive policy and centralized ownership rather than per-node agent settings.
+- Node's HTTP agent pool is process-global. The package therefore routes every outbound call through one module (`lib/sidecar-http.js`) with a single keep-alive policy and centralized ownership, rather than per-node agent settings.
 
 ## 11. Primary References
 
 - [Node-RED: Creating Nodes](https://nodered.org/docs/creating-nodes/)
 - [Node-RED Admin API: POST /flows](https://nodered.org/docs/api/admin/methods/post/flows/)
 - [Node-RED source](https://github.com/node-red/node-red/)
-- [Dapr JavaScript SDK client](https://v1-18.docs.dapr.io/developing-applications/sdks/js/js-client/)
-- [Dapr JavaScript SDK package](https://www.npmjs.com/package/@dapr/dapr)
+- [Dapr pub/sub HTTP API](https://v1-18.docs.dapr.io/reference/api/pubsub_api/) — the endpoints this package calls directly
+- [Dapr health HTTP API](https://v1-18.docs.dapr.io/reference/api/health_api/)
 - [Dapr programmatic subscriptions](https://docs.dapr.io/developing-applications/building-blocks/pubsub/subscription-methods/)
 - [Dapr service invocation](https://docs.dapr.io/developing-applications/building-blocks/service-invocation/howto-invoke-discover-services/)
 - [Dapr app API token](https://docs.dapr.io/operations/security/app-api-token/)

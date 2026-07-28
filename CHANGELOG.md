@@ -17,6 +17,14 @@ the same change that ships behavior.
   node status in an open editor.
 - The connection editor warns, live, when the app-channel bind address is not
   loopback.
+- `examples/memorydb-pubsub-component.yaml` — a Dapr pub/sub component for AWS
+  MemoryDB, carrying the TLS, Redis ACL, and cluster-mode settings a managed
+  cluster needs, with the password supplied through Dapr's own env secret store
+  rather than the component file. Flows need no changes: the nodes never see the
+  broker, so `examples/basic-pubsub.json` works against it unchanged. See
+  `docs/deployment.md`, and `docs/testing.md` for the optional
+  `npm run test:integration:memorydb` tier that verifies it against a real
+  cluster (it skips itself without credentials).
 
 ### Changed
 

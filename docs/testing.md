@@ -1,8 +1,9 @@
 # Testing
 
-Four tiers, each with a distinct job. All use the native `node:test` runner
-(plus Playwright for the editor tier). No Mocha/Jest/Vitest/Sinon/Supertest and
-no `node-red-node-test-helper`.
+Five tiers, each with a distinct job: four hermetic ones that always run, plus an
+optional MemoryDB tier that needs a live AWS cluster and skips itself without
+one. All use the native `node:test` runner (plus Playwright for the editor tier).
+No Mocha/Jest/Vitest/Sinon/Supertest and no `node-red-node-test-helper`.
 
 ## Tiers
 
