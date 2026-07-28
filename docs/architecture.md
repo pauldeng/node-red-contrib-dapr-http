@@ -86,11 +86,24 @@ modules with no Node-RED import, so they're directly unit-testable. See
 
 Everything this package sends to the sidecar is a handful of documented HTTP
 endpoints: `POST /v1.0/publish/<pubsub>/<topic>`,
-`/v1.0/invoke/<app-id>/method/<method>`, and `GET /v1.0/healthz/outbound`. They
-all go through `lib/sidecar-http.js`, on Node's process-global keep-alive agent,
-so keep-alive is owned centrally rather than per node instance and there is
-exactly one place where deadlines, aborts, Content-Length framing, and error
-mapping are implemented.
+`/v1.0/invoke/<app-id>/method/<method>`, and `GET /v1.0/healthz/outbound`. All
+three go through `lib/sidecar-http.js`, so there is exactly one place where
+deadlines, aborts, Content-Length framing, response bounds, and error mapping
+are implemented.
+
+Publish and invoke ride Node's process-global keep-alive agent, so keep-alive is
+owned centrally rather than per node instance. The health poll is the single
+caller that opts out (`agent: false`): it runs every 10 s against a sidecar that
+may be on its way down, and a pooled socket to a dead sidecar is only something
+the next poll would have to discover is dead.
+
+Response bodies are bounded in both directions. The app channel has always
+capped what it will buffer from an inbound request; an outbound response is
+capped by that same configured limit (**Body limit** on the connection node),
+because an invoked app's response is the one body an operator does not control.
+Exceeding it tears the exchange down mid-read rather than after it, and fails as
+`RESPONSE_TOO_LARGE` — deliberately a different code from `SIDECAR_UNAVAILABLE`,
+because the sidecar did answer.
 
 Publishing used to go through the `@dapr/dapr` SDK. That cost 140 transitive
 runtime packages (including `express`, `@grpc/grpc-js`, `protobufjs`, and

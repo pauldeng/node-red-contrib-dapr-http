@@ -52,6 +52,7 @@ module.exports = function registerDaprPublish(RED) {
             token: connection.options.daprApiToken,
             timeoutMs: connection.options.limits.requestTimeoutMs,
             signal: controller.signal,
+            maxResponseBytes: connection.options.limits.bodyLimitBytes,
           },
           preparePublish(config, msg)
         );

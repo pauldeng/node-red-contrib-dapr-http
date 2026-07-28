@@ -294,6 +294,15 @@
     supplies them, keep the listener on loopback or protect it with network-level controls.
   </p>
 
+  <h3>Advanced</h3>
+  <p>
+    <b>Body limit</b> bounds a single HTTP body in <em>both</em> directions: what the app channel
+    will buffer from an inbound delivery or service call, and what an outbound publish or invocation
+    will accept back. An oversized body is rejected rather than buffered &mdash; inbound with
+    <code>413</code>, outbound as <code>RESPONSE_TOO_LARGE</code>. <b>Request timeout</b> is the
+    whole-request deadline on both sides; <code>dapr-invoke</code> can override it per message.
+  </p>
+
   <h3>Status</h3>
   <p>
     The node polls <code>/v1.0/healthz/outbound</code> and shows connected (green) or sidecar

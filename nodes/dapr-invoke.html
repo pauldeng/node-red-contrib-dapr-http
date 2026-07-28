@@ -134,6 +134,13 @@
     still in flight when the node is stopped or redeployed is aborted. On failure the node calls
     <code>done(error)</code> for a Catch node.
   </p>
+  <p>
+    The response body is capped by the connection node's <b>Body limit</b> (default 4 MB) — the
+    invoked app's reply is the one body you do not control, so an oversized one is torn down
+    mid-read instead of buffered. That failure is <code>RESPONSE_TOO_LARGE</code>, not
+    <code>SIDECAR_UNAVAILABLE</code>: the sidecar answered, so retrying will not help &mdash; raise
+    <b>Body limit</b> if you legitimately expect large replies, or have the callee return less.
+  </p>
 
   <h3>Example</h3>
   <p>Set the body and target on the message, then read the reply from the output message:</p>

@@ -148,6 +148,9 @@ module.exports = function registerDaprInvoke(RED) {
             body: encoded.body,
             timeoutMs,
             signal: controller.signal,
+            // The invoked app's response is the one body an operator does not
+            // control, so it is bounded by the same configured limit as inbound.
+            maxResponseBytes: connection.options.limits.bodyLimitBytes,
           }
         );
         msg.payload = decodeBody(result.body, result.headers['content-type']);

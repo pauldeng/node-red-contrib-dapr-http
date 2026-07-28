@@ -173,6 +173,20 @@ test('a transport failure becomes SIDECAR_UNAVAILABLE, not PUBLISH_FAILED', asyn
   );
 });
 
+test('an over-size error body is RESPONSE_TOO_LARGE, not a sidecar outage', async (t) => {
+  // The sidecar answered — it just answered with more than the configured limit.
+  // Reporting that as SIDECAR_UNAVAILABLE would send an operator looking for a
+  // sidecar that is up, and would let a Catch node retry a body that cannot
+  // shrink.
+  const sidecar = await recordingSidecar(500, 'x'.repeat(4096));
+  t.after(() => sidecar.stop());
+
+  await assert.rejects(
+    publish({ baseUrl: sidecar.baseUrl, maxResponseBytes: 1024 }, request()),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.RESPONSE_TOO_LARGE
+  );
+});
+
 test('publish rejects when it exceeds its deadline', async (t) => {
   const sidecar = await fakeSidecar((req) => req.resume()); // never responds
   t.after(() => sidecar.stop());

@@ -78,13 +78,20 @@ These are load-bearing. Each traces to a verified constraint recorded in
 - **Fail fast when the sidecar is down.** Do not queue; fail the current message
   via `done(error)` and drive status from a bounded-backoff health poll of
   `/v1.0/healthz/outbound` (outbound excludes the app channel — the right probe).
-- **HTTP-only, one outbound path.** Every outbound call (publish, service
-  invocation) goes through `lib/sidecar-http.js` on Node's process-global
-  keep-alive agent: keep-alive is centrally owned, never a per-node agent, and
-  there is one place where deadlines, aborts, and framing are correct. Do not add
-  a second HTTP client or a runtime dependency to talk to the sidecar — the wire
-  format is a handful of documented endpoints, and the previous `@dapr/dapr`
+- **HTTP-only, one outbound path.** Every outbound call — publish, service
+  invocation, and the health poll — goes through `lib/sidecar-http.js`, so there
+  is one place where deadlines, aborts, framing, and response bounds are correct.
+  Publish and invoke use Node's process-global keep-alive agent (centrally owned,
+  never a per-node agent); the health poll is the only caller that passes
+  `agent: false`, so a sidecar going down leaves no pooled socket behind. Do not
+  add a second HTTP client or a runtime dependency to talk to the sidecar — the
+  wire format is a handful of documented endpoints, and the previous `@dapr/dapr`
   dependency cost 140 transitive packages plus two workarounds for one call.
+- **Bodies are bounded in both directions.** The connection's configured body
+  limit caps what the app channel buffers from an inbound request _and_ what an
+  outbound call accepts back — an invoked app's response is the one body an
+  operator does not control. Over-size fails as `RESPONSE_TOO_LARGE`, never as
+  `SIDECAR_UNAVAILABLE`: the sidecar answered.
 - **Sidecar paths are built, never interpolated.** Any app id, method, pubsub
   name, or topic that reaches a URL is validated and percent-encoded
   (`buildInvokePath`, `publish`), so a `..` segment can never redirect a

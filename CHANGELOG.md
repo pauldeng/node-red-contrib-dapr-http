@@ -20,6 +20,18 @@ the same change that ships behavior.
 
 ### Changed
 
+- **Outbound response bodies are now bounded.** `lib/sidecar-http.js` caps what it
+  buffers from the sidecar at the connection node's **Body limit** (the same
+  setting that already bounded inbound requests) and tears the exchange down
+  mid-read when it is exceeded. Previously an invoked app could return an
+  arbitrarily large body and exhaust Node-RED's memory — the one body an operator
+  does not control was the only unbounded one. Over-size fails as the new
+  `RESPONSE_TOO_LARGE` code rather than `SIDECAR_UNAVAILABLE`, since the sidecar
+  did answer and a retry cannot help.
+- The connection node's health poll goes through `lib/sidecar-http.js` like every
+  other sidecar call instead of its own inline `http.request`, so deadlines,
+  framing, and response bounds are implemented once. It passes `agent: false` to
+  stay out of the keep-alive pool, as the inline version did.
 - **Publishing no longer uses the `@dapr/dapr` SDK.** `lib/dapr-client.js` calls
   the sidecar's HTTP pub/sub API directly through the same `node:http` path every
   other outbound call already used. The package now has **zero runtime

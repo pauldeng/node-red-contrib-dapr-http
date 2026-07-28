@@ -130,10 +130,6 @@ test('limits: header, drain, lease and pending caps are fixed and not overridabl
   assert.equal(limits.maxPending, 1000);
 });
 
-test('keep-alive is always enabled and not configurable', () => {
-  assert.equal(resolveOptions({ config: { keepAlive: false } }).keepAlive, true);
-});
-
 test('validation: non-numeric or out-of-range ports throw INVALID_OPTIONS', () => {
   for (const bad of ['abc', '0', '70000', '-1', '80.5']) {
     assert.throws(

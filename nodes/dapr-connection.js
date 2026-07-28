@@ -1,59 +1,17 @@
 'use strict';
 
-const http = require('node:http');
-
 const { resolveOptions } = require('../lib/options');
 const { acquireListener } = require('../lib/app-channel');
 const { DaprError, ErrorCodes } = require('../lib/errors');
 const { fingerprint, discoveryEntry } = require('../lib/subscriptions');
 const { PendingRegistry } = require('../lib/pending');
+const { sidecarRequest } = require('../lib/sidecar-http');
 
+const HEALTH_PATH = '/v1.0/healthz/outbound';
 const HEALTHY_INTERVAL_MS = 10000;
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30000;
 const HEALTH_TIMEOUT_MS = 2000;
-
-// Minimal GET resolving true on a 2xx response, false otherwise. Non-pooled and
-// time-bounded so a down sidecar never hangs or lingers the status poll. Sends
-// the given headers (e.g. the Dapr API token) so a token-secured sidecar does
-// not reject the probe with 401.
-function probe(url, timeoutMs, headers) {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve(value);
-    };
-    const u = new URL(url);
-    const req = http.request(
-      {
-        hostname: u.hostname,
-        port: u.port,
-        path: u.pathname,
-        method: 'GET',
-        agent: false,
-        headers,
-      },
-      (res) => {
-        res.resume();
-        finish(res.statusCode >= 200 && res.statusCode < 300);
-      }
-    );
-    const timer = setTimeout(
-      () => {
-        req.destroy();
-        finish(false);
-      },
-      Math.max(1, timeoutMs)
-    );
-    req.on('error', () => finish(false));
-    req.end();
-  });
-}
 
 module.exports = function registerDaprConnection(RED) {
   function DaprConnectionNode(config) {
@@ -82,13 +40,33 @@ module.exports = function registerDaprConnection(RED) {
       );
     }
 
-    // The base URL is validated in resolveOptions, so this is always parseable.
-    const healthUrl = `${options.outbound.baseUrl}/v1.0/healthz/outbound`;
+    // For operator-facing log lines only — the request itself is built from
+    // baseUrl + HEALTH_PATH below.
+    const healthUrl = `${options.outbound.baseUrl}${HEALTH_PATH}`;
     // Dapr requires the API token on API requests when token auth is enabled;
     // send it on the health probe so a token-secured sidecar is not seen as down.
     const healthHeaders = options.daprApiToken
       ? { 'dapr-api-token': options.daprApiToken }
       : undefined;
+
+    // Resolves true only on a clear 2xx. Goes through the one outbound path
+    // (lib/sidecar-http.js) like every other sidecar call, but opts out of the
+    // keep-alive pool: a sidecar that is going down must not leave a pooled
+    // socket behind for the next poll to inherit.
+    const probeHealth = async () => {
+      try {
+        const res = await sidecarRequest(options.outbound.baseUrl, {
+          path: HEALTH_PATH,
+          headers: healthHeaders,
+          timeoutMs: HEALTH_TIMEOUT_MS,
+          maxResponseBytes: options.limits.bodyLimitBytes,
+          agent: false,
+        });
+        return res.status >= 200 && res.status < 300;
+      } catch {
+        return false;
+      }
+    };
     let pollTimer = null;
     let backoff = INITIAL_BACKOFF_MS;
     let stopped = false;
@@ -294,7 +272,7 @@ module.exports = function registerDaprConnection(RED) {
       }
       let nextHealthy = false;
       try {
-        nextHealthy = await probe(healthUrl, HEALTH_TIMEOUT_MS, healthHeaders);
+        nextHealthy = await probeHealth();
       } catch {
         nextHealthy = false;
       }
