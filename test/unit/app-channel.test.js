@@ -482,7 +482,7 @@ test('servedFingerprint records the last fetched set and survives a reacquire', 
   assert.equal(l2.servedFingerprint(), 'fp1', 'persists across reacquire');
 });
 
-test('a removed internal route stays retryable (503), never 404, until daprd re-fetches', async (t) => {
+test('a removed internal route stays retryable (503), never 404, even after a discovery fetch', async (t) => {
   const port = await freePort();
   const lease = await acquire(t, { port });
   lease.activate({
@@ -500,12 +500,15 @@ test('a removed internal route stays retryable (503), never 404, until daprd re-
   const stale = await httpRequest(url(port, '/r'), { method: 'POST', body: '' });
   assert.equal(stale.status, 503);
 
-  // Once daprd actually fetches the new set, the placeholder is no longer
-  // needed — daprd will never call the old path again unless it restarts,
-  // which starts stale-tracking fresh.
+  // A discovery fetch must NOT clear the placeholder. The listener cannot tell
+  // daprd's own startup fetch from any other caller's — an operator's curl, a
+  // monitoring probe, or (on the untokenized loopback default) any local
+  // process. Clearing it on the wrong one turns the next delivery from a
+  // still-stale sidecar into a 404, which Dapr treats as a permanent DROP: the
+  // message is lost rather than retried.
   await httpRequest(url(port, '/dapr/subscribe'));
   const afterFetch = await httpRequest(url(port, '/r'), { method: 'POST', body: '' });
-  assert.equal(afterFetch.status, 404, 'cleared once daprd has fetched the current route set');
+  assert.equal(afterFetch.status, 503, 'still retryable after a discovery fetch');
 });
 
 test('a re-added route at the same path wins over its own stale placeholder', async (t) => {

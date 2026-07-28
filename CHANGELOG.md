@@ -40,6 +40,14 @@ the same change that ships behavior.
 
 ### Fixed
 
+- A pub/sub delivery route removed from a flow now stays retryable (503) for the
+  life of the app-channel listener, instead of being cleared the first time
+  anything fetches `/dapr/subscribe`. The listener cannot tell daprd's own
+  startup fetch from an operator's `curl` or a monitoring probe, so clearing on
+  the wrong one turned a still-stale sidecar's next delivery into a 404 — which
+  Dapr treats as a permanent DROP, losing the message rather than retrying it.
+  `docs/subscriptions.md` no longer suggests fetching that endpoint by hand, and
+  now states what the connection node's status does and does not prove.
 - Publishing with any JSON media type — `application/json; charset=utf-8`,
   `application/vnd.example+json`, or a differently-cased variant — now serializes
   object payloads as JSON. Matching the exact type string (as the SDK path also

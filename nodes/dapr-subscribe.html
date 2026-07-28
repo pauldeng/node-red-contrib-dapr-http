@@ -408,8 +408,14 @@
     routine redeploy keeps working without restarting the sidecar. Adding or removing a
     subscription, or changing pub/sub, topic, metadata, dead-letter topic, raw-payload, rules, or
     bulk subscribe, changes the subscription definition and requires a sidecar restart — the
-    connection node shows <code>restart sidecar: subscriptions changed</code> until daprd re-fetches
-    <code>/dapr/subscribe</code>.
+    connection node shows <code>restart sidecar: subscriptions changed</code> until
+    <code>/dapr/subscribe</code> is served again.
+  </p>
+  <p>
+    Restart the sidecar to clear that status. Do <em>not</em> request
+    <code>/dapr/subscribe</code> by hand to clear it: the app channel cannot tell your request from
+    daprd's, so the status goes green while daprd is still acting on the old definition. Deliveries
+    are safe either way — a removed route stays retryable rather than dropping messages.
   </p>
 
   <h3>References</h3>

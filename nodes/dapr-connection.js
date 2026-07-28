@@ -157,8 +157,13 @@ module.exports = function registerDaprConnection(RED) {
         return;
       }
       const served = node.lease.servedFingerprint();
-      // A restart is required whenever daprd has fetched a set that differs from
-      // the current one — including removing the last subscription (empty set).
+      // A restart is required whenever the set last SERVED from /dapr/subscribe
+      // differs from the current one — including removing the last subscription
+      // (empty set). "Served", not "fetched by daprd": the app channel cannot
+      // attribute a fetch to a caller, so a non-daprd fetch (an operator's curl,
+      // a probe) clears this warning too, while daprd stays stale. That is a
+      // documented operator footgun, not something this status can detect — see
+      // lib/app-channel.js and docs/subscriptions.md.
       if (served !== null && served !== desiredFingerprint) {
         if (warnedFingerprint !== desiredFingerprint) {
           warnedFingerprint = desiredFingerprint;

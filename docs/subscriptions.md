@@ -49,30 +49,48 @@ about which fields matter.
 
 ## Reading the connection node's status
 
-- **connected** (green) — the fingerprint daprd last fetched matches the
-  current desired one. No restart needed.
+- **connected** (green) — the fingerprint last served from `/dapr/subscribe`
+  matches the current desired one. No restart needed.
 - **restart sidecar: subscriptions changed** (yellow) — the desired
-  fingerprint changed since daprd last fetched `/dapr/subscribe`. Routes stay
+  fingerprint changed since `/dapr/subscribe` was last served. Routes stay
   operational where possible, but daprd is acting on stale subscription
   definitions until restarted. The warning is rate-limited, not repeated on
   every poll.
 - **waiting for sidecar discovery** (yellow) — a fresh Node-RED process with
   no observed `/dapr/subscribe` fetch yet. This is not a claim that daprd is
   out of date; it's simply that this process has no record of what daprd
-  last saw (e.g. right after a Node-RED restart). It clears when daprd (or
-  your own probe) next fetches `/dapr/subscribe`.
+  last saw (e.g. right after a Node-RED restart). It clears when something
+  next fetches `/dapr/subscribe`.
 
   **This state can persist indefinitely on a perfectly healthy system.** daprd
   fetches `/dapr/subscribe` once, at its own startup — so if Node-RED restarts
   while daprd keeps running, delivery continues working (the routes are derived
   from persisted ids and never move) but nothing re-fetches, and the status stays
-  yellow until daprd itself is next restarted. Do not alert on it as a fault, and
-  do not restart daprd just to clear it: check whether deliveries are arriving.
-  `curl` the app channel's `/dapr/subscribe` yourself if you want the status to
-  reflect the current set immediately.
+  yellow. Do not alert on it as a fault, and do not restart daprd just to clear
+  it: check whether deliveries are arriving.
 
-The warning only clears after daprd actually re-fetches `/dapr/subscribe` and
-receives the new definition — never optimistically, right after you deploy.
+The status never clears optimistically on deploy — it changes only when
+`/dapr/subscribe` is actually served. But read the next section for what that
+does and does not prove.
+
+## What the status can and cannot tell you
+
+The status tracks that **something** fetched `/dapr/subscribe`, not that
+**daprd** did. Nothing in the request identifies its caller: daprd's own startup
+fetch, a monitoring probe, and an operator's `curl` are indistinguishable, and on
+the default loopback bind with no app API token set, any local process can make
+one.
+
+So do not fetch the endpoint by hand to "refresh" the status. On a connection
+showing **restart sidecar: subscriptions changed**, a single manual fetch flips
+it to **connected** while daprd is still acting on the old subscription set, and
+nothing flips it back. You lose the one signal that told you a restart was owed.
+
+Delivery is unaffected either way: a delivery route removed from the flow stays
+retryable (503) for the life of the listener rather than 404-ing, so a
+not-yet-restarted sidecar's messages are redelivered rather than dropped. It is
+only the status that stops being truthful. If you want the status to reflect
+reality, restart daprd and let it fetch.
 
 ## Restart procedure
 
