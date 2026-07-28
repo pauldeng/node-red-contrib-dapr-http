@@ -51,24 +51,15 @@ test('subscribe helper text uses Node-RED theme colors', () => {
   assert.ok((html.match(/var\(--red-ui-secondary-text-color\)/g) || []).length >= 1);
 });
 
-test('subscribe editor keeps optional metadata blank and helper text responsive', () => {
+// As in test/unit/editor-ui.test.js, the dialog's LAYOUT is asserted in the e2e
+// tier by measuring real rendered geometry, not by matching CSS literals here.
+test('subscribe editor stores blank metadata rather than an empty JSON object', () => {
   const html = read('nodes/dapr-subscribe.html');
 
+  // Both halves of the same contract: the default is '' (an imported flow that
+  // omits the key must validate), and a stored '{}' from an older flow is
+  // blanked on open so the field does not show noise the runtime ignores.
   assert.match(html, /metadata:\s*\{\s*value:\s*''/);
   assert.match(html, /node-input-metadata'\)\.val\(\) === '\{\}'/);
   assert.match(html, /placeholder='\{"consumerID":"group-1"\}'/);
-  assert.match(html, /class="dapr-field-hint"/);
-  assert.doesNotMatch(html, /max-width:\s*450px/);
-  assert.match(html, /--dapr-label-width:\s*140px/);
-  assert.match(html, /addClass\('dapr-subscribe-tray'\)/);
-  assert.match(html, /\.red-ui-tray-body\.dapr-subscribe-tray/);
-  assert.match(html, /\.red-ui-tray-body\.dapr-subscribe-tray[\s\S]*min-width:\s*0/);
-  assert.match(html, /\.dapr-subscribe-form[\s\S]*min-width:\s*0/);
-  assert.match(html, /width:\s*calc\(100%\s*-\s*var\(--dapr-label-width\)\s*-\s*10px\)/);
-  assert.match(html, /#node-input-rules-container[\s\S]*min-width:\s*0\s*!important/);
-  assert.match(html, /\.css\('min-width', '0'\)/);
-  assert.match(html, /\.css\('width', '100%'\)/);
-  assert.match(html, /class="dapr-checkbox-copy"/);
-  assert.match(html, /class="form-row dapr-checkbox-row dapr-raw-row"/);
-  assert.match(html, /class="dapr-field-hint dapr-cel-summary"/);
 });

@@ -10,22 +10,16 @@ const readNode = (name) =>
 
 const inputById = (html, id) => html.match(new RegExp(`<input(?=[^>]*id="${id}")[^>]*>`))[0];
 
-test('connection editor gives long labels room and lets tips span the dialog', () => {
-  const html = readNode('dapr-connection');
-
-  assert.match(html, /class="dapr-config-form"/);
-  assert.match(html, /class="form-tips dapr-form-tip"/g);
-  assert.match(html, /--dapr-label-width:\s*170px/);
-  assert.match(html, /\.dapr-config-form[\s\S]*width:\s*calc\(100%\s*-\s*60px\)/);
-  assert.match(html, /addClass\('dapr-connection-tray'\)/);
-  assert.match(html, /\.red-ui-tray-body\.dapr-connection-tray/);
-  assert.match(html, /\.red-ui-tray-body\.dapr-connection-tray[\s\S]*min-width:\s*0/);
-  assert.match(html, /width:\s*calc\(100%\s*-\s*var\(--dapr-label-width\)\s*-\s*10px\)/);
-  assert.match(html, /\.dapr-form-tip[\s\S]*width:\s*auto/);
-  assert.match(html, /\.dapr-form-tip[\s\S]*max-width:\s*none/);
-  assert.match(html, /\.dapr-form-tip[\s\S]*overflow-wrap:\s*anywhere/);
-  assert.match(html, /\.dapr-form-tip[\s\S]*margin:\s*6px 0/);
-});
+// Dialog LAYOUT is deliberately not asserted here. Matching CSS literals
+// (`170px`, `calc(100% - 60px)`, `margin: 6px 0`) only proves the stylesheet
+// contains a string — it cannot show whether anything is clipped, and it fails
+// on any cosmetic tweak. The regression those assertions were written for
+// (content measuring wider than its tray wrapper, which clips with no
+// scrollbar) is asserted properly in the e2e tier: assertNoHorizontalOverflow
+// measures scrollWidth against the wrapper in a real browser, for every node,
+// across three viewports and both themes. What stays below is behavior the
+// runtime depends on — field bounds that must match lib/options.js, and the JS
+// wiring of the bind warning.
 
 test('connection numeric fields use native number inputs and unit text after the field', () => {
   const html = readNode('dapr-connection');
@@ -43,14 +37,11 @@ test('connection numeric fields use native number inputs and unit text after the
     assert.match(input, /step="1"/);
   }
 
-  assert.match(
-    html,
-    /id="node-config-input-bodyLimitMb"[\s\S]*<span class="dapr-unit-label">MB \(1-64\)<\/span>/
-  );
-  assert.match(
-    html,
-    /id="node-config-input-requestTimeoutSec"[\s\S]*<span class="dapr-unit-label">seconds \(1-300\)<\/span>/
-  );
+  // The ranges shown to an operator must be the ranges actually enforced (the
+  // min/max above, and lib/options.js's own bounds) — not the exact markup that
+  // displays them.
+  assert.match(html, /MB \(1-64\)/);
+  assert.match(html, /seconds \(1-300\)/);
 });
 
 test('invoke timeout editor is numeric and hints the default value only', () => {

@@ -107,6 +107,17 @@ test('invalid destination, metadata, or payload fails with INVALID_MESSAGE', () 
     [baseConfig, { payload: 'x', dapr: { metadata: [] } }],
     [baseConfig, {}],
     [baseConfig, { payload: 1n }],
+    // msg.dapr itself must be an object: a string or array would otherwise be
+    // read with hasOwn/property access and silently contribute nothing, so a
+    // flow that set it wrongly would publish to the configured destination
+    // believing it had overridden it.
+    [baseConfig, { payload: 'x', dapr: 'orders' }],
+    [baseConfig, { payload: 'x', dapr: [] }],
+    [baseConfig, { payload: 'x', dapr: 42 }],
+    // A non-string contentType would stringify into the header as "42" or
+    // "[object Object]" and be sent as-is.
+    [baseConfig, { payload: 'x', dapr: { contentType: 42 } }],
+    [baseConfig, { payload: 'x', dapr: { contentType: {} } }],
   ];
 
   for (const [config, msg] of invalid) {
@@ -115,6 +126,13 @@ test('invalid destination, metadata, or payload fails with INVALID_MESSAGE', () 
       (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_MESSAGE
     );
   }
+});
+
+test('a node with no metadata configured at all publishes with empty metadata', () => {
+  // The editor omits the key entirely rather than storing '{}' on a
+  // hand-authored or re-imported flow, so the unset path must not throw.
+  const request = preparePublish({ pubsubName: 'ps', topic: 't' }, { payload: 'x' });
+  assert.deepEqual(request.options.metadata, {});
 });
 
 test('a blank message override is rejected rather than silently falling back to config', () => {

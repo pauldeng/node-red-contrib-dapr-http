@@ -344,6 +344,58 @@ test('a port can be rebound immediately after the previous listener closes', asy
   assert.ok(l2);
 });
 
+test('a bind failure frees the registry key, so a retry can still succeed', async (t) => {
+  // An UNRELATED process holding the port is a different path from the
+  // registry's own DUPLICATE_LISTENER: there is no entry to find, so listen()
+  // itself fails. If the reserved key were left behind, every later attempt on
+  // that bind:port would report "already in use" even once the squatter let go —
+  // a Node-RED restart would be the only way out.
+  const port = await freePort();
+  const squatter = net.createServer();
+  await new Promise((resolve) => squatter.listen(port, BIND, resolve));
+
+  await assert.rejects(
+    acquireListener({ bindAddress: BIND, port, token: undefined, limits: limits() }),
+    (err) => {
+      assert.equal(err.code, 'EADDRINUSE');
+      assert.ok(!(err instanceof DaprError), 'a real bind error, not DUPLICATE_LISTENER');
+      return true;
+    }
+  );
+
+  await new Promise((resolve) => squatter.close(resolve));
+
+  // The key was released, so the same bind:port is acquirable again.
+  const lease = await acquire(t, { port });
+  assert.equal((await httpRequest(url(port, '/healthz'))).status, 204);
+  assert.ok(lease);
+});
+
+test('acquiring a closing listener waits for the port, then rebinds fresh', async (t) => {
+  const port = await freePort();
+  const l1 = await acquireListener({ bindAddress: BIND, port, token: undefined, limits: limits() });
+  l1.activate({ subscriptions: [{ pubsubname: 'ps', topic: 'old', route: '/old' }] });
+
+  // Release with no grace: the entry goes straight to 'closing'. Acquire while
+  // that close is still in flight — without awaiting it the rebind would race
+  // the OS releasing the port and fail EADDRINUSE.
+  l1.release({ graceMs: 0 });
+  const l2 = await acquireListener({ bindAddress: BIND, port, token: undefined, limits: limits() });
+  t.after(async () => {
+    l2.release({ graceMs: 0 });
+    await l2.whenClosed();
+  });
+
+  assert.ok(l1.isClosed(), 'the previous generation finished closing');
+  // A genuinely fresh listener, not the old entry adopted: its discovery state
+  // starts empty rather than carrying the released generation's subscriptions.
+  assert.equal(l2.servedFingerprint(), null);
+  l2.activate({ subscriptions: [] });
+  const res = await httpRequest(url(port, '/dapr/subscribe'));
+  assert.equal(res.status, 200);
+  assert.deepEqual(JSON.parse(res.text), []);
+});
+
 test('a handler that never responds is cut off with 503 at the request deadline', async (t) => {
   const port = await freePort();
   const lease = await acquire(t, { port, limits: limits({ requestTimeoutMs: 150 }) });

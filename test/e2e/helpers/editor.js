@@ -92,11 +92,26 @@ async function openConnectionDialog(page) {
 // `config: true` closes a nested config-node dialog (`node-config-dialog-*`
 // ids) opened via openConnectionDialog; otherwise a regular node dialog
 // (`node-dialog-*` ids) opened via openNodeDialog.
+// Retried for the same reason openNodeDialog is, and against the same editor
+// behavior: the canvas/tray redraws on its own schedule, and a click that lands
+// mid-redraw is swallowed — the button stays attached and no amount of waiting
+// closes it, because nothing is pending. Seen once as three failures on a fully
+// parallel local run (all three in this helper, all "waiting for
+// #node-dialog-cancel to be detached"), and not reproduced since across 54
+// stressed runs, so this is defensive: the gesture openNodeDialog already
+// retries is exactly the gesture this one performs. The count() guard keeps a
+// retry from clicking a button an earlier attempt already dismissed, which would
+// otherwise burn the whole toPass budget waiting for a detached element.
 async function closeDialog(page, { save = true, config = false } = {}) {
   const prefix = config ? '#node-config-dialog-' : '#node-dialog-';
   const selector = prefix + (save ? 'ok' : 'cancel');
-  await page.click(selector);
-  await page.waitForSelector(selector, { state: 'detached' });
+  await expect(async () => {
+    if ((await page.locator(selector).count()) === 0) {
+      return;
+    }
+    await page.locator(selector).click({ timeout: 2000 });
+    await page.waitForSelector(selector, { state: 'detached', timeout: 2000 });
+  }).toPass({ timeout: 30000 });
   await waitForTraySettled(page);
 }
 
@@ -215,6 +230,27 @@ function fullFlow({ appPort, daprPort }) {
 // assertion was written for overflowed by 250-500px.
 const OVERFLOW_TOLERANCE_PX = 20;
 
+// Text that cannot wrap is a SECOND, independent clipping mechanism, and the
+// tray-level measurement above cannot see it: a block with `width: auto` stays
+// inside its container, so its overflowing inline text never widens the tray.
+// Verified by forcing `white-space: nowrap` onto a tip — the tray-level overflow
+// above stayed at exactly 0px while the text was unreadable.
+//
+// Scoped to the prose-bearing elements this package styles, NOT every `dapr-`
+// element: a form container legitimately reports content wider than itself when
+// it holds Node-RED's own rule editableList (min-width 450px), which is the same
+// known characteristic OVERFLOW_TOLERANCE_PX above accounts for. Measuring
+// containers here would re-report that as a text bug.
+const TEXT_ELEMENT_SELECTOR = [
+  '.dapr-form-tip',
+  '.dapr-field-hint',
+  '.dapr-unit-label',
+  '.dapr-checkbox-copy',
+  '.dapr-cel-summary',
+  '.dapr-bind-warning',
+].join(', ');
+const TEXT_CLIP_TOLERANCE_PX = 2; // sub-pixel layout rounding only
+
 async function assertNoHorizontalOverflow(page) {
   const overflow = await page.evaluate(() => {
     const wrapper = document.querySelector('.red-ui-tray-body-wrapper');
@@ -225,6 +261,22 @@ async function assertNoHorizontalOverflow(page) {
     throw new Error(
       `dialog content overflows its tray by ${overflow}px — some content is clipped and unreachable`
     );
+  }
+
+  const clipped = await page.evaluate(
+    ({ selector, tolerance }) =>
+      Array.from(document.querySelectorAll(selector))
+        .filter(
+          (el) =>
+            el.getBoundingClientRect().width > 0 &&
+            el.clientWidth > 0 &&
+            el.scrollWidth - el.clientWidth > tolerance
+        )
+        .map((el) => `${el.className || el.tagName} (${el.scrollWidth}px in ${el.clientWidth}px)`),
+    { selector: TEXT_ELEMENT_SELECTOR, tolerance: TEXT_CLIP_TOLERANCE_PX }
+  );
+  if (clipped.length > 0) {
+    throw new Error(`dialog text is clipped inside its own element: ${clipped.join('; ')}`);
   }
 }
 
