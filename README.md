@@ -57,9 +57,8 @@ sidecar's own API in the meantime.
 
 Import `examples/basic-pubsub.json` (menu → Import → paste or select the
 file) for the smallest complete flow: publish a message, receive it back on
-the same topic. Set the `dapr-connection` node's Dapr host/port and app port
-first — see [Listener topology](#listener-topology). All five example flows
-are in `examples/`:
+the same topic. `examples/README.md` has the NATS JetStream + `daprd`
+quickstart. All five example flows are in `examples/`:
 
 - `basic-pubsub.json` — publish and subscribe.
 - `cel-routing.json` — subscribe with CEL routing rules.
@@ -67,11 +66,11 @@ are in `examples/`:
 - `outbound-invocation.json` — call another app-id's method.
 - `inbound-service.json` — expose a method and reply with `dapr-response`.
 
-`examples/memorydb-pubsub-component.yaml` is a Dapr **component**, not a flow:
-AWS MemoryDB as the pub/sub broker, with the TLS, Redis ACL, and cluster-mode
-settings a managed cluster needs. There is no MemoryDB example flow because the
-nodes never see the broker — `basic-pubsub.json` works against it unchanged, which
-is the point. See `docs/deployment.md`.
+`examples/nats-jetstream-pubsub-component.yaml` is the beginner pub/sub
+component. `examples/memorydb-pubsub-component.yaml` is for AWS MemoryDB
+operators. These are Dapr **components**, not flows: the nodes never see the
+broker, so `basic-pubsub.json` works against either component unchanged. See
+`docs/deployment.md`.
 
 ## NATS JetStream
 

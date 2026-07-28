@@ -1,0 +1,26 @@
+# NATS JetStream as the pub/sub broker for the example flows.
+#
+# There is deliberately no NATS-specific example FLOW: the nodes never see the
+# broker, so examples/basic-pubsub.json works unchanged. Only this Dapr component
+# and the NATS stream differ.
+#
+# Before daprd starts, NATS must be running with JetStream enabled and the
+# memory-backed stream below must already exist. For the default example flow:
+#
+#   nats-server -js
+#   nats stream add node-red-examples --subjects greetings --storage memory --defaults
+#
+# If you use cel-routing.json or bulk-acknowledgement.json, include "orders" in
+# the stream subjects too, or use a wildcard such as ">" for local development.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub # matches the "Pub/sub" field in examples/basic-pubsub.json
+spec:
+  type: pubsub.jetstream
+  version: v1
+  metadata:
+    - name: natsURL
+      value: nats://127.0.0.1:4222
+    - name: streamName
+      value: node-red-examples

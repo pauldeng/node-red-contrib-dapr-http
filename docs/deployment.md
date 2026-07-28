@@ -72,15 +72,25 @@ Either way, images are pinned by digest, not just tag — see
 ## NATS JetStream
 
 The `pubsub.jetstream` component binds to an existing stream. The stream
-must exist before the component is used. For this repository's manual
-Compose stack, run:
+must exist before the component is used. Two JetStream components ship here,
+for two different jobs — check which one you mean:
+
+| File                                                         | Component name | Stream              | For                                                                  |
+| ------------------------------------------------------------ | -------------- | ------------------- | -------------------------------------------------------------------- |
+| `examples/nats-jetstream-pubsub-component.yaml`              | `pubsub`       | `node-red-examples` | Getting started; `examples/basic-pubsub.json` runs against it as-is. |
+| `test/integration/fixtures/components/pubsub-jetstream.yaml` | `pubsub-nats`  | `manual`            | This repository's own manual Compose stack (`docker-compose.yml`).   |
+
+`examples/README.md` is the step-by-step quickstart for the first one. For the
+second — the Compose stack, which mounts the whole fixtures directory — provision
+its stream first:
 
 ```bash
 node -e "require('./test/helpers/nats').provisionStream(4222, { streamName: 'manual', subjects: ['manual.>'] }).then(() => console.log('stream ready'))"
 ```
 
-The supplied component is named `pubsub-nats`; use topics under `manual.*`
-so they match that stream.
+That component is named `pubsub-nats` (both it and the Redis one live in the same
+mounted directory, so only one can be called `pubsub`); use topics under
+`manual.*` so they match that stream's subject filter.
 
 With the pinned Dapr 1.18.1 runtime, do not use `deadLetterTopic` with NATS
 JetStream. The real integration test observes the original delivery stall
