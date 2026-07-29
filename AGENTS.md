@@ -1,8 +1,11 @@
-# node-red-contrib-dapr — Engineering Guide
+# @pauldeng/node-red-contrib-dapr-http — Engineering Guide
 
 Node-RED nodes that publish and receive Dapr pub/sub messages and invoke and
-expose Dapr services through a Dapr sidecar. HTTP over TCP only. Private,
-internal package (`"private": true`, `"license": "UNLICENSED"`).
+expose Dapr services through a Dapr sidecar. HTTP over TCP only. **Published
+publicly** to npm as `@pauldeng/node-red-contrib-dapr-http` under the MIT license,
+and listed in the Node-RED library — so the README, node help, and examples are
+consumer-facing documentation, not internal notes, and a breaking change to a
+node's config fields or `msg.dapr` contract is a breaking change for strangers.
 
 This file is the single, provider-neutral source of durable instructions for
 any engineer or coding agent working in this repository. `CLAUDE.md` imports it

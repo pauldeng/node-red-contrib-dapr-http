@@ -11,13 +11,11 @@ name: Release
 # rotate, or accidentally use locally. Provenance is attested from the same
 # identity.
 #
-# One-time owner prerequisites before the first release (deliberate decisions
-# this workflow must not make silently):
-#   1. Register this repository + `.github/workflows/release.yml` as a trusted
-#      publisher for the package on the registry.
-#   2. Remove `private: true` from package.json, and scope the name to the
-#      publishing org (e.g. @your-org/node-red-contrib-dapr) so the package stays
-#      restricted — an unscoped name on the public registry cannot be private.
+# One-time owner prerequisite before the first release, which only the npm
+# account owner can do: register this repository + `.github/workflows/release.yml`
+# as the trusted publisher for @pauldeng/node-red-contrib-dapr-http on the registry.
+# Until that exists the publish step fails to authenticate — the intended failure
+# mode, not something to work around by adding a token secret.
 
 on:
   push:

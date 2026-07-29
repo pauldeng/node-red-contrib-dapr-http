@@ -1,14 +1,35 @@
 {
-  "name": "node-red-contrib-dapr",
+  "name": "@pauldeng/node-red-contrib-dapr-http",
   "version": "0.1.0",
   "description": "Node-RED nodes for Dapr pub/sub and service invocation over the Dapr HTTP sidecar API.",
-  "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "author": {
+    "name": "Paul Deng",
+    "email": "dengpeng.cn@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pauldeng/node-red-contrib-dapr-http.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pauldeng/node-red-contrib-dapr-http/issues"
+  },
+  "homepage": "https://github.com/pauldeng/node-red-contrib-dapr-http#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "keywords": [
     "node-red",
+    "node-red-contrib",
     "dapr",
+    "daprd",
     "pubsub",
-    "service-invocation"
+    "publish-subscribe",
+    "service-invocation",
+    "cloudevents",
+    "sidecar",
+    "microservices"
   ],
   "engines": {
     "node": ">=24"

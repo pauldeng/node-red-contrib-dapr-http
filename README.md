@@ -1,8 +1,7 @@
-# node-red-contrib-dapr
+# @pauldeng/node-red-contrib-dapr-http
 
 Node-RED nodes for Dapr pub/sub and service invocation, talking to a Dapr
-sidecar over its HTTP API only. Private, internal package — not published to
-npm.
+sidecar over its HTTP API only, with zero runtime dependencies.
 
 ## Prerequisites
 
@@ -13,12 +12,13 @@ npm.
 
 ## Install
 
-This is a private, unpublished package — `npm install node-red-contrib-dapr`
-will 404. Install it from a local path instead, run from your Node-RED user
-directory (typically `~/.node-red`):
+From the Node-RED editor: **menu → Manage palette → Install**, then search for
+`dapr` and pick `@pauldeng/node-red-contrib-dapr-http`.
+
+Or from your Node-RED user directory (typically `~/.node-red`):
 
 ```bash
-npm install /path/to/node-red-contrib-dapr
+npm install @pauldeng/node-red-contrib-dapr-http
 ```
 
 Then restart Node-RED. Six of the seven nodes below appear in the palette

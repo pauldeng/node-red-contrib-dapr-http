@@ -10,8 +10,8 @@
 
 ## 1. Confirmed Scope And Decisions
 
-- Package name and initial version: `node-red-contrib-dapr` `0.1.0`.
-- Keep the package private and unlicensed in this phase: `"private": true` and `"license": "UNLICENSED"`.
+- Package name and initial version: `@pauldeng/node-red-contrib-dapr-http` `0.1.0`.
+- Publish publicly to npm under the MIT license, and list in the Node-RED library. (The package was `"private": true` / `"license": "UNLICENSED"` through Milestones 1-10; that phase ended once the implementation was complete and reviewed.)
 - Support Dapr's HTTP protocol over TCP only.
 - Unix domain sockets and gRPC are permanently outside scope.
 - Include pub/sub and service invocation in both directions.
@@ -22,7 +22,7 @@
 - Keep dependencies minimal. Use Node core APIs where they provide the required behavior.
 - Use ES6+ syntax, `const` and `let`, and `async`/`await`; prohibit `var`.
 - Add comments only around security boundaries, listener ownership, subscription generations, acknowledgement correlation, and bulk aggregation where the code is not self-explanatory.
-- Publication to npm, Node-RED Flow Library submission, release automation, bindings, state, secrets, actors, workflows, and custom telemetry are outside scope.
+- Bindings, state, secrets, actors, workflows, and custom telemetry are outside scope. (Publication to npm, Node-RED library listing, and release automation were also out of scope for Milestones 1-10, and are now in scope — see the second bullet above.)
 
 ## 2. Runtime Nodes
 

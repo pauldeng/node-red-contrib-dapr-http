@@ -66,8 +66,35 @@ workflow file, and the same identity attests provenance.
    (lint, format, unit, coverage, runtime, audit, pack) and refuses to publish if
    the tag and `package.json` version disagree.
 
-Two one-time prerequisites are the repository owner's call and are deliberately
-not pre-decided here: registering this repo + workflow as the package's trusted
-publisher, and removing `private: true` (scoping the name to the publishing org,
-since an unscoped name on the public registry cannot stay private). Until then
-the package is installed from a path — see the README.
+The package publishes publicly as `@pauldeng/node-red-contrib-dapr-http` under MIT.
+
+The name is **scoped** because Node-RED's packaging guidance says modules first
+published after 2022-01-31 "should use a scoped name". The `-http` suffix names
+the **transport**, not the feature set: HTTP-only is a permanent constraint (gRPC
+and Unix sockets are out of scope for good), whereas the supported building
+blocks could grow. A name like `-pubsub` would become a lie and force a rename,
+and renaming a published npm package means republishing, deprecating the old
+name, and every user editing their `package.json`. The feature boundary lives in
+the README's Scope section and the node help instead, where it can be corrected
+without a migration.
+
+`publishConfig.access` is `public` and **load-bearing**: npm defaults scoped
+packages to restricted, so without it the first publish would silently produce a
+private package.
+
+**One remaining one-time prerequisite, and only the npm account owner can do
+it:** on npmjs.com, register this repository plus `.github/workflows/release.yml`
+as the **trusted publisher** for `@pauldeng/node-red-contrib-dapr-http`. There is no token
+fallback by design, so until that exists the publish step fails with an
+authentication error — which is the intended failure mode, not a bug to work
+around by adding a secret.
+
+**Listing in the Node-RED library is a separate, manual step — it does not happen
+on its own.** The flow library stopped auto-indexing npm packages carrying the
+`node-red` keyword in April 2020; a submission has to be placed by hand at
+<https://flows.nodered.org/add/node> after the package exists on npm. Publishing
+alone gets you an npm listing and nothing else.
+
+The package already meets the library's stated requirements: a README describing
+what the nodes do and how to use them, a `node-red` section in `package.json`
+listing the node files, and `node-red` in `keywords`.

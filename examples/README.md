@@ -26,7 +26,7 @@ another Dapr app to call, or another caller that invokes this app.
 
    ```bash
    cd ~/.node-red
-   npm install /path/to/node-red-contrib-dapr
+   npm install @pauldeng/node-red-contrib-dapr-http
    npx node-red
    ```
 
@@ -40,7 +40,7 @@ another Dapr app to call, or another caller that invokes this app.
      --subjects greetings --storage memory --defaults
 
    mkdir -p components
-   cp /path/to/node-red-contrib-dapr/examples/nats-jetstream-pubsub-component.yaml \
+   cp ~/.node-red/node_modules/@pauldeng/node-red-contrib-dapr-http/examples/nats-jetstream-pubsub-component.yaml \
      components/pubsub.yaml
    ```
 

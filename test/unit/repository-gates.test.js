@@ -65,6 +65,37 @@ test('releases publish only from a tag, only via GitHub OIDC, never from a machi
   assert.match(release, /npm publish --provenance/);
 });
 
+test('the package is publishable to the public registry', () => {
+  const pkg = JSON.parse(read('package.json'));
+
+  // `private: true` makes `npm publish` refuse outright, so its absence is the
+  // single load-bearing fact here — asserted explicitly rather than left to be
+  // discovered by a failed release job.
+  assert.equal(pkg.private, undefined, 'private must be unset to publish');
+  // Scoped, per Node-RED's packaging guidance for modules first published after
+  // 2022-01-31 ("Packages should use a scoped name"). The "-http" suffix names the
+  // TRANSPORT, not the feature set: HTTP-only is permanent (IMPLEMENTATION_PLAN §1
+  // puts gRPC and Unix sockets permanently out of scope), whereas the supported
+  // building blocks could grow — so a "-pubsub" name would eventually be a lie and
+  // force a rename that every consumer would have to follow.
+  assert.equal(pkg.name, '@pauldeng/node-red-contrib-dapr-http');
+  // Load-bearing for a scoped name: npm defaults scoped packages to RESTRICTED,
+  // so without this the first publish would silently be a private package.
+  assert.equal(pkg.publishConfig.access, 'public');
+  assert.equal(pkg.license, 'MIT');
+  assert.match(read('LICENSE'), /MIT License/);
+  assert.doesNotMatch(read('LICENSE'), /UNLICENSED|Proprietary|All rights reserved/i);
+
+  // node-red-dev validate's P03: a published node needs somewhere to file bugs.
+  // Asserted exactly, not by substring: a bare /pauldeng\/node-red-contrib-dapr/
+  // matches the renamed repo as a prefix, so stale pre-rename URLs passed silently.
+  const REPO = 'https://github.com/pauldeng/node-red-contrib-dapr-http';
+  assert.equal(pkg.repository.url, `git+${REPO}.git`);
+  assert.equal(pkg.bugs.url, `${REPO}/issues`);
+  assert.equal(pkg.homepage, `${REPO}#readme`);
+  assert.ok(pkg.author, 'an author is required');
+});
+
 test('the package ships only runtime files, and declares itself a Node-RED package', () => {
   const pkg = JSON.parse(read('package.json'));
 

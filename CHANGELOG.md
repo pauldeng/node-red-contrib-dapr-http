@@ -9,6 +9,17 @@ the same change that ships behavior.
 
 ### Added
 
+- **The package is now published publicly** to npm as
+  `@pauldeng/node-red-contrib-dapr-http` under the **MIT** license. It was previously a
+  private, `UNLICENSED` package installable only from a local path. The name is
+  scoped, per Node-RED's guidance for modules first published after 2022-01-31,
+  and `-http` names the transport: this package speaks only Dapr's HTTP sidecar
+  API, and gRPC is permanently out of scope. `repository`, `bugs`, `homepage`,
+  and `author` are now set, which the Node-RED library and `node-red-dev
+validate` both expect, and `publishConfig.access` is `public` because npm
+  defaults scoped packages to restricted. Releases still publish only from CI via
+  GitHub OIDC — there is no npm token anywhere. Listing in the Node-RED flow
+  library is a separate manual submission; see `docs/development.md`.
 - `dapr-publish` accepts `msg.dapr.headers`, so a flow can carry request headers
   (most usefully `traceparent`) through a publish and keep one W3C trace across
   a subscribe → publish hop.
