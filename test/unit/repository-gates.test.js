@@ -103,6 +103,33 @@ test('releases publish only from a tag, only via GitHub OIDC, never from a machi
   assert.match(release, /npm publish --provenance --access public/);
 });
 
+// Delete this test together with .github/workflows/bootstrap-publish.yml, once
+// the package exists on npm and trusted publishing is configured. It passes when
+// the file is absent, so removing the workflow does not break the suite.
+test('the one-time bootstrap publish workflow cannot fire by itself', () => {
+  const file = path.resolve(__dirname, '../..', '.github/workflows/bootstrap-publish.yml');
+  if (!fs.existsSync(file)) {
+    return; // already removed — the no-token invariant is whole again
+  }
+  const bootstrap = fs.readFileSync(file, 'utf8');
+
+  // The whole risk of a temporary token path is that it stops being temporary.
+  // Manual dispatch only: no push/tag trigger, so a forgotten file still cannot
+  // publish on its own.
+  assert.match(bootstrap, /^on:\n {2}workflow_dispatch:\n/m);
+  assert.doesNotMatch(bootstrap, /^ {2}push:/m);
+  assert.match(bootstrap, /if: startsWith\(github\.ref, 'refs\/tags\/v'\)/);
+  // And it refuses to run at all once the package exists, which is exactly when
+  // OIDC becomes available and this file should have been deleted.
+  assert.match(bootstrap, /Package already exists on npm/);
+  assert.match(bootstrap, /DELETE AFTER USE/);
+
+  // The token stays confined to this file; release.yml is asserted token-free
+  // above and must remain the only path used after the bootstrap.
+  const release = read('.github/workflows/release.yml');
+  assert.doesNotMatch(release, /NPM_BOOTSTRAP_TOKEN/);
+});
+
 test('both workflows run with least privilege, and CI does not pile up runs', () => {
   const ci = read('.github/workflows/ci.yml');
   const release = read('.github/workflows/release.yml');

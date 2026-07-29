@@ -11,11 +11,17 @@ name: Release
 # rotate, or accidentally use locally. Provenance is attested from the same
 # identity.
 #
-# One-time owner prerequisite before the first release, which only the npm
-# account owner can do: register this repository + `.github/workflows/release.yml`
-# as the trusted publisher for @pauldeng/node-red-contrib-dapr-http on the registry.
-# Until that exists the publish step fails to authenticate — the intended failure
-# mode, not something to work around by adding a token secret.
+# One-time owner prerequisite, which only the npm account owner can do: register
+# this repository + `.github/workflows/release.yml` as the trusted publisher for
+# @pauldeng/node-red-contrib-dapr-http on the registry. Until that exists this
+# workflow fails to authenticate, which is the intended failure mode — do not add
+# a token secret here to get past it.
+#
+# That registration is only possible once the package exists, because npm
+# configures trusted publishing on a package's settings page. The very first
+# published version therefore comes from `.github/workflows/bootstrap-publish.yml`
+# — a temporary, manual-dispatch-only workflow that is deleted immediately
+# afterwards. See docs/development.md. This file stays token-free throughout.
 
 on:
   push:

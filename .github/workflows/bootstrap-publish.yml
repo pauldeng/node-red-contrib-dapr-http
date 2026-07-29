@@ -1,0 +1,90 @@
+name: Bootstrap publish (one-time, DELETE AFTER USE)
+
+# TEMPORARY. Delete this file, its secret, and its token once the first version
+# of the package exists on npm.
+#
+# Why it exists: npm's trusted publishing (OIDC) is configured on a PACKAGE's
+# settings page, so a package that has never been published has nowhere to
+# configure it. The first publish of a brand-new package therefore cannot use
+# OIDC — a documented bootstrap gap, not a misconfiguration. `release.yml` stays
+# pure OIDC and is untouched; this file is the whole exception, so deleting it
+# restores the no-token invariant exactly.
+#
+# Why not publish from a laptop instead: a local `npm publish` cannot attach
+# provenance, and it skips every gate below. Version 0.1.0 is the one most
+# people install; it should not be the single unattested, unverified release.
+#
+# ONE-TIME PROCEDURE (see docs/development.md for the authoritative copy):
+#   1. On npmjs.com create a GRANULAR access token:
+#        - Type: Automation (bypasses 2FA, which interactive tokens cannot)
+#        - Permissions: Read and write
+#        - Scope: the @pauldeng SCOPE, not a package — the package does not exist
+#          yet, so a package-scoped token cannot create it
+#        - Expiry: the shortest offered
+#   2. Add it as a secret named NPM_BOOTSTRAP_TOKEN on the `release` environment
+#      (environment-scoped, not repository-wide).
+#   3. Push the tag, then run this workflow manually against that tag ref.
+#   4. Immediately after it succeeds:
+#        a. delete the NPM_BOOTSTRAP_TOKEN secret,
+#        b. revoke the token on npmjs.com,
+#        c. register this repository + `.github/workflows/release.yml` as the
+#           package's trusted publisher,
+#        d. delete this file and the repository-gates assertion that references
+#           it, and commit that removal.
+#   5. Every later release goes through `release.yml` on a tag, with no token.
+#
+# This workflow is deliberately `workflow_dispatch`-only: it can never fire from
+# a push or a tag, so if step 4d is forgotten it still cannot publish by
+# accident. A repository-gates test asserts that property.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # provenance attestation; the publish itself uses the token
+
+jobs:
+  publish:
+    name: Bootstrap the first published version
+    # Tags only. workflow_dispatch can be pointed at a tag ref, and must be —
+    # publishing from a branch has no tag to check the version against.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm install -g npm@^11
+      - run: npm ci
+      # Identical gate to release.yml: the bootstrap must not be a way to ship
+      # something a normal release would have rejected.
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run test:coverage
+      - run: npm run test:runtime
+        timeout-minutes: 10
+      - run: npm audit --omit=dev
+      - run: npm pack --dry-run
+      - name: Check tag matches package version
+        run: test "v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}"
+      - name: Refuse to run once the package exists
+        # After the first publish this workflow is obsolete and must be deleted.
+        # If it is still here, fail loudly rather than re-publishing with a token
+        # when OIDC is already available.
+        run: |
+          if npm view "$(node -p 'require("./package.json").name')" version >/dev/null 2>&1; then
+            echo "::error::Package already exists on npm. Configure trusted publishing and delete this workflow."
+            exit 1
+          fi
+      # Provenance still applies: it comes from the id-token above and the
+      # GitHub-hosted runner, independent of how the publish authenticates.
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
