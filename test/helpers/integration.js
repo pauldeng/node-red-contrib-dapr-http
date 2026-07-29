@@ -244,7 +244,7 @@ async function startDaprd({
     } catch (err) {
       const logs = await dockerLogs(name);
       await dockerStop(name);
-      throw new Error(`${err.message}\n--- daprd logs ---\n${logs}`);
+      throw new Error(`${err.message}\n--- daprd logs ---\n${logs}`, { cause: err });
     }
     return name;
   };
@@ -265,7 +265,9 @@ async function startDaprd({
       name = await attempt();
     } catch (second) {
       await fsp.rm(resourcesDir, { recursive: true, force: true });
-      throw new Error(`daprd failed to start twice (port contention?): ${second.message}`);
+      throw new Error(`daprd failed to start twice (port contention?): ${second.message}`, {
+        cause: second,
+      });
     }
   }
 

@@ -270,7 +270,11 @@ module.exports = function registerDaprConnection(RED) {
       if (stopped) {
         return;
       }
-      let nextHealthy = false;
+      // No initial value: both branches below assign one, and a dead initializer
+      // hides which path actually set it. probeHealth() already resolves false on
+      // every failure, so the catch is defence in depth for this must-never-throw
+      // path rather than the expected route.
+      let nextHealthy;
       try {
         nextHealthy = await probeHealth();
       } catch {

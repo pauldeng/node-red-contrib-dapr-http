@@ -284,16 +284,23 @@ Two-part policy:
   e2e tiers, and the bundled `npm` only ever runs when the Node-RED editor
   installs a palette module, which these tests never do.
 
-  Permitted advisories (dev-only), last reviewed 2026-07-26:
+  Permitted advisories (dev-only), last reviewed 2026-07-29:
 
   | Advisory                                                                 | Package           | Reached through                                        |
   | ------------------------------------------------------------------------ | ----------------- | ------------------------------------------------------ |
   | [GHSA-86vw-mfpg-wwv9](https://github.com/advisories/GHSA-86vw-mfpg-wwv9) | `jsonata` < 2.2.0 | `node-red` → `@node-red/util`                          |
   | [GHSA-v422-hmwv-36x6](https://github.com/advisories/GHSA-v422-hmwv-36x6) | `body-parser`     | `node-red` → `@node-red/editor-api`, `@node-red/nodes` |
   | [GHSA-v2hh-gcrm-f6hx](https://github.com/advisories/GHSA-v2hh-gcrm-f6hx) | `fast-uri`        | `node-red` → `@node-red/nodes` → `ajv`                 |
-  | [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg) | `brace-expansion` | `eslint` → `minimatch`; `npm` (bundled)                |
+  | [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg) | `brace-expansion` | `npm` (bundled) only — see note below                  |
   | [GHSA-r292-9mhp-454m](https://github.com/advisories/GHSA-r292-9mhp-454m) | `tar`             | `node-red` → `@node-red/registry` → `npm` (bundled)    |
   | axios advisories (10, see below)                                         | `axios` 1.16.0    | `node-red` → `node-red-admin`                          |
+
+  `brace-expansion` reaches the tree twice but is only vulnerable once. ESLint 10
+  pulls a patched `5.0.8` through its own `minimatch`; the advisory applies solely
+  to the `5.0.7` copy bundled inside `npm` (itself reached via `node-red` →
+  `@node-red/registry`), which is why `npm audit` reports a single node under
+  `node_modules/npm/`. Under ESLint 9 both copies were vulnerable — recheck this
+  row rather than assuming it, if ESLint moves again.
 
   The `axios` advisories (GHSA-42h9-826w-cgv3, GHSA-xj6q-8x83-jv6g,
   GHSA-pmv8-rq9r-6j72, GHSA-jqh4-m9w3-8hp9, GHSA-mmx7-hfxf-jppx,
