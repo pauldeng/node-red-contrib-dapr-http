@@ -5,21 +5,32 @@ All notable changes to this package. This project follows
 `package.json` is what a consumer installs, so bump it and add an entry here in
 the same change that ships behavior.
 
-## Unreleased
+## 0.1.0 - 2026-07-29
+
+First public release, and the first version of this package published to npm at
+all. Everything below is part of it. The _Changed_ and _Fixed_ entries describe
+work done before that first publish and are kept for provenance — no earlier
+version was ever released, so none of them is a change a consumer has to migrate
+for.
 
 ### Added
 
-- **The package is now published publicly** to npm as
-  `@pauldeng/node-red-contrib-dapr-http` under the **MIT** license. It was previously a
-  private, `UNLICENSED` package installable only from a local path. The name is
-  scoped, per Node-RED's guidance for modules first published after 2022-01-31,
-  and `-http` names the transport: this package speaks only Dapr's HTTP sidecar
-  API, and gRPC is permanently out of scope. `repository`, `bugs`, `homepage`,
-  and `author` are now set, which the Node-RED library and `node-red-dev
-validate` both expect, and `publishConfig.access` is `public` because npm
-  defaults scoped packages to restricted. Releases still publish only from CI via
-  GitHub OIDC — there is no npm token anywhere. Listing in the Node-RED flow
-  library is a separate manual submission; see `docs/development.md`.
+- Seven nodes over the Dapr HTTP sidecar API: `dapr-connection`, `dapr-publish`,
+  `dapr-subscribe`, `dapr-ack`, `dapr-invoke`, `dapr-service`, and
+  `dapr-response` — with pub/sub CEL routing, bulk subscription, explicit
+  SUCCESS/RETRY/DROP acknowledgement, and service invocation in both directions.
+- Published to npm under the **MIT** license. The name is scoped, per Node-RED's
+  guidance for modules first published after 2022-01-31, and `-http` names the
+  transport: this package speaks only Dapr's HTTP sidecar API, and gRPC is
+  permanently out of scope. `publishConfig.access` is `public` because npm
+  defaults scoped packages to restricted.
+- Releases publish from CI only, never from a developer machine, with provenance
+  attested. Later releases authenticate via GitHub OIDC (npm trusted publishing)
+  with no token anywhere; this first one could not, because npm configures trusted
+  publishing on a package's own settings page and the package did not exist yet, so
+  it used a single-use scope-granular token that was revoked immediately after.
+- Listing in the Node-RED flow library is a separate manual submission, not an
+  automatic consequence of publishing; see `docs/development.md`.
 - `dapr-publish` accepts `msg.dapr.headers`, so a flow can carry request headers
   (most usefully `traceparent`) through a publish and keep one W3C trace across
   a subscribe → publish hop.
@@ -107,10 +118,3 @@ validate` both expect, and `publishConfig.access` is `public` because npm
 - The integration harness allocates daprd's internal gRPC port explicitly and
   retries once on port contention, instead of failing a test when daprd loses a
   port race and exits fatally.
-
-## 0.1.0
-
-- Initial internal release: `dapr-connection`, `dapr-publish`, `dapr-subscribe`,
-  `dapr-ack`, `dapr-invoke`, `dapr-service`, and `dapr-response` nodes over the
-  Dapr HTTP sidecar API, with pub/sub CEL routing, bulk subscription, explicit
-  acknowledgement, and service invocation in both directions.
