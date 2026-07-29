@@ -4,8 +4,10 @@ test-results/
 playwright-report/
 package-lock.json
 
-# Review working notes (gitignored) are not formatter-owned. Both families must
-# be listed: an unformatted note that only one pattern covers would otherwise
-# fail `format:check` for a file that is never committed.
+# Local working notes (gitignored) are not formatter-owned. Every pattern in
+# .gitignore's "Process artifacts" block must be listed here too: an unformatted
+# note left on one developer's disk would otherwise fail `format:check` for a file
+# that is never committed.
 PLAN_REVIEW_*.md
 IMPLEMENTATION_REVIEW_*.md
+IMPLEMENTATION_PLAN.md

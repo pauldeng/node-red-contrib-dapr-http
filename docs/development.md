@@ -49,7 +49,7 @@ Put behavior in `lib/` and keep `nodes/*.js` wrappers thin.
   tests must pass; inspect the staged diff.
 - **Milestone gate:** reaching a milestone is a hard stop. Present results and
   wait for explicit human approval before making the milestone commit and before
-  starting the next milestone. See `IMPLEMENTATION_PLAN.md` §8.
+  starting the next milestone.
 
 ## Releasing
 

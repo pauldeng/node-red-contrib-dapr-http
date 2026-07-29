@@ -74,8 +74,8 @@ test('the package is publishable to the public registry', () => {
   assert.equal(pkg.private, undefined, 'private must be unset to publish');
   // Scoped, per Node-RED's packaging guidance for modules first published after
   // 2022-01-31 ("Packages should use a scoped name"). The "-http" suffix names the
-  // TRANSPORT, not the feature set: HTTP-only is permanent (IMPLEMENTATION_PLAN §1
-  // puts gRPC and Unix sockets permanently out of scope), whereas the supported
+  // TRANSPORT, not the feature set: HTTP-only is permanent (gRPC and Unix sockets
+  // are permanently out of scope), whereas the supported
   // building blocks could grow — so a "-pubsub" name would eventually be a lie and
   // force a rename that every consumer would have to follow.
   assert.equal(pkg.name, '@pauldeng/node-red-contrib-dapr-http');

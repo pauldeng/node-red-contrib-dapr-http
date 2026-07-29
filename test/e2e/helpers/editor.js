@@ -4,7 +4,7 @@ const path = require('node:path');
 
 const { expect } = require('@playwright/test');
 
-// Three viewports required by IMPLEMENTATION_PLAN.md's e2e tier: a wide
+// Three viewports, so a dialog is checked at more than one width: a wide
 // desktop size, Node-RED's own commonly-documented minimum-comfortable size,
 // and a narrower size still wide enough for the editor's three-pane layout
 // (this project's own choice for "narrow", not a Node-RED-documented minimum).

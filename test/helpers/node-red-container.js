@@ -2,9 +2,9 @@
 
 // Same public surface as NodeRed (test/helpers/node-red.js) — start/deploy/
 // waitForHttp/stop/logText/nodeUrl — but drives the pinned real
-// nodered/node-red container image instead of a host child process, per
-// IMPLEMENTATION_PLAN.md's integration-tier requirement to use a pinned
-// Node-RED image there. The runtime tier is untouched and keeps using the
+// nodered/node-red container image instead of a host child process, so the
+// integration tier runs Node-RED from a pinned image rather than the host's
+// installed copy. The runtime tier is untouched and keeps using the
 // host-process NodeRed class.
 //
 // Networking: runs with --network host, exactly like daprd in

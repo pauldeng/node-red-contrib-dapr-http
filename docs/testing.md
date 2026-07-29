@@ -15,13 +15,10 @@ No Mocha/Jest/Vitest/Sinon/Supertest and no `node-red-node-test-helper`.
 | E2E         | `test/e2e/`                                | Editor dialogs, validation, and a full publish/subscribe + invoke/service flow.                          | Playwright + Node-RED.                       |
 | MemoryDB    | `test/integration/memorydb-pubsub.test.js` | The same chain against a real AWS MemoryDB cluster: TLS, Redis ACL auth, cluster mode.                   | **Optional** — a live cluster + VPC routing. |
 
-Tiers are introduced by the milestone that first needs them; this file grows
-with them.
-
-Visual inspection of every node's editor dialog (light/dark, multiple viewports)
-is consolidated in the E2E tier (Milestone 10). The `dapr-connection` and
-`dapr-publish` dialog checks are explicitly tracked there; the owner deferred
-the connection check from Milestone 3. Runtime tests confirm both nodes load.
+Visual inspection of every node's editor dialog (light/dark, three viewports) is
+consolidated in the E2E tier, which captures a screenshot per node per
+theme/viewport for a human to review; `dapr-connection` and `dapr-publish` are
+covered there like every other node. Runtime tests confirm each node loads.
 
 ## Running
 
@@ -117,8 +114,7 @@ per test file via raw `docker run` (not docker-compose, so files stay
 parallel-safe on dynamically allocated ports): `daprio/daprd:1.18.1`,
 `redis:7.4-alpine` (`test/helpers/integration.js`), `nats:2.14.3-alpine`
 (`test/helpers/nats.js` — JetStream only, started with `-js`; `pubsub.natsstreaming`
-is deprecated and out of scope), and — per IMPLEMENTATION_PLAN.md's
-integration-tier requirement — Node-RED itself, as the pinned
+is deprecated and out of scope), and Node-RED itself, as the pinned
 `nodered/node-red:5.0.1-24` image (`test/helpers/node-red-container.js`,
 `ContainerNodeRed`), not the host child process the runtime tier uses
 (`NodeRed`, `test/helpers/node-red.js` — unchanged, and still exactly what the

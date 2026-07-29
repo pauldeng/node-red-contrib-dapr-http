@@ -28,10 +28,17 @@ Vitest/Sinon/Supertest and no `node-red-node-test-helper`).
   `test/e2e/` — Playwright editor tests. `test/helpers/`, `test/fixtures/`.
 - `docs/*.md` — architecture, development, testing, security, deployment,
   subscription runbook.
-- `IMPLEMENTATION_PLAN.md` — the authoritative plan and milestone list.
 
-Create a file only in the milestone that first needs it. The layout is a
-target, not permission to scaffold empty files.
+Create a file only when something first needs it. The layout is a target, not
+permission to scaffold empty files.
+
+There is deliberately **no versioned design or plan document**. The original
+implementation plan and its review notes are local working notes, gitignored and
+never shipped (see `.gitignore`). They record how the package was built, which is
+history, not a contract. **This file is the contract** — anything durable belongs
+here or in `docs/`. Do not add a plan/design document to the repository, and do
+not cite one: a reference to a file a fresh clone does not contain is worse than
+no reference.
 
 ## Commands
 
@@ -55,8 +62,9 @@ Keep this list in step with `package.json`.
 
 ## Architecture invariants (do not violate)
 
-These are load-bearing. Each traces to a verified constraint recorded in
-`IMPLEMENTATION_PLAN.md`.
+These are load-bearing. Each was verified against real daprd 1.18.1 rather than
+assumed, and each states the failure it prevents — that reasoning is the
+justification, so do not relax one because it looks incidental.
 
 - **Dedicated app-channel listener.** Each `dapr-connection` owns a small
   `node:http` server for inbound Dapr traffic (subscription discovery, pub/sub
@@ -158,11 +166,12 @@ runtime tests. Target >= 90% line/function and >= 85% branch coverage on `lib/`.
 
 ## Completion criteria
 
-See `IMPLEMENTATION_PLAN.md` §9 (Completion Gate). In short: unit+coverage,
-real Node-RED black-box, real Dapr/Redis and NATS JetStream integration (including unchanged-flow
-redeploy without restarting daprd), Playwright e2e with visual inspection,
-lint + format + `git diff --check` + `npm pack --dry-run`, and confirmation that
-`AGENTS.md` is the only durable AI instruction source. Audit policy: `npm audit
+Before calling a change complete: unit+coverage, real Node-RED black-box, real
+Dapr/Redis and NATS JetStream integration (including unchanged-flow redeploy
+without restarting daprd), Playwright e2e with visual inspection of the captured
+screenshots, lint + format + `git diff --check` + `npm pack --dry-run`, and
+confirmation that `AGENTS.md` is the only durable AI instruction source and
+`CLAUDE.md` is exactly `@AGENTS.md`. Audit policy: `npm audit
 --omit=dev` must be clean; the full `npm audit` is reviewed and only the specific
 advisories explicitly listed in `docs/testing.md` are permitted — any other or
 newly-disclosed advisory fails until individually assessed.

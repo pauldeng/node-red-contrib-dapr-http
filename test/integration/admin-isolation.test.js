@@ -4,7 +4,7 @@
 // routes to RED.httpAdmin, RED.httpNode, or the editor port") holds in the
 // full real-Dapr environment, not just against the runtime tier's fake
 // sidecar — the same assertion, run once with a real daprd/Node-RED pair
-// actually wired together, per IMPLEMENTATION_PLAN.md's real-Dapr bullet list.
+// actually wired together.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');

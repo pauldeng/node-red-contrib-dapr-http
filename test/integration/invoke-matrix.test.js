@@ -1,7 +1,7 @@
 'use strict';
 
 // Expands test/integration/invoke.test.js's basic round trip into the full
-// invocation matrix IMPLEMENTATION_PLAN.md calls for: all supported verbs,
+// invocation matrix: all supported verbs,
 // query strings, headers, binary data, non-2xx responses, timeout, and
 // unknown-method 404 — all through real daprd, not the fake sidecar.
 

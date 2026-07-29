@@ -58,10 +58,8 @@ for (const theme of THEMES) {
   });
 }
 
-// Screenshots for manual visual inspection (light/dark, three viewports) —
-// IMPLEMENTATION_PLAN.md's e2e tier requirement, consolidating the
-// `dapr-connection` check deferred from Milestone 3 and the `dapr-publish`
-// check alongside every other node's dialog. Not a pass/fail assertion
+// Screenshots for manual visual inspection (light/dark, three viewports),
+// covering every node's dialog including `dapr-connection` and `dapr-publish`. Not a pass/fail assertion
 // beyond "the dialog actually opened" — a human inspects the images for
 // clipped labels, overflow, overlap, or unreadable status.
 for (const theme of THEMES) {
