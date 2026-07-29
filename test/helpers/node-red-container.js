@@ -98,8 +98,12 @@ class ContainerNodeRed {
       await fsp.chmod(this.userDir, 0o777);
 
       const nodeModules = path.join(this.userDir, 'node_modules');
-      await fsp.mkdir(nodeModules, { recursive: true });
-      await fsp.symlink(WORKSPACE, path.join(nodeModules, PKG.name), 'dir');
+      const linkPath = path.join(nodeModules, PKG.name);
+      // mkdir the link's PARENT, not just node_modules: a scoped package name
+      // ("@scope/pkg") puts the link one level deeper, and symlink() does not
+      // create intermediate directories — it fails ENOENT without the scope dir.
+      await fsp.mkdir(path.dirname(linkPath), { recursive: true });
+      await fsp.symlink(WORKSPACE, linkPath, 'dir');
 
       await fsp.writeFile(path.join(this.userDir, 'settings.js'), settingsSource(this.port));
       await fsp.writeFile(path.join(this.userDir, 'flows.json'), JSON.stringify(flows));

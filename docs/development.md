@@ -5,7 +5,8 @@ live in `AGENTS.md`; test tiers in `docs/testing.md`.
 
 ## Prerequisites
 
-- Node.js >= 24 (supported on Node 24 and 26).
+- Node.js >= 22.9 — the floor Node-RED 5.0.1 itself requires. CI runs the unit,
+  coverage, lint, format, and runtime tiers on Node 22, 24, and 26.
 - Docker (only for the integration tier — real daprd + Redis or NATS JetStream).
 
 ## Setup

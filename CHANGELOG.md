@@ -39,6 +39,13 @@ validate` both expect, and `publishConfig.access` is `public` because npm
 
 ### Changed
 
+- **The supported Node floor is now `>=22.9.0`**, down from `>=24`, matching the
+  minimum Node-RED 5.0.1 itself requires. `>=24` turned away users on Node 22.x
+  that Node-RED fully supports, for no reason the code needed — nothing in `lib/`
+  or `nodes/` uses an API newer than Node 18.11. CI now runs the unit, coverage,
+  lint, format, and runtime tiers on Node 22, 24, and 26, so the floor is tested
+  rather than merely declared, and a repository gate asserts `engines.node` and
+  the CI matrix cannot drift apart.
 - **Outbound response bodies are now bounded.** `lib/sidecar-http.js` caps what it
   buffers from the sidecar at the connection node's **Body limit** (the same
   setting that already bounded inbound requests) and tears the exchange down

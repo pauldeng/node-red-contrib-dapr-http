@@ -43,6 +43,41 @@ test('durable docs list every test tier and CI enforces cheap completion gates',
   }
 });
 
+test('CI actually tests the minimum Node version the package claims to support', () => {
+  const pkg = JSON.parse(read('package.json'));
+  const workflow = read('.github/workflows/ci.yml');
+
+  const floor = pkg.engines.node.match(/^>=\s*(\d+)/);
+  assert.ok(floor, `engines.node must be a ">=<major>" range, got ${pkg.engines.node}`);
+  const matrix = workflow.match(/node-version:\s*\[([^\]]+)\]/);
+  assert.ok(matrix, 'the unit job must declare a node-version matrix');
+  const tested = matrix[1].match(/\d+/g);
+
+  // These two drift apart silently and in both directions: lowering the floor to
+  // widen reach without adding a matrix entry advertises a Node version nothing
+  // runs, and dropping a matrix entry without raising the floor does the same.
+  // npm enforces engines at install time, so the claim is load-bearing for users.
+  assert.ok(
+    tested.includes(floor[1]),
+    `engines.node is >=${floor[1]} but CI tests only Node ${tested.join(', ')} — the declared floor must be in the matrix`
+  );
+});
+
+test('the lockfile mirrors the manifest it was generated from', () => {
+  const pkg = JSON.parse(read('package.json'));
+  const root = JSON.parse(read('package-lock.json')).packages[''];
+
+  // package-lock.json duplicates the root manifest's identity, and npm only
+  // refreshes it when something triggers a resolve — so editing package.json by
+  // hand leaves the copy stale. That drifted three times while making this
+  // package publishable (name, license, then engines), each caught by eye rather
+  // than by a gate. `npm install --package-lock-only` is the fix.
+  for (const field of ['name', 'version', 'license']) {
+    assert.equal(root[field], pkg[field], `package-lock.json root ${field} is stale`);
+  }
+  assert.deepEqual(root.engines, pkg.engines, 'package-lock.json root engines is stale');
+});
+
 test('releases publish only from a tag, only via GitHub OIDC, never from a machine login', () => {
   const release = read('.github/workflows/release.yml');
 

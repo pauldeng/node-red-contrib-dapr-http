@@ -86,8 +86,11 @@ class NodeRed {
       // way an installed contrib package is found. A symlink (not a copy) keeps
       // its requires resolving against the workspace's own node_modules.
       const nodeModules = path.join(this.userDir, 'node_modules');
-      await fsp.mkdir(nodeModules, { recursive: true });
       this._linkPath = path.join(nodeModules, PKG.name);
+      // mkdir the link's PARENT, not just node_modules: a scoped package name
+      // ("@scope/pkg") puts the link one level deeper, and symlink() does not
+      // create intermediate directories — it fails ENOENT without the scope dir.
+      await fsp.mkdir(path.dirname(this._linkPath), { recursive: true });
       await fsp.symlink(WORKSPACE, this._linkPath, 'dir');
 
       await fsp.writeFile(path.join(this.userDir, 'settings.js'), settingsSource(this.port));

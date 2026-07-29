@@ -5,7 +5,7 @@ sidecar over its HTTP API only, with zero runtime dependencies.
 
 ## Prerequisites
 
-- Node.js >= 24.
+- Node.js >= 22.9 (Node-RED 5's own minimum). Tested on 22, 24, and 26.
 - Node-RED `>=5.0.1 <6`.
 - A Dapr sidecar (`daprd`) reachable from this app, and this app reachable
   from that sidecar — see [Listener topology](#listener-topology) below.
