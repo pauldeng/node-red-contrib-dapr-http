@@ -65,10 +65,11 @@
     "test:integration:memorydb": "node --test test/integration/memorydb-pubsub.test.js",
     "test:e2e": "playwright test",
     "validate": "npx --yes node-red-dev@latest validate",
-    "lint": "eslint .",
+    "lint": "eslint . && html-validate \"nodes/*.html\"",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "lint:html": "html-validate \"nodes/*.html\""
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -77,6 +78,7 @@
     "@playwright/test": "^1.62.0",
     "eslint": "^10.8.0",
     "globals": "^17.8.0",
+    "html-validate": "^11.6.0",
     "node-red": "5.0.1",
     "prettier": "^3.9.6"
   }

@@ -62,10 +62,6 @@ jobs:
         timeout-minutes: 10
       - run: npm audit --omit=dev
       - run: npm pack --dry-run
-      # Node-RED's own packaging checks. Advisory here too — it warns about
-      # Node-RED versions this package deliberately does not support.
-      - run: npm run validate
-        continue-on-error: true
       # The tag must match the version being published, so an installed build is
       # always identifiable from its version alone.
       - name: Check tag matches package version

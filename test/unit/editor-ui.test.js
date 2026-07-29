@@ -63,6 +63,24 @@ test('response status editor uses a native number input', () => {
   assert.match(input, /step="1"/);
 });
 
+test('credential inputs opt out of browser password autofill', () => {
+  const html = readNode('dapr-connection');
+
+  // Without an autocomplete token, a browser password manager treats a Dapr API
+  // token like a site login: it offers to save it, and can autofill a saved
+  // password into the field. "off" is valid HTML but most browsers ignore it for
+  // password fields (MDN), so it does not stop either behaviour; "new-password" is
+  // the token they honour for "a secret is being set, do not fill an existing
+  // credential". html-validate's autocomplete-password rule also flags "off",
+  // which is that tool's preference rather than an HTML-validity error.
+  for (const id of ['daprApiToken', 'appApiToken']) {
+    const input = inputById(html, `node-config-input-${id}`);
+    assert.match(input, /type="password"/);
+    assert.match(input, /autocomplete="new-password"/, `${id} must opt out of autofill`);
+  }
+  assert.doesNotMatch(html, /autocomplete="(off|current-password)"/);
+});
+
 test('the connection editor wires a live non-loopback bind warning', () => {
   const html = readNode('dapr-connection');
 

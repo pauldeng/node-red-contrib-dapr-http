@@ -67,12 +67,6 @@ jobs:
       # base nor a push "before" sha.
       - run: git diff --check "${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}...HEAD"
       - run: printf '@AGENTS.md\n' | cmp -s - CLAUDE.md
-      # Node-RED's own packaging checks (naming, metadata, examples, dependency
-      # health). Advisory, not a gate: it also warns about Node-RED versions this
-      # package deliberately does not support, so a non-zero exit here is
-      # information for a human, not a reason to fail the build.
-      - run: npm run validate
-        continue-on-error: true
       - run: docker compose config --quiet
       - run: npx playwright install --with-deps chromium
       - run: npm run test:integration

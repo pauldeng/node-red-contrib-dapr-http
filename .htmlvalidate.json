@@ -1,0 +1,11 @@
+{
+  "extends": ["html-validate:recommended"],
+  "transform": {
+    "nodes/[^/]*\\.html$": "./tools/html-validate-nodered.js"
+  },
+  "rules": {
+    "no-inline-style": "off",
+    "attribute-boolean-style": "off",
+    "void-style": "off"
+  }
+}

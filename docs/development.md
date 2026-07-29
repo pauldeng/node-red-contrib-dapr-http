@@ -30,8 +30,9 @@ npm install
 | `npm run test:integration` | Real daprd + Redis/NATS JetStream Docker tests (pulls pinned images first). |
 | `npm run test:e2e`         | Playwright tests against the real Node-RED editor.                          |
 | `npm run validate`         | Node-RED's own packaging checks (`node-red-dev validate`) — advisory.       |
-| `npm run lint`             | ESLint 9 — correctness and security rules.                                  |
+| `npm run lint`             | ESLint 10 over JS + html-validate over the editor HTML.                     |
 | `npm run lint:fix`         | ESLint with autofix.                                                        |
+| `npm run lint:html`        | html-validate only, for iterating on an editor dialog.                      |
 | `npm run format`           | Prettier — write.                                                           |
 | `npm run format:check`     | Prettier — verify only (required before commits).                           |
 
@@ -104,8 +105,15 @@ alone gets you an npm listing and nothing else.
 
 The package already meets the library's stated requirements: a README describing
 what the nodes do and how to use them, a `node-red` section in `package.json`
-listing the node files, and `node-red` in `keywords`. `npm run validate` checks
-these with Node-RED's own tool; CI and the release workflow both run it with
-`continue-on-error`, because it also warns about Node-RED versions this package
-deliberately does not support (see the `node-red` range in `package.json`), so a
-non-zero exit is information for a human rather than a build failure.
+listing the node files, and `node-red` in `keywords`.
+
+`npm run validate` runs Node-RED's own `node-red-dev validate` against those
+requirements. **Run it by hand before a release, not in CI.** It is deliberately
+not a workflow step: every finding it still reports is one this package has
+assessed and accepted on purpose (the `node-red` range excludes 1.x/2.x/3.x), so
+as a `continue-on-error` step it produced no signal while downloading a 618-package
+tree containing 16 deprecated packages on every run. It stays available because
+its naming-collision, examples-per-node, and compatibility checks are worth having
+at a publish decision — a human-gated moment — and `npx` costs nothing when unused.
+The metadata it verified once is now asserted permanently by
+`test/unit/repository-gates.test.js`.
