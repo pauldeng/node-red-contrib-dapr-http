@@ -20,7 +20,8 @@
       daprPort: {
         value: '',
         validate: function (v) {
-          return isBlank(v) || (/^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 65535);
+          const s = String(isBlank(v) ? '' : v).trim();
+          return s === '' || (/^\d+$/.test(s) && Number(s) >= 1 && Number(s) <= 65535);
         },
       },
       bindAddress: { value: '127.0.0.1', required: true },
@@ -28,7 +29,8 @@
         value: '3000',
         required: true,
         validate: function (v) {
-          return /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 65535;
+          const s = String(isBlank(v) ? '' : v).trim();
+          return /^\d+$/.test(s) && Number(s) >= 1 && Number(s) <= 65535;
         },
       },
       bodyLimitMb: {

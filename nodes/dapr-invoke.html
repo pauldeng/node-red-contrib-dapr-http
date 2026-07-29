@@ -21,13 +21,29 @@
       },
       headers: {
         value: '',
+        // Mirrors lib/http-headers.js parseRequestHeaders, which the runtime
+        // applies to this same value. Checking only the JSON shape here was not
+        // enough: an illegal header name or a CRLF in a value looked valid in the
+        // editor and then failed EVERY message at runtime with INVALID_MESSAGE.
+        // The editor cannot call Node's http.validateHeaderName/Value, so the
+        // grammar is restated — RFC 9110 token for the name, and the character
+        // range Node itself accepts in a value (tab plus printable latin-1).
+        // Kept in sync by test/unit/editor-runtime-contract.test.js, which runs one
+        // table through both this function and the runtime.
         validate: function (value) {
           if (!value) {
             return true;
           }
+          const NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+          const BAD_VALUE = /[^\t -~-ÿ]/;
           try {
             const parsed = JSON.parse(value);
-            return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+            if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+              return false;
+            }
+            return Object.entries(parsed).every(
+              ([name, item]) => NAME.test(name) && !BAD_VALUE.test(String(item))
+            );
           } catch {
             return false;
           }

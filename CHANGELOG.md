@@ -5,6 +5,27 @@ All notable changes to this package. This project follows
 `package.json` is what a consumer installs, so bump it and add an entry here in
 the same change that ships behavior.
 
+## Unreleased
+
+### Fixed
+
+- **The `dapr-invoke` node's Headers field accepted values the runtime rejects.**
+  Its editor validation checked only that the JSON parsed to an object, never the
+  header names or values — so an illegal header name (`{"bad name":"x"}`) or a CRLF
+  in a value (`{"x":"a\r\nb"}`) showed the node as valid, and then failed _every_
+  message at runtime with `INVALID_MESSAGE`. The CRLF case is the header-injection
+  input `lib/http-headers.js` exists to block, and the editor gave no warning. The
+  field now applies the same rules: RFC 9110's token grammar for names, and the
+  character range Node accepts in a value.
+- `dapr-service`'s Method path rejected paths with surrounding whitespace
+  (`" /orders"`) that the runtime accepts, because the runtime trims and the editor
+  did not; and its validator returned valid for a blank path that the runtime
+  rejects. Both now match.
+- The `dapr-connection` Dapr port and App port fields rejected whitespace-padded
+  numbers (`"  5  "`) the runtime accepts. They now trim. They remain deliberately
+  stricter than the runtime in one respect — digits only, so exponent notation like
+  `1e3` is still refused for a port.
+
 ## 0.1.0 - 2026-07-29
 
 First public release, and the first version of this package published to npm at

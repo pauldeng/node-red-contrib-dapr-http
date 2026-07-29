@@ -9,8 +9,16 @@
       methodPath: {
         value: '',
         required: true,
+        // Mirrors lib/services.js buildService, which trims via requiredString and
+        // rejects blank. Not trimming here rejected " /orders" that the runtime
+        // accepts, and returning true for blank accepted what the runtime rejects.
+        // Pinned by test/unit/editor-runtime-contract.test.js.
         validate: function (value) {
-          const p = value && value.charAt(0) === '/' ? value : `/${value || ''}`;
+          const raw = String(value === undefined || value === null ? '' : value).trim();
+          if (raw === '') {
+            return false;
+          }
+          const p = raw.charAt(0) === '/' ? raw : `/${raw}`;
           if (!/^\/[A-Za-z0-9\-._~/]*$/.test(p) || p.includes('..') || p.includes('//')) {
             return false;
           }
