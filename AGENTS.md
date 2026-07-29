@@ -157,16 +157,6 @@ runtime tests. Target >= 90% line/function and >= 85% branch coverage on `lib/`.
   `NODE_AUTH_TOKEN` secret — the release identity is the workflow's own
   short-lived OIDC token. Every user-visible change gets a `CHANGELOG.md` entry,
   and the tag must match `package.json`'s version.
-  - **One dated exception, for the first published version only.** npm configures
-    trusted publishing on a package's own settings page, so a package that has
-    never been published has nowhere to configure it — the first publish of a new
-    package cannot use OIDC. `.github/workflows/bootstrap-publish.yml` covers that
-    once, with a scope-granular Automation token in an environment secret; it is
-    `workflow_dispatch`-only, refuses to run once the package exists, and runs the
-    same gate as a real release. `release.yml` is untouched and stays token-free.
-    **Deleting that workflow, its secret, and its token is part of the first
-    release, not follow-up work** — see `docs/development.md`. Once removed, the
-    invariant above is absolute again and this sub-bullet should go with it.
 - **Reaching a milestone is a hard stop.** Do not make the milestone's closing
   commit and do not start the next milestone. Present results (tests run and
   outcomes, coverage, staged diff) and wait for explicit human approval. Apply

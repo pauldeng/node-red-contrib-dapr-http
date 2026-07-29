@@ -90,47 +90,22 @@ without a migration.
 packages to restricted, so without it the first publish would silently produce a
 private package.
 
-### The first publish cannot use OIDC
+### How 0.1.0 was first published (history, not a procedure)
 
-npm configures trusted publishing on a **package's own settings page**. A package
-that has never been published has no settings page, so there is nowhere to
-register a trusted publisher — the first publish of a brand-new package cannot
-authenticate via OIDC. This is a documented bootstrap gap, not a
-misconfiguration.
+npm configures trusted publishing on a **package's own settings page**, so a
+package that has never been published has nowhere to register a trusted
+publisher — the very first publish of a new package cannot authenticate via OIDC.
 
-Publishing that first version from a laptop would avoid a token, but it cannot
-attach provenance and it skips every gate below. `0.1.0` is the version most
-people will install; it should not be the only unattested, unverified one. So the
-first release runs through `.github/workflows/bootstrap-publish.yml` instead —
-manual-dispatch only, tag-gated, same gate as a real release, and it refuses to
-run once the package exists.
+`0.1.0` was therefore published from CI using a single-use, scope-granular
+Automation token, which was revoked and deleted immediately afterwards along with
+the temporary workflow that used it. That route was chosen over publishing from a
+laptop so the first release still carried provenance and still passed the full
+gate. Trusted publishing has been registered since, so **every release from
+`0.1.1` onward uses `release.yml` and OIDC with no token anywhere** — the
+invariant in `AGENTS.md` holds without exception.
 
-**Do this once, then undo it. The undo is part of the release.**
-
-1. On npmjs.com, create a **granular** access token: type **Automation** (an
-   interactive token cannot bypass 2FA), permission **Read and write**, scoped to
-   the **`@pauldeng` scope** — not to a package, because the package does not
-   exist yet and a package-scoped token cannot create it — with the shortest
-   available expiry.
-2. Add it as a secret named `NPM_BOOTSTRAP_TOKEN` on the **`release` environment**
-   (environment-scoped, not repository-wide).
-3. Push the `v<version>` tag, then run **Bootstrap publish** manually against that
-   tag ref.
-4. Immediately after it succeeds:
-   1. delete the `NPM_BOOTSTRAP_TOKEN` secret;
-   2. revoke the token on npmjs.com;
-   3. register this repository plus `.github/workflows/release.yml` as the
-      package's **trusted publisher**;
-   4. delete `.github/workflows/bootstrap-publish.yml`, the
-      `repository-gates.test.js` test that guards it, and the exception
-      sub-bullet in `AGENTS.md`; commit that removal.
-5. Every later release goes through `release.yml` on a tag, with no token
-   anywhere.
-
-Until step 4 is done the repository contains a publish-capable credential path.
-It is bounded three ways — the workflow cannot fire from a push or tag, it fails
-outright once the package exists, and a repository gate asserts both of those —
-but bounded is not the same as absent. Finish step 4.
+Nothing here needs repeating. It is recorded because "why does the changelog say
+0.1.0 used a token?" is otherwise unanswerable from the repository alone.
 
 **Listing in the Node-RED library is a separate, manual step — it does not happen
 on its own.** The flow library stopped auto-indexing npm packages carrying the
