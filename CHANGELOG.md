@@ -5,7 +5,7 @@ All notable changes to this package. This project follows
 `package.json` is what a consumer installs, so bump it and add an entry here in
 the same change that ships behavior.
 
-## Unreleased
+## 0.1.1 - 2026-07-29
 
 ### Fixed
 
