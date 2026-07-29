@@ -97,7 +97,28 @@ test('releases publish only from a tag, only via GitHub OIDC, never from a machi
     /- name: Check tag matches package version\n\s+run: test "v\$\(node -p/,
     'the tag/version check must not be conditional'
   );
-  assert.match(release, /npm publish --provenance/);
+  // Scoped packages default to RESTRICTED. publishConfig.access is the primary
+  // guard; --access public is the second, because a silently-private first
+  // publish looks like success and is awkward to undo.
+  assert.match(release, /npm publish --provenance --access public/);
+});
+
+test('both workflows run with least privilege, and CI does not pile up runs', () => {
+  const ci = read('.github/workflows/ci.yml');
+  const release = read('.github/workflows/release.yml');
+
+  // Neither workflow writes to the repository. Declaring the token scope keeps a
+  // future step from inheriting write access it never needed.
+  assert.match(ci, /^permissions:\n {2}contents: read$/m);
+  // Only the release workflow may mint an OIDC identity, and only for publishing.
+  // Matched as a YAML key, not as a word: ci.yml's own comment explains why it
+  // has no such permission, and a bare /id-token/ would match that prose — the
+  // same trap the NPM_TOKEN assertion above sidesteps by stripping comments.
+  assert.doesNotMatch(ci, /^\s*id-token:/m);
+  assert.match(release, /^\s*id-token: write/m);
+  // Superseded pushes are cancelled rather than paid for twice — this workflow
+  // runs Docker and Playwright tiers, so a duplicate run is expensive.
+  assert.match(ci, /concurrency:\n {2}group:[^\n]*\n {2}cancel-in-progress: true/);
 });
 
 test('the package is publishable to the public registry', () => {

@@ -64,6 +64,7 @@
     "test:integration": "node --test --test-concurrency=1 \"test/integration/**/*.test.js\"",
     "test:integration:memorydb": "node --test test/integration/memorydb-pubsub.test.js",
     "test:e2e": "playwright test",
+    "validate": "npx --yes node-red-dev@latest validate",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

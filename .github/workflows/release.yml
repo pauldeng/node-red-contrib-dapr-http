@@ -35,12 +35,20 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Add a required reviewer to this environment in repository settings to gate
+    # publishing behind a manual approval. GitHub creates the environment on first
+    # use with no protection rules, so naming it here changes nothing until an
+    # owner configures it — it makes the approval gate available, not mandatory.
+    environment: release
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'
+          # Writes the .npmrc that points publishing at the public registry, so it
+          # cannot inherit a different one from the runner.
+          registry-url: 'https://registry.npmjs.org'
       # Trusted publishing (OIDC token exchange) requires npm >= 11.5.1.
       - run: npm install -g npm@^11
       - run: npm ci
@@ -54,10 +62,16 @@ jobs:
         timeout-minutes: 10
       - run: npm audit --omit=dev
       - run: npm pack --dry-run
+      # Node-RED's own packaging checks. Advisory here too — it warns about
+      # Node-RED versions this package deliberately does not support.
+      - run: npm run validate
+        continue-on-error: true
       # The tag must match the version being published, so an installed build is
       # always identifiable from its version alone.
       - name: Check tag matches package version
         run: test "v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}"
       # No token env var by design — npm exchanges the OIDC id-token above for a
-      # short-lived publish credential.
-      - run: npm publish --provenance
+      # short-lived publish credential. --access public is belt-and-braces
+      # alongside publishConfig: npm defaults a SCOPED package to restricted, and
+      # a silently-private first publish is the failure worth two guards.
+      - run: npm publish --provenance --access public

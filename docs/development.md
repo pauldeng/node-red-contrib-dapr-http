@@ -24,6 +24,7 @@ npm install
 | `npm run test:runtime`     | Real Node-RED child-process harness tests.                                  |
 | `npm run test:integration` | Real daprd + Redis/NATS JetStream Docker tests (pulls pinned images first). |
 | `npm run test:e2e`         | Playwright tests against the real Node-RED editor.                          |
+| `npm run validate`         | Node-RED's own packaging checks (`node-red-dev validate`) — advisory.       |
 | `npm run lint`             | ESLint 9 — correctness and security rules.                                  |
 | `npm run lint:fix`         | ESLint with autofix.                                                        |
 | `npm run format`           | Prettier — write.                                                           |
@@ -98,4 +99,8 @@ alone gets you an npm listing and nothing else.
 
 The package already meets the library's stated requirements: a README describing
 what the nodes do and how to use them, a `node-red` section in `package.json`
-listing the node files, and `node-red` in `keywords`.
+listing the node files, and `node-red` in `keywords`. `npm run validate` checks
+these with Node-RED's own tool; CI and the release workflow both run it with
+`continue-on-error`, because it also warns about Node-RED versions this package
+deliberately does not support (see the `node-red` range in `package.json`), so a
+non-zero exit is information for a human rather than a build failure.

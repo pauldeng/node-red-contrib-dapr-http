@@ -10,6 +10,19 @@ on:
   schedule:
     - cron: '17 6 * * 1'
 
+# Least privilege: nothing here writes to the repository, so the default
+# GITHUB_TOKEN scope is narrowed to reading contents. Publishing is a separate
+# workflow with its own explicit id-token permission.
+permissions:
+  contents: read
+
+# One in-flight run per ref. Pushing twice to a branch cancels the first run
+# rather than paying for two full Docker/Playwright tiers on a superseded commit.
+# Never keyed on the default branch alone, so main's runs still queue normally.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unit:
     name: Unit/coverage/lint/format (Node ${{ matrix.node-version }})
@@ -22,8 +35,8 @@ jobs:
         # test that asserts these two stay in step.
         node-version: ['22', '24', '26']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
@@ -40,10 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'
@@ -54,6 +67,12 @@ jobs:
       # base nor a push "before" sha.
       - run: git diff --check "${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}...HEAD"
       - run: printf '@AGENTS.md\n' | cmp -s - CLAUDE.md
+      # Node-RED's own packaging checks (naming, metadata, examples, dependency
+      # health). Advisory, not a gate: it also warns about Node-RED versions this
+      # package deliberately does not support, so a non-zero exit here is
+      # information for a human, not a reason to fail the build.
+      - run: npm run validate
+        continue-on-error: true
       - run: docker compose config --quiet
       - run: npx playwright install --with-deps chromium
       - run: npm run test:integration
@@ -61,7 +80,7 @@ jobs:
       - run: npm run test:e2e
         timeout-minutes: 6
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-screenshots
           path: test/e2e/screenshots/
@@ -71,7 +90,7 @@ jobs:
       # A timing failure in this tier can be hard to reproduce; without the trace
       # the one occurrence CI catches is not diagnosable after the fact.
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-traces
           path: test-results/
