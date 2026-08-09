@@ -3,7 +3,7 @@
 const js = require('@eslint/js');
 const globals = require('globals');
 
-// Flat config (ESLint 9). Correctness- and security-sensitive rules only —
+// Flat config (ESLint 10). Correctness- and security-sensitive rules only —
 // formatting is owned by Prettier, so no stylistic rules live here.
 module.exports = [
   {

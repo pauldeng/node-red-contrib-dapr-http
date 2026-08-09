@@ -104,8 +104,8 @@ Two things this tier learned the hard way, both encoded in
   order, so the cleanup hook is registered last, and it verifies the keys are
   actually gone instead of swallowing the error.
 
-The runtime harness (`test/helpers/node-red.js`) drives a real `node-red@5.0.1`
-process in a throwaway user directory with this package symlinked into its
+The runtime harness (`test/helpers/node-red.js`) drives the package.json-pinned
+`node-red` process in a throwaway user directory with this package symlinked into its
 `node_modules`, deploys flows over the Admin API, and observes behavior over
 HTTP. A fake Dapr HTTP sidecar (`test/helpers/fake-dapr.js`) stands in for daprd.
 

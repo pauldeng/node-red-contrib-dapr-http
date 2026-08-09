@@ -11,7 +11,7 @@ const MiB = 1024 * 1024;
 test('outbound: env mode when neither host nor port is configured', () => {
   const opts = resolveOptions({ config: {}, credentials: {}, env: {} });
   assert.equal(opts.outbound.mode, 'env');
-  assert.equal(opts.outbound.baseUrl, 'http://127.0.0.1:3500'); // SDK default
+  assert.equal(opts.outbound.baseUrl, 'http://127.0.0.1:3500'); // Dapr HTTP default
 });
 
 test('outbound: env mode adopts DAPR_HTTP_ENDPOINT as the base URL', () => {
