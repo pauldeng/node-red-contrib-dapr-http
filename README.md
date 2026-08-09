@@ -1,7 +1,7 @@
 # @pauldeng/node-red-contrib-dapr-http
 
 Node-RED nodes for Dapr pub/sub and service invocation, talking to a Dapr
-sidecar over its HTTP API only, with zero runtime dependencies.
+sidecar over its HTTP API only, with optional first-party OpenTelemetry tracing.
 
 ## Prerequisites
 
@@ -37,8 +37,9 @@ node's own dialog rather than dragged from the palette.
 
 ## Scope
 
-Two Dapr building blocks, over HTTP only, with **zero runtime dependencies** —
-every call to the sidecar is a plain `node:http` request:
+Two Dapr building blocks, over HTTP only. Every call to the sidecar is a plain
+`node:http` request; the only runtime dependencies are the pinned official
+OpenTelemetry packages used by optional tracing:
 
 - **Pub/sub** — publish, subscribe (CEL routing rules, bulk delivery, raw
   payloads, dead-letter topics), and explicit SUCCESS/RETRY/DROP
@@ -52,6 +53,20 @@ gRPC transport, and bulk _publish_ (bulk _subscribe_ is supported; the bulk
 publish API is still alpha in Dapr 1.18.1). A flow that needs one of those can
 reach it with a `dapr-invoke` node or a core `http request` node against the
 sidecar's own API in the meantime.
+
+## OpenTelemetry tracing
+
+Tracing is disabled by default. Enable **Tracing** on any `dapr-connection` to
+export Dapr publish, subscribe, invoke, and service boundary spans plus spans
+for the Node-RED nodes traversed by each message. The integration propagates
+W3C `traceparent` and `tracestate` automatically and uses standard `OTEL_*`
+environment variables for service identity, the OTLP/HTTP collector endpoint,
+authentication, and sampling. If Node-RED already owns a global OpenTelemetry
+provider, the nodes reuse it without replacing or shutting it down.
+
+Export is batched and off the message path; an unavailable collector never
+changes message delivery. See [Telemetry](docs/architecture.md#telemetry) for
+the lifecycle and span model.
 
 ## A minimal flow
 

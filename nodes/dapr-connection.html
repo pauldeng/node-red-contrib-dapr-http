@@ -55,6 +55,7 @@
           return Number.isFinite(n) && n >= 1 && n <= 300;
         },
       },
+      tracingEnabled: { value: false },
     },
     credentials: {
       daprApiToken: { type: 'password' },
@@ -268,6 +269,23 @@
       />
       <span class="dapr-unit-label">seconds (1-300)</span>
     </div>
+
+    <h4 style="margin-bottom:0">Tracing (optional)</h4>
+    <div class="form-tips dapr-form-tip">
+      Configured entirely through standard OpenTelemetry environment variables
+      (<code>OTEL_SERVICE_NAME</code>, <code>OTEL_EXPORTER_OTLP_ENDPOINT</code>,
+      <code>OTEL_TRACES_SAMPLER*</code>, ...). Shared by every connection that enables it &mdash;
+      enabling on one is enough for the whole process.
+    </div>
+    <div class="form-row">
+      <label for="node-config-input-tracingEnabled"><i class="fa fa-share-alt"></i> Tracing</label>
+      <input
+        type="checkbox"
+        id="node-config-input-tracingEnabled"
+        style="display:inline-block; width:auto; vertical-align:middle;"
+      />
+      <span class="dapr-unit-label">Export OpenTelemetry traces (OTLP/HTTP)</span>
+    </div>
   </div>
 </script>
 
@@ -313,6 +331,24 @@
     will accept back. An oversized body is rejected rather than buffered &mdash; inbound with
     <code>413</code>, outbound as <code>RESPONSE_TOO_LARGE</code>. <b>Request timeout</b> is the
     whole-request deadline on both sides; <code>dapr-invoke</code> can override it per message.
+  </p>
+
+  <h3>Tracing</h3>
+  <p>
+    Disabled by default. Enabling it on any one <code>dapr-connection</code> activates one
+    process-wide OpenTelemetry tracer shared by every connection and node &mdash; there is nothing
+    to configure per connection. Service identity, the OTLP endpoint, exporter authentication, and
+    sampling all come from the standard <code>OTEL_*</code> environment variables; unset, sampling
+    defaults to <code>parentbased_traceidratio</code> at <code>0.1</code>. Publish, invoke,
+    subscribe, and service nodes extract and inject the W3C <code>traceparent</code>/
+    <code>tracestate</code> headers automatically once tracing is enabled anywhere in the process.
+    If Node-RED already has an application-owned OpenTelemetry provider, this integration reuses it
+    and does not replace or shut it down.
+  </p>
+  <p>
+    A stopped or unreachable OTLP collector never fails, delays, or retries a message &mdash; export
+    happens off the message path, and a failed export is only ever logged. Disabling tracing again
+    leaves every other behavior, and the public <code>msg.dapr</code> contract, unchanged.
   </p>
 
   <h3>Status</h3>

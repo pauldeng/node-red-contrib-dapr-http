@@ -442,6 +442,14 @@
     <li><a href="https://github.com/google/cel-spec" target="_blank">CEL language spec</a></li>
   </ul>
 
+  <h3>Trace context</h3>
+  <p>
+    When the connection's <b>Tracing</b> checkbox is enabled, this node extracts the delivery's W3C
+    <code>traceparent</code>/<code>tracestate</code> (from the request headers for a single
+    delivery, or from each entry's CloudEvent for a bulk one &mdash; bulk has no per-message HTTP
+    headers) and creates a consumer span as its child automatically.
+  </p>
+
   <h3>Example</h3>
   <p>
     With Ack mode set to Manual, decide the outcome in a downstream Function node and finish with a

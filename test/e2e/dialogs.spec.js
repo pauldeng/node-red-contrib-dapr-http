@@ -89,6 +89,12 @@ for (const theme of THEMES) {
       await page.screenshot({
         path: screenshotPath(`dapr-connection-${theme}-${viewport.name}`),
       });
+      const tracing = page.locator('#node-config-input-tracingEnabled');
+      await tracing.scrollIntoViewIfNeeded();
+      await expect(tracing).toBeVisible();
+      await page.screenshot({
+        path: screenshotPath(`dapr-connection-tracing-${theme}-${viewport.name}`),
+      });
       await closeDialog(page, { save: false, config: true });
       await closeDialog(page, { save: false });
     });

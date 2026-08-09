@@ -148,9 +148,11 @@
   </p>
   <h3>Trace context</h3>
   <p>
-    A delivery arrives with the sidecar's own request headers in
-    <code>msg.dapr.metadata</code>, including <code>traceparent</code>. Forward it explicitly to
-    keep one trace across the hop:
+    When the connection's <b>Tracing</b> checkbox is enabled, this node creates a producer span and
+    injects the current W3C <code>traceparent</code>/<code>tracestate</code> into the publish
+    request automatically &mdash; nothing to set on the message. With tracing disabled, a delivery
+    still arrives with the sidecar's own request headers in <code>msg.dapr.metadata</code>,
+    including <code>traceparent</code>; forward it explicitly to keep one trace across the hop:
   </p>
   <pre>
 msg.dapr = { headers: { traceparent: msg.dapr.metadata.traceparent } };

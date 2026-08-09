@@ -96,6 +96,13 @@
     deployment, rely on loopback binding and network-level controls instead.
   </p>
 
+  <h3>Trace context</h3>
+  <p>
+    When the connection's <b>Tracing</b> checkbox is enabled, this node extracts the caller's W3C
+    <code>traceparent</code>/<code>tracestate</code> from the request and creates a server span as
+    its child automatically &mdash; nothing to read from the message.
+  </p>
+
   <h3>Example</h3>
   <p>
     Wire <code>dapr service</code> &rarr; a Function &rarr; <code>dapr response</code>. In the

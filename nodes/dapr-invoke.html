@@ -158,6 +158,13 @@
     <b>Body limit</b> if you legitimately expect large replies, or have the callee return less.
   </p>
 
+  <h3>Trace context</h3>
+  <p>
+    When the connection's <b>Tracing</b> checkbox is enabled, this node creates a client span and
+    injects the current W3C <code>traceparent</code>/<code>tracestate</code> into the invocation
+    request automatically &mdash; nothing to set on the message.
+  </p>
+
   <h3>Example</h3>
   <p>Set the body and target on the message, then read the reply from the output message:</p>
   <pre>

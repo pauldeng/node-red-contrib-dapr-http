@@ -32,7 +32,7 @@ npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
 
 `npm run test:integration` first runs `pretest:integration`
-(`test/helpers/pull-images.js`), which pre-pulls all four pinned images. A
+(`test/helpers/pull-images.js`), which pre-pulls all five pinned images. A
 cold pull can take minutes on a fresh runner — far longer than a single
 integration test's own timeout, which includes its setup — so pulling happens
 once, up front, outside any individual test's clock, not lazily on whichever
@@ -114,13 +114,18 @@ per test file via raw `docker run` (not docker-compose, so files stay
 parallel-safe on dynamically allocated ports): `daprio/daprd:1.18.1`,
 `redis:7.4-alpine` (`test/helpers/integration.js`), `nats:2.14.3-alpine`
 (`test/helpers/nats.js` — JetStream only, started with `-js`; `pubsub.natsstreaming`
-is deprecated and out of scope), and Node-RED itself, as the pinned
+is deprecated and out of scope), Node-RED itself, as the pinned
 `nodered/node-red:5.0.1-24` image (`test/helpers/node-red-container.js`,
 `ContainerNodeRed`), not the host child process the runtime tier uses
 (`NodeRed`, `test/helpers/node-red.js` — unchanged, and still exactly what the
-runtime tier runs). All four images are pinned by digest, not just tag; see
-`test/helpers/docker.js` (the shared `execFileP`/`ensureImage` plumbing every
-container helper uses) for the re-pin procedure.
+runtime tier runs), and `otel/opentelemetry-collector-contrib:0.158.0`
+(`test/helpers/otel-collector.js`) for the telemetry integration test —
+configured with an OTLP/HTTP receiver and a file exporter on a host-mounted
+temp directory, so that test asserts on the exported spans directly instead
+of a tracing backend or console-log scraping. All five images are pinned by
+digest, not just tag; see `test/helpers/docker.js` (the shared
+`execFileP`/`ensureImage` plumbing every container helper uses) for the
+re-pin procedure.
 
 `startDaprd()` (`test/helpers/integration.js`) is broker-agnostic: `redisPort`
 is optional, and a `components` array accepts any pre-rendered Component YAML
@@ -268,9 +273,13 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
 Two-part policy:
 
 - **Package gate:** `npm audit --omit=dev` must report zero vulnerabilities. It
-  covers everything the package ships — which, since the package has **no runtime
-  dependencies at all**, is nothing. This gate can only start failing if a runtime
-  dependency is ever added.
+  covers everything the package ships: the official OpenTelemetry packages
+  (`@opentelemetry/api`, `sdk-trace-node`, `exporter-trace-otlp-http`,
+  `resources` — see `AGENTS.md`'s "Stack (pinned)" for why runtime
+  dependencies are pinned and deliberately minimal here, not zero) and
+  nothing else. Zero vulnerabilities in that tree as of this milestone;
+  re-verify whenever those versions move, the same as any other pinned
+  dependency.
 - **Full audit review:** `npm audit` is reviewed but need not be empty. Only the
   specific advisories listed below are permitted; any advisory not on the list —
   including a newly-disclosed one reached through `node-red` — fails the review

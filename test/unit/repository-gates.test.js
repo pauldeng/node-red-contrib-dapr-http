@@ -154,6 +154,7 @@ test('the package is publishable to the public registry', () => {
 
 test('the package ships only runtime files, and declares itself a Node-RED package', () => {
   const pkg = JSON.parse(read('package.json'));
+  const readme = read('README.md');
 
   // No test suite, plan, review note, or CI/tooling config in the tarball.
   assert.deepEqual(pkg.files, [
@@ -167,8 +168,25 @@ test('the package ships only runtime files, and declares itself a Node-RED packa
   ]);
   // Node-RED's own packaging guidance requires this keyword.
   assert.ok(pkg.keywords.includes('node-red'));
-  // Zero runtime dependencies: everything outbound speaks node:http directly.
-  assert.equal(pkg.dependencies, undefined);
+  // Runtime dependencies are pinned and deliberately minimal, not zero (see
+  // AGENTS.md's "Stack (pinned)"): only the official OpenTelemetry packages
+  // this package's own optional tracing integration needs. Every call to the
+  // sidecar itself still goes through lib/sidecar-http.js with no HTTP
+  // client of its own. Asserting the exact set, not just "some dependencies
+  // exist", so an unapproved addition fails this test loudly rather than
+  // slipping in silently — any new one needs the maintainer's explicit
+  // approval before landing here.
+  assert.deepEqual(Object.keys(pkg.dependencies).sort(), [
+    '@opentelemetry/api',
+    '@opentelemetry/exporter-trace-otlp-http',
+    '@opentelemetry/resources',
+    '@opentelemetry/sdk-trace-node',
+  ]);
+  for (const [name, version] of Object.entries(pkg.dependencies)) {
+    assert.match(version, /^\d+\.\d+\.\d+$/, `${name} must be pinned exactly`);
+  }
+  assert.doesNotMatch(readme, /zero runtime dependencies/i);
+  assert.match(readme, /OpenTelemetry/);
   for (const name of ['LICENSE', 'CHANGELOG.md']) {
     assert.ok(read(name).length > 0, `${name} must exist and be non-empty`);
   }
