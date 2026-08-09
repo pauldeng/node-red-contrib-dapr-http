@@ -75,11 +75,11 @@
     "@eslint/js": "^10.0.1",
     "@nats-io/jetstream": "3.4.0",
     "@nats-io/transport-node": "3.4.0",
-    "@playwright/test": "^1.62.0",
-    "eslint": "^10.8.0",
-    "globals": "^17.8.0",
-    "html-validate": "^11.6.0",
-    "node-red": "5.0.1",
+    "@playwright/test": "^1.62.1",
+    "eslint": "^10.8.1",
+    "globals": "^17.9.0",
+    "html-validate": "^11.6.2",
+    "node-red": "5.0.4",
     "prettier": "^3.9.6"
   }
 }
