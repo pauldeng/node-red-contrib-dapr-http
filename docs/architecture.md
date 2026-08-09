@@ -76,6 +76,7 @@ lib/subscriptions.js       subscription definitions, canonical fingerprints, gen
 lib/services.js            registered dapr-service method table
 lib/pending.js             bounded first-wins ack/response correlation
 lib/errors.js              stable internal error types and safe (no-stack-trace) messages
+lib/telemetry.js           OpenTelemetry provider lifecycle, boundary spans, flow-span hooks
 ```
 
 `nodes/*.js` files are thin Node-RED wrappers; behavior lives in `lib/` as
@@ -110,7 +111,72 @@ runtime packages (including `express`, `@grpc/grpc-js`, `protobufjs`, and
 `node-fetch@2`) for a single call, plus a private-API poke to skip the SDK's
 readiness wait and a truthy-wrapper workaround for its falsy-body handling — and
 it made every SDK bump a re-verification exercise against real `daprd`. Calling
-the endpoint directly removed all of it: the package now has **zero runtime
-dependencies**. The wire format is pinned by the runtime tier (exact bodies,
-headers, and query parameters against a fake sidecar) and by the integration
-tier (the same publishes against real `daprd`).
+the endpoint directly removed all of it. The wire format is pinned by the
+runtime tier (exact bodies, headers, and query parameters against a fake
+sidecar) and by the integration tier (the same publishes against real
+`daprd`).
+
+This package's own runtime dependencies are the official OpenTelemetry
+packages (see "Telemetry" below) — pinned and deliberately minimal, not zero:
+see `AGENTS.md`'s "Stack (pinned)" for the policy. Talking to the sidecar
+itself is unaffected: every publish, invoke, and health-poll call still goes
+through `lib/sidecar-http.js` alone, with no HTTP client of its own.
+
+## Telemetry
+
+Opt-in, disabled by default, and process-wide once any one `dapr-connection`
+enables it — there is nothing to configure per connection (`lib/telemetry.js`).
+Env-var driven throughout, matching the standard OpenTelemetry SDK contract
+(`OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_TRACES_SAMPLER*`,
+...), so this package adds no configuration surface of its own beyond the one
+checkbox.
+
+If Node-RED was started with an application-owned OpenTelemetry provider, this
+integration reuses it. It never replaces or shuts down a provider installed by
+the host; the checkbox only manages the package-owned fallback provider.
+
+Three layers, each independently useful:
+
+- **Boundary spans.** A producer span on `dapr-publish`, a client span on
+  `dapr-invoke`, a consumer span on `dapr-subscribe` (single and bulk,
+  extracting the W3C trace context from the delivery's headers or, for a bulk
+  entry, its CloudEvent with metadata as a fallback — bulk has no per-message
+  HTTP headers), and a
+  server span on `dapr-service`. Each injects or extracts `traceparent` /
+  `tracestate` through the connection's own header path, so a manually
+  forwarded `msg.dapr.headers.traceparent` (the pre-tracing way to keep one
+  trace across a subscribe → publish hop) still works unchanged when tracing
+  is disabled — `propagation.inject()`/`extract()` are true no-ops with
+  nothing registered — and is superseded by the real mechanism once enabled.
+- **Flow spans.** Every node in every flow gets its own span, via the four
+  Node-RED runtime hooks built for exactly this (`onSend`, `preDeliver`,
+  `onReceive`, `onComplete`) — not only this package's own nodes. `onSend`
+  captures the active context on each `SendEvent` (a property on the event
+  object, never on `msg`); `preDeliver` re-enters it before Node-RED's own
+  (by default asynchronous) delivery, so the destination node's `onReceive`
+  sees the sender's context regardless of what ran in between. `onReceive`
+  starts the node's span and mints a delivery token bounded by
+  `lib/pending.js`'s same registry pattern the app channel already uses for
+  acks and responses (a fresh, process-wide instance — a node span applies
+  to every flow, not only Dapr ones); `onComplete` reads the token back and
+  settles it. `_msgid` is deliberately never used as this key: Node-RED
+  preserves one `_msgid` across cloned branches and successive nodes, so it
+  cannot identify one node's one delivery. A node whose input handler never
+  calls `done()` (most existing nodes — this needs the modern 3-argument
+  `(msg, send, done)` form) has its span force-closed after a bounded timeout
+  and marked `node_red.span.incomplete`, rather than left open forever.
+- **Export.** Batched OTLP/HTTP, off the message path entirely — nothing a
+  flow does ever awaits an export. A stopped or unreachable collector is
+  fail-open at both ends: mid-operation, the SDK's own batch processor
+  swallows export failures (routed to OTel's `diag` logger, never thrown);
+  at shutdown, `BasicTracerProvider.shutdown()`'s flush has no timeout of its
+  own, so `lib/telemetry.js` bounds and swallows it itself (3s) — otherwise
+  an unreachable collector could hang a connection's close handler for as
+  long as the exporter's own retry/backoff takes.
+
+Verified against real infrastructure, not only the fake-sidecar runtime tier:
+the integration tier pins `otel/opentelemetry-collector-contrib` (see
+`docs/testing.md`) configured with a file exporter, and asserts on the
+exported OTLP spans directly — real daprd + Redis delivery, through a plain
+function node, into a real outbound publish, checked for one shared trace ID
+and correct span nesting.

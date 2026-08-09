@@ -6,6 +6,7 @@ const { DaprError, ErrorCodes } = require('../lib/errors');
 const { fingerprint, discoveryEntry } = require('../lib/subscriptions');
 const { PendingRegistry } = require('../lib/pending');
 const { sidecarRequest } = require('../lib/sidecar-http');
+const telemetry = require('../lib/telemetry');
 
 const HEALTH_PATH = '/v1.0/healthz/outbound';
 const HEALTHY_INTERVAL_MS = 10000;
@@ -14,10 +15,16 @@ const MAX_BACKOFF_MS = 30000;
 const HEALTH_TIMEOUT_MS = 2000;
 
 module.exports = function registerDaprConnection(RED) {
+  // Once, at node-type registration — not per connection instance. Gives
+  // every node in every flow a span the moment any connection enables
+  // tracing; a no-op span (nothing has) costs nothing and needs no guard.
+  telemetry.registerFlowSpanHooks(RED.hooks);
+
   function DaprConnectionNode(config) {
     RED.nodes.createNode(this, config);
     const node = this;
     node.lease = null;
+    node.tracingHandle = null;
 
     let options;
     try {
@@ -300,17 +307,38 @@ module.exports = function registerDaprConnection(RED) {
     let closing = false;
     node.status({ fill: 'grey', shape: 'ring', text: 'connecting' });
 
+    // Opt-in, disabled by default. telemetry.acquire() is async; mirrors the
+    // acquireListener pattern below — if the node closes before it resolves,
+    // release immediately rather than leaking a registered provider. Fails
+    // open: a setup error only warns, it never fails the connection.
+    if (config.tracingEnabled) {
+      const enableTracing = async () => {
+        try {
+          const handle = await telemetry.acquire();
+          if (closing) {
+            await handle.release();
+            return;
+          }
+          node.tracingHandle = handle;
+        } catch (err) {
+          node.warn(`tracing could not be enabled: ${err.message}`);
+        }
+      };
+      void enableTracing();
+    }
+
     // acquireListener is async; if the node is torn down before it resolves,
     // release the lease immediately so a redeploy race cannot leak a listener.
-    acquireListener({
-      bindAddress: options.inbound.bindAddress,
-      port: options.inbound.port,
-      token: options.inbound.appApiToken,
-      limits: options.limits,
-    })
-      .then((lease) => {
+    const startListener = async () => {
+      try {
+        const lease = await acquireListener({
+          bindAddress: options.inbound.bindAddress,
+          port: options.inbound.port,
+          token: options.inbound.appApiToken,
+          limits: options.limits,
+        });
         if (closing) {
-          lease.release({ graceMs: 0 });
+          await lease.release({ graceMs: 0 });
           return;
         }
         node.lease = lease;
@@ -318,8 +346,7 @@ module.exports = function registerDaprConnection(RED) {
         // registrations re-activate through scheduleActivation.
         applyActivation();
         pollOnce();
-      })
-      .catch((err) => {
+      } catch (err) {
         const text =
           err.code === ErrorCodes.DUPLICATE_LISTENER ? 'app port in use' : 'listen failed';
         node.status({ fill: 'red', shape: 'ring', text });
@@ -327,7 +354,9 @@ module.exports = function registerDaprConnection(RED) {
         // No listener means no health poll will ever run — release anything
         // waiting on the first probe instead of hanging it forever.
         markHealthKnown();
-      });
+      }
+    };
+    void startListener();
 
     node.on('close', async (removed, done) => {
       closing = true;
@@ -357,6 +386,10 @@ module.exports = function registerDaprConnection(RED) {
         // after us must not reach applyActivation() and re-activate a released
         // generation.
         node.lease = null;
+      }
+      if (node.tracingHandle) {
+        await node.tracingHandle.release();
+        node.tracingHandle = null;
       }
       done();
     });

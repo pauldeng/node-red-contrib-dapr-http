@@ -1,8 +1,11 @@
 'use strict';
 
+const { context, propagation, trace, SpanKind } = require('@opentelemetry/api');
+
 const { publish } = require('../lib/dapr-client');
 const { DaprError, ErrorCodes } = require('../lib/errors');
 const { preparePublish } = require('../lib/messages');
+const { getTracer, endSpan } = require('../lib/telemetry');
 
 module.exports = function registerDaprPublish(RED) {
   function DaprPublishNode(config) {
@@ -43,6 +46,35 @@ module.exports = function registerDaprPublish(RED) {
         done(new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'Dapr sidecar is unavailable'));
         return;
       }
+      let request;
+      try {
+        request = preparePublish(config, msg);
+      } catch (err) {
+        node.status({ fill: 'red', shape: 'ring', text: 'invalid message' });
+        done(err);
+        return;
+      }
+
+      // A no-op span (tracing disabled) costs nothing and needs no branch of
+      // its own here. Injected onto request.headers, which preparePublish
+      // already validated — a manually forwarded msg.dapr.headers.traceparent
+      // is preserved when tracing is disabled (propagation.inject() is then a
+      // true no-op) and superseded by the real one once enabled.
+      const span = getTracer().startSpan(
+        `${request.topic} publish`,
+        {
+          kind: SpanKind.PRODUCER,
+          attributes: {
+            'messaging.system': 'dapr',
+            'messaging.destination.name': request.topic,
+            'messaging.operation.name': 'publish',
+            'dapr.pubsub.name': request.pubsubName,
+          },
+        },
+        context.active()
+      );
+      propagation.inject(trace.setSpan(context.active(), span), request.headers);
+
       const controller = new AbortController();
       inflight.add(controller);
       try {
@@ -54,12 +86,14 @@ module.exports = function registerDaprPublish(RED) {
             signal: controller.signal,
             maxResponseBytes: connection.options.limits.bodyLimitBytes,
           },
-          preparePublish(config, msg)
+          request
         );
         updateStatus(true);
+        endSpan(span);
         send(msg);
         done();
       } catch (err) {
+        endSpan(span, err);
         const text = err.code === ErrorCodes.INVALID_MESSAGE ? 'invalid message' : 'publish failed';
         node.status({ fill: 'red', shape: 'ring', text });
         done(err);

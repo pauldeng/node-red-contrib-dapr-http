@@ -2,9 +2,12 @@
 
 const crypto = require('node:crypto');
 
+const { context, propagation, trace, SpanKind } = require('@opentelemetry/api');
+
 const { buildService } = require('../lib/services');
 const { decodeBody } = require('../lib/invoke-client');
 const { HOP_BY_HOP } = require('../lib/http-headers');
+const { getTracer, endSpan } = require('../lib/telemetry');
 
 // Transport and sensitive headers not exposed to flows as request metadata: the
 // full hop-by-hop/framing set (so proxy-authorization, te, trailer, upgrade,
@@ -84,23 +87,52 @@ module.exports = function registerDaprService(RED) {
         }
       }
 
-      node.send({
-        _msgid: RED.util.generateId(),
-        payload: decodeBody(ctx.body, ctx.headers['content-type']),
-        dapr: {
-          method: definition.path,
-          verb: definition.verb,
-          query: ctx.query,
-          headers,
-          callerAppId: ctx.callerAppId,
-          responseId,
+      // A no-op extract/span (tracing disabled) costs nothing and needs no
+      // branch of its own here.
+      const parentContext = propagation.extract(context.active(), ctx.headers);
+      const span = getTracer().startSpan(
+        `${definition.verb} ${definition.path}`,
+        {
+          kind: SpanKind.SERVER,
+          attributes: {
+            'rpc.system': 'dapr',
+            'rpc.method': definition.path,
+            'http.request.method': definition.verb,
+            ...(ctx.callerAppId ? { 'dapr.caller_app_id': ctx.callerAppId } : {}),
+          },
         },
-      });
+        parentContext
+      );
+
+      context.with(trace.setSpan(parentContext, span), () =>
+        node.send({
+          _msgid: RED.util.generateId(),
+          payload: decodeBody(ctx.body, ctx.headers['content-type']),
+          dapr: {
+            method: definition.path,
+            verb: definition.verb,
+            query: ctx.query,
+            headers,
+            callerAppId: ctx.callerAppId,
+            responseId,
+          },
+        })
+      );
 
       const response = await responseResult;
       if (ctx.signal) {
         ctx.signal.removeEventListener('abort', onAbort);
       }
+      // A 5xx is this service's own failure to answer the request; 4xx is a
+      // valid RPC outcome (the caller's request was rejected, not mishandled)
+      // and does not mark the span an error, per common RPC/HTTP conventions.
+      span.setAttribute('http.response.status_code', response.status);
+      endSpan(
+        span,
+        response.status >= 500
+          ? new Error(`service responded with status ${response.status}`)
+          : undefined
+      );
       activeIds.delete(responseId);
       pending -= 1;
       showStatus();

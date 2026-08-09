@@ -5,6 +5,43 @@ All notable changes to this package. This project follows
 `package.json` is what a consumer installs, so bump it and add an entry here in
 the same change that ships behavior.
 
+## Unreleased
+
+### Added
+
+- **First-party OpenTelemetry tracing, opt-in and off by default.** A new
+  **Tracing** checkbox on `dapr-connection` activates one process-wide
+  tracer shared by every connection and node — there is nothing to configure
+  per connection; service identity, the OTLP endpoint, exporter
+  authentication, and sampling all come from the standard `OTEL_*`
+  environment variables (unset, sampling defaults to
+  `parentbased_traceidratio` at `0.1`). `dapr-publish` gets a producer span,
+  `dapr-invoke` a client span, `dapr-subscribe` a consumer span (single and
+  bulk), and `dapr-service` a server span, each injecting or extracting the
+  W3C `traceparent`/`tracestate` headers automatically. Every other node in
+  a flow — not only this package's own — gets its own span too, via
+  Node-RED's `onSend`/`preDeliver`/`onReceive`/`onComplete` runtime hooks.
+  See `docs/architecture.md`'s "Telemetry" section.
+- A stopped or unreachable OTLP collector never fails, delays, or retries a
+  message: export happens off the message path entirely, and a failed
+  export or a slow shutdown flush is only ever bounded and swallowed.
+  Disabling tracing again leaves every other behavior, and the public
+  `msg.dapr` contract, unchanged — a manually forwarded
+  `msg.dapr.headers.traceparent` (the pre-tracing way to keep one trace
+  across a subscribe → publish hop) still works exactly as before when
+  tracing is off.
+
+### Changed
+
+- **Runtime dependencies are no longer zero.** The official OpenTelemetry
+  packages (`@opentelemetry/api`, `sdk-trace-node`, `exporter-trace-otlp-http`,
+  `resources`) are now pinned, direct dependencies — see `AGENTS.md`'s "Stack
+  (pinned)" for the policy this replaces (deliberately minimal, not zero; any
+  other new runtime dependency needs the maintainer's explicit approval
+  before it is added). Talking to the sidecar itself is unaffected: every
+  publish, invoke, and health-poll call still goes through
+  `lib/sidecar-http.js` alone.
+
 ## 0.1.1 - 2026-07-29
 
 ### Fixed

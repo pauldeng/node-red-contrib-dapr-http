@@ -2,8 +2,41 @@
 
 const crypto = require('node:crypto');
 
+const { context, propagation, trace, SpanKind } = require('@opentelemetry/api');
+
 const { buildSubscription, parseDelivery, parseBulkDelivery } = require('../lib/subscriptions');
 const { HOP_BY_HOP } = require('../lib/http-headers');
+const { getTracer, endSpan } = require('../lib/telemetry');
+
+// A non-SUCCESS outcome (RETRY/DROP) closes the consumer span as an error:
+// the delivery was not successfully processed, which is exactly what a trace
+// reviewing this topic wants to see flagged.
+function endDeliverySpan(span, status) {
+  endSpan(span, status === 'SUCCESS' ? undefined : new Error(`delivery ${status}`));
+}
+
+// Extract the W3C trace context from a carrier (ctx.headers for a single
+// delivery; an entry's CloudEvent/metadata for a bulk one, which has no
+// per-message HTTP headers — see deliverBulk) and start this delivery's
+// consumer span as its child. A no-op extract/span (tracing disabled) costs
+// nothing and needs no branch of its own here.
+function startConsumerSpan(definition, carrier) {
+  const parentContext = propagation.extract(context.active(), carrier);
+  const span = getTracer().startSpan(
+    `${definition.topic} process`,
+    {
+      kind: SpanKind.CONSUMER,
+      attributes: {
+        'messaging.system': 'dapr',
+        'messaging.destination.name': definition.topic,
+        'messaging.operation.name': 'process',
+        'dapr.pubsub.name': definition.pubsubName,
+      },
+    },
+    parentContext
+  );
+  return { span, context: trace.setSpan(parentContext, span) };
+}
 
 // Distinguishes an ack timeout (warn + RETRY) from an explicit ack-node RETRY.
 const ACK_TIMEOUT = Symbol('ack-timeout');
@@ -186,11 +219,14 @@ module.exports = function registerDaprSubscribe(RED) {
       };
       const msg = { _msgid: RED.util.generateId(), payload: parsed.payload, dapr };
 
+      const consumer = startConsumerSpan(definition, ctx.headers);
       if (definition.ackMode === 'auto') {
-        node.send(msg);
+        context.with(consumer.context, () => node.send(msg));
+        endDeliverySpan(consumer.span, 'SUCCESS');
         return { status: 200, body: { status: 'SUCCESS' } };
       }
-      const status = await awaitAck(msg, ctx.signal);
+      const status = await context.with(consumer.context, () => awaitAck(msg, ctx.signal));
+      endDeliverySpan(consumer.span, status);
       return { status: 200, body: { status } };
     };
 
@@ -243,11 +279,21 @@ module.exports = function registerDaprSubscribe(RED) {
             cloudEvent: entry.cloudEvent,
           };
           const msg = { _msgid: RED.util.generateId(), payload: entry.payload, dapr };
+
+          // Dapr 1.18.1 carries each non-raw entry's traceparent/tracestate in
+          // its CloudEvent. Entry metadata is retained as a fallback (and is
+          // the only possible carrier for a raw entry).
+          const consumer = startConsumerSpan(definition, {
+            ...entry.metadata,
+            ...(entry.cloudEvent || {}),
+          });
           if (definition.ackMode === 'auto') {
-            node.send(msg);
+            context.with(consumer.context, () => node.send(msg));
+            endDeliverySpan(consumer.span, 'SUCCESS');
             return { entryId: entry.entryId, status: 'SUCCESS' };
           }
-          const status = await awaitAck(msg, ctx.signal);
+          const status = await context.with(consumer.context, () => awaitAck(msg, ctx.signal));
+          endDeliverySpan(consumer.span, status);
           return { entryId: entry.entryId, status };
         })
       );

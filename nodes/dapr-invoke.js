@@ -1,9 +1,12 @@
 'use strict';
 
+const { context, propagation, trace, SpanKind } = require('@opentelemetry/api');
+
 const { invoke, encodeBody, decodeBody } = require('../lib/invoke-client');
 const { validateContentType, parseRequestHeaders } = require('../lib/http-headers');
 const { DaprError, ErrorCodes } = require('../lib/errors');
 const { SUPPORTED_VERBS } = require('../lib/services');
+const { getTracer, endSpan } = require('../lib/telemetry');
 
 const TIMEOUT_SEC_MIN = 1;
 const TIMEOUT_SEC_MAX = 300;
@@ -131,6 +134,24 @@ module.exports = function registerDaprInvoke(RED) {
         headers['content-type'] = resolvedType;
       }
 
+      // A no-op span (tracing disabled) costs nothing and needs no branch of
+      // its own here. Injected onto `headers` before invoke() sends them, so
+      // the invoked app's own dapr-service node can extract this trace.
+      const span = getTracer().startSpan(
+        `invoke ${appId.trim()}/${methodPath.trim()}`,
+        {
+          kind: SpanKind.CLIENT,
+          attributes: {
+            'rpc.system': 'dapr',
+            'rpc.service': appId.trim(),
+            'rpc.method': methodPath.trim(),
+            'http.request.method': verb,
+          },
+        },
+        context.active()
+      );
+      propagation.inject(trace.setSpan(context.active(), span), headers);
+
       const controller = new AbortController();
       inflight.add(controller);
       try {
@@ -162,10 +183,13 @@ module.exports = function registerDaprInvoke(RED) {
           statusCode: result.status,
           headers: result.headers,
         };
+        span.setAttribute('http.response.status_code', result.status);
+        endSpan(span);
         node.status({ fill: 'green', shape: 'dot', text: `${result.status}` });
         send(msg);
         done();
       } catch (err) {
+        endSpan(span, err);
         node.status({ fill: 'red', shape: 'ring', text: 'invoke failed' });
         done(
           err instanceof DaprError
