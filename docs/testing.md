@@ -277,38 +277,44 @@ Two-part policy:
   until it is individually assessed and added here. `node-red` is pinned
   deliberately and never shipped.
 
-  Every permitted advisory below is reached only through a **dev-only** path
-  (`node-red@5.0.1`, `eslint`, or the `npm` CLI bundled inside
-  `@node-red/registry`). None of them is in the published package, and none is
-  reachable from a flow at runtime: `node-red` here exists to run the runtime and
-  e2e tiers, and the bundled `npm` only ever runs when the Node-RED editor
-  installs a palette module, which these tests never do.
+  Every permitted advisory below is reached only through the dev-only
+  `node-red@5.0.4` tree, so none is installed with the published package. That
+  does **not** mean every advisory is unreachable inside Node-RED: core nodes use
+  `jsonata` and `js-yaml`, so those two ARE reachable from a flow in any Node-RED
+  installation — just not through anything this package's own code or dependency
+  choices control. The rest sit inside the `npm` CLI bundled by
+  `@node-red/registry`; this test suite never asks the editor to install a
+  palette module, so that code path never runs here.
 
-  Permitted advisories (dev-only), last reviewed 2026-07-29:
+  Permitted advisories (dev-only), last reviewed 2026-08-09:
 
-  | Advisory                                                                 | Package           | Reached through                                        |
-  | ------------------------------------------------------------------------ | ----------------- | ------------------------------------------------------ |
-  | [GHSA-86vw-mfpg-wwv9](https://github.com/advisories/GHSA-86vw-mfpg-wwv9) | `jsonata` < 2.2.0 | `node-red` → `@node-red/util`                          |
-  | [GHSA-v422-hmwv-36x6](https://github.com/advisories/GHSA-v422-hmwv-36x6) | `body-parser`     | `node-red` → `@node-red/editor-api`, `@node-red/nodes` |
-  | [GHSA-v2hh-gcrm-f6hx](https://github.com/advisories/GHSA-v2hh-gcrm-f6hx) | `fast-uri`        | `node-red` → `@node-red/nodes` → `ajv`                 |
-  | [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg) | `brace-expansion` | `npm` (bundled) only — see note below                  |
-  | [GHSA-r292-9mhp-454m](https://github.com/advisories/GHSA-r292-9mhp-454m) | `tar`             | `node-red` → `@node-red/registry` → `npm` (bundled)    |
-  | axios advisories (10, see below)                                         | `axios` 1.16.0    | `node-red` → `node-red-admin`                          |
+  | Advisory                                                                                                                                                                                                                     | Package                 | Reached through                                                                                                                                                        |
+  | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | [GHSA-86vw-mfpg-wwv9](https://github.com/advisories/GHSA-86vw-mfpg-wwv9)                                                                                                                                                     | `jsonata` 2.0.0 - 2.1.1 | `node-red` → `@node-red/util`                                                                                                                                          |
+  | [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg), [GHSA-rgw5-rvv9-x895](https://github.com/advisories/GHSA-rgw5-rvv9-x895)                                                                           | `brace-expansion`       | `node-red` → `@node-red/registry` → bundled `npm` → `minimatch` (ESLint's own copy is patched at `5.0.9`; only npm's bundled `5.0.7` remains vulnerable)               |
+  | [GHSA-r292-9mhp-454m](https://github.com/advisories/GHSA-r292-9mhp-454m)                                                                                                                                                     | `tar`                   | `node-red` → `@node-red/registry` → bundled `npm`                                                                                                                      |
+  | [GHSA-mwp4-54f8-5fhr](https://github.com/advisories/GHSA-mwp4-54f8-5fhr), [GHSA-4xrf-jv44-h6hh](https://github.com/advisories/GHSA-4xrf-jv44-h6hh), [GHSA-22jq-vg5j-6vgg](https://github.com/advisories/GHSA-22jq-vg5j-6vgg) | `ip-address`            | `node-red` → `@node-red/registry` → bundled `npm` → `socks-proxy-agent` → `socks` (the `mqtt` → `socks` path resolves to `10.4.0`, already above the vulnerable range) |
+  | [GHSA-5p4m-2wfm-xmqj](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj)                                                                                                                                                     | `js-yaml` 4.0.0 - 4.3.0 | `node-red` → `@node-red/nodes`                                                                                                                                         |
+  | undici advisories (3, see below)                                                                                                                                                                                             | `undici` <= 6.27.0      | `node-red` → `@node-red/registry` → bundled `npm` → `node-gyp`                                                                                                         |
 
-  `brace-expansion` reaches the tree twice but is only vulnerable once. ESLint 10
-  pulls a patched `5.0.8` through its own `minimatch`; the advisory applies solely
-  to the `5.0.7` copy bundled inside `npm` (itself reached via `node-red` →
-  `@node-red/registry`), which is why `npm audit` reports a single node under
-  `node_modules/npm/`. Under ESLint 9 both copies were vulnerable — recheck this
-  row rather than assuming it, if ESLint moves again.
+  `fast-uri`'s two advisories (GHSA-v2hh-gcrm-f6hx, GHSA-7p8r-x3mc-p8w7) and
+  `body-parser`'s (GHSA-v422-hmwv-36x6) and the ten `axios` advisories previously
+  permitted here no longer appear in `npm audit`'s output at all — confirmed by
+  running it fresh against this dependency graph rather than assuming an older
+  table still applied. The safe non-breaking `npm audit fix` is already applied:
+  it moved `fast-uri` to `3.1.5` under both `html-validate`'s and `node-red`'s
+  copies of `ajv`, clearing its advisories entirely. `brace-expansion`,
+  `ip-address`, `tar`, and `undici` are all bundled inside `npm@11.19.0` itself
+  — `npm audit fix` reports it "cannot be fixed automatically" for any of the
+  four, since fixing them means Node-RED's own bundled `npm` moving, which this
+  repository does not control. `js-yaml` and `jsonata` only have a fix via
+  `npm audit fix --force`, which downgrades `node-red` to `2.2.3` — see the note
+  below on why that is refused.
 
-  The `axios` advisories (GHSA-42h9-826w-cgv3, GHSA-xj6q-8x83-jv6g,
-  GHSA-pmv8-rq9r-6j72, GHSA-jqh4-m9w3-8hp9, GHSA-mmx7-hfxf-jppx,
-  GHSA-f4gw-2p7v-4548, GHSA-gcfj-64vw-6mp9, GHSA-hcpx-6fm6-wx23,
-  GHSA-7q8q-rj6j-mhjq, GHSA-mwf2-3pr3-8698) are all reached through
-  `node-red-admin`, the CLI shipped alongside `node-red`. Nothing in this
-  repository invokes `node-red-admin`, and it is never installed by a consumer of
-  this package.
+  The `undici` advisories (GHSA-8xcm-r25x-g524, GHSA-m8rv-5g2x-5cg5,
+  GHSA-v3r7-h72x-cjcm) are all reached through `npm`'s own bundled `node-gyp`
+  dependency (`node-red` → `@node-red/registry` → bundled `npm`). Nothing in
+  this repository makes an HTTP request through `undici`, bundled or otherwise.
 
 CI runs `npm audit --omit=dev` on every push/PR **and on a weekly schedule**
 (`.github/workflows/ci.yml`), so a newly-disclosed advisory surfaces without
