@@ -2,12 +2,12 @@
 
 // Re-runs the broker-sensitive slice of the Milestone 8 matrix against real
 // NATS JetStream instead of Redis: publish/subscribe, the CloudEvents round
-// trip, and raw payload. Invocation, ACL, Admin-API isolation, and the SDK
-// adapter's serialization concerns never reach a broker-specific code path
-// (dapr-client.js calls the SDK's generic pubsub.publish()), so none of that
-// matrix is re-run here. This component's own AddConsumer() call means the
-// baseline component below carries no durableName/queueGroupName — those are
-// component-wide and reserved for the dedicated competing-consumers fixture.
+// trip, and raw payload. Invocation, ACL, Admin-API isolation, and the HTTP
+// client's serialization concerns never reach a broker-specific code path,
+// so none of that matrix is re-run here. This component's own AddConsumer()
+// call means the baseline component below carries no durableName/
+// queueGroupName — those are component-wide and reserved for the dedicated
+// competing-consumers fixture.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');

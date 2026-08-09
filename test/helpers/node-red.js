@@ -48,7 +48,7 @@ function settingsSource(uiPort) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Drives a real `node-red@5.0.1` process in an isolated temporary user
+// Drives the package.json-pinned `node-red` process in an isolated temporary user
 // directory, with this workspace package made discoverable so its nodes load
 // exactly as an installed package would. Black-box: tests observe behavior over
 // HTTP, never by importing Node-RED internals.

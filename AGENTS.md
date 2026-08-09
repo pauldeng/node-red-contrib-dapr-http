@@ -55,7 +55,7 @@ no reference.
   needs a live cluster and VPC routing this repository cannot create. Never commit
   those credentials: pass them through the environment, never a fixture.
 - `npm run test:e2e` — Playwright tests against the real Node-RED editor.
-- `npm run lint` / `npm run lint:fix` — ESLint 9 (correctness + security rules).
+- `npm run lint` / `npm run lint:fix` — ESLint 10 (correctness + security rules).
 - `npm run format` / `npm run format:check` — Prettier.
 
 Keep this list in step with `package.json`.
