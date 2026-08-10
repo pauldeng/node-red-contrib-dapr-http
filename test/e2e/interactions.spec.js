@@ -23,6 +23,19 @@ function interactionsFlow({ appPort, daprPort }) {
       appPort: String(appPort),
     },
     {
+      id: 'pub',
+      type: 'dapr-publish',
+      z: 'tab',
+      name: 'publish orders',
+      connection: 'conn',
+      pubsubName: 'pubsub',
+      topic: 'orders',
+      metadata: '{}',
+      x: 200,
+      y: 120,
+      wires: [[]],
+    },
+    {
       id: 'sub',
       type: 'dapr-subscribe',
       z: 'tab',
@@ -101,6 +114,25 @@ test('subscribe bulk fields show and hide with the checkbox', async ({
 
   await page.uncheck('#node-input-bulkEnabled');
   await expect(bulkFields).toBeHidden();
+});
+
+test('publish bulk mode is off for a legacy flow and persists when enabled', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'pub');
+  const bulkEnabled = page.locator('#node-input-bulkEnabled');
+  await expect(bulkEnabled).not.toBeChecked();
+  await bulkEnabled.check();
+  await closeDialog(page, { save: true });
+
+  await openNodeDialog(page, 'pub');
+  await expect(page.locator('#node-input-bulkEnabled')).toBeChecked();
 });
 
 test('CEL routing rules can be added, edited, reordered, and removed', async ({

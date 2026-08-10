@@ -48,6 +48,25 @@ the same change that ships behavior.
   object shape; application-authored log text remains the operator's
   responsibility. See `docs/architecture.md`'s "Application logs" section.
 
+- **Bulk publish on `dapr-publish`.** A new **Bulk publish** checkbox (or a
+  per-message `msg.dapr.bulk` override) switches `msg.payload` to an array of
+  `{entryId, payload, contentType, metadata}` entries, published through
+  Dapr's stable `POST /v1.0/publish/bulk/<pubsub>/<topic>` endpoint. Single
+  publish is unaffected and remains byte-for-byte compatible when bulk mode
+  is disabled. Entry count, shape, `entryId` uniqueness, content type (Dapr's
+  bulk endpoint accepts only `application/json`, `application/cloudevents+json`,
+  `text/*`, `application/xml`, or `application/octet-stream` — stricter than
+  single publish), and encoded body size are all validated as
+  `INVALID_MESSAGE` before any request is sent. On success,
+  `msg.dapr.bulkResult = { failedEntries: [], entryCount }` is added before
+  the message is sent on; if Dapr identifies specific failed entries —
+  including every entry in the batch — the node calls `done(error)` with code
+  `BULK_PUBLISH_PARTIAL` and a populated `failedEntries` list instead,
+  without resubmitting the batch. A bulk failure with no entries identified
+  (nothing for a Catch node to retry) is reported as the existing
+  `PUBLISH_FAILED`, not an empty `BULK_PUBLISH_PARTIAL`. One producer span
+  covers the whole request, carrying only the batch and failure counts.
+
 ### Changed
 
 - **Runtime dependencies are no longer zero.** The official OpenTelemetry

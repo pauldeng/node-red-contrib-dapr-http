@@ -12,7 +12,8 @@ const { freePort } = require('../helpers/node-red');
 const { ContainerNodeRed } = require('../helpers/node-red-container');
 const { httpRequest } = require('../helpers/http');
 const { startRedis, startDaprd } = require('../helpers/integration');
-const { publish } = require('../../lib/dapr-client');
+const { publish, publishBulk } = require('../../lib/dapr-client');
+const { DaprError, ErrorCodes } = require('../../lib/errors');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
 
@@ -182,5 +183,163 @@ return msg;`,
       /could not reach the sidecar/
     );
     assert.ok(Date.now() - start < 5000, 'publish against a dead sidecar must fail fast, not hang');
+  }
+);
+
+test(
+  'publishBulk delivers JSON, string, and binary entries to a real subscriber through real daprd + Redis',
+  { timeout: 60000 },
+  async (t) => {
+    const appId = 'it-bulk-publish-client';
+    const appPort = await freePort();
+    const daprHttpPort = await freePort();
+    const capture = await startCapture();
+    t.after(() => capture.stop());
+
+    const nr = new ContainerNodeRed();
+    await nr.start({
+      flows: [
+        { id: 'tab', type: 'tab', label: 'it-bulk-publish-client' },
+        {
+          id: 'c1',
+          type: 'dapr-connection',
+          daprHost: '127.0.0.1',
+          daprPort: String(daprHttpPort),
+          bindAddress: '127.0.0.1',
+          appPort: String(appPort),
+        },
+        {
+          id: 'sub1',
+          type: 'dapr-subscribe',
+          z: 'tab',
+          connection: 'c1',
+          pubsubName: 'pubsub',
+          topic: 'bulk-probe',
+          ackMode: 'auto',
+          metadata: '{}',
+          wires: [['fwd']],
+        },
+        {
+          id: 'fwd',
+          type: 'function',
+          z: 'tab',
+          func: `msg.url = ${JSON.stringify(capture.url)};
+msg.method = 'POST';
+msg.headers = { 'content-type': 'application/json' };
+const payload = Buffer.isBuffer(msg.payload) ? msg.payload.toString('utf8') : msg.payload;
+msg.payload = JSON.stringify({ payload });
+return msg;`,
+          outputs: 1,
+          wires: [['req']],
+        },
+        {
+          id: 'req',
+          type: 'http request',
+          z: 'tab',
+          method: 'use',
+          ret: 'txt',
+          url: '',
+          wires: [[]],
+        },
+      ],
+    });
+    t.after(() => nr.stop());
+    await waitFor(async () => {
+      const r = await httpRequest(`http://127.0.0.1:${appPort}/healthz`, { timeoutMs: 1000 });
+      return r.status === 204 ? true : null;
+    });
+
+    const redis = await startRedis();
+    t.after(() => redis.stop());
+    const daprd = await startDaprd({
+      appId,
+      appPort,
+      redisPort: redis.port,
+      httpPort: daprHttpPort,
+    });
+    t.after(() => daprd.stop());
+
+    const target = { baseUrl: daprd.baseUrl, timeoutMs: 10000 };
+
+    await publishBulk(target, {
+      pubsubName: 'pubsub',
+      topic: 'bulk-probe',
+      entries: [
+        { entryId: 'json-1', event: { orderId: 1 }, contentType: 'application/json', metadata: {} },
+        { entryId: 'string-1', event: 'plain text entry', contentType: 'text/plain', metadata: {} },
+        {
+          entryId: 'binary-1',
+          event: Buffer.from('binary entry', 'utf8').toString('base64'),
+          contentType: 'application/octet-stream',
+          metadata: {},
+        },
+      ],
+      options: { metadata: {} },
+    });
+
+    await waitFor(() => capture.received.filter((r) => r).length >= 3, { timeoutMs: 10000 });
+    const payloads = capture.received.map((r) => r.payload);
+    assert.deepEqual(
+      payloads.find((p) => typeof p === 'object' && p?.orderId === 1),
+      { orderId: 1 }
+    );
+    assert.ok(payloads.includes('plain text entry'));
+    assert.ok(payloads.includes('binary entry'));
+  }
+);
+
+test(
+  'publishBulk surfaces a duplicate entryId as a whole-batch PUBLISH_FAILED, matching real daprd, not a partial result',
+  { timeout: 60000 },
+  async (t) => {
+    const appId = 'it-bulk-publish-client-dup';
+    const appPort = await freePort();
+    const daprHttpPort = await freePort();
+
+    const nr = new ContainerNodeRed();
+    await nr.start({
+      flows: [
+        { id: 'tab', type: 'tab', label: 'it-bulk-publish-dup' },
+        {
+          id: 'c1',
+          type: 'dapr-connection',
+          daprHost: '127.0.0.1',
+          daprPort: String(daprHttpPort),
+          bindAddress: '127.0.0.1',
+          appPort: String(appPort),
+        },
+      ],
+    });
+    t.after(() => nr.stop());
+    await waitFor(async () => {
+      const r = await httpRequest(`http://127.0.0.1:${appPort}/healthz`, { timeoutMs: 1000 });
+      return r.status === 204 ? true : null;
+    });
+
+    const redis = await startRedis();
+    t.after(() => redis.stop());
+    const daprd = await startDaprd({
+      appId,
+      appPort,
+      redisPort: redis.port,
+      httpPort: daprHttpPort,
+    });
+    t.after(() => daprd.stop());
+
+    await assert.rejects(
+      publishBulk(
+        { baseUrl: daprd.baseUrl, timeoutMs: 10000 },
+        {
+          pubsubName: 'pubsub',
+          topic: 'bulk-dup',
+          entries: [
+            { entryId: 'dup', event: 1, contentType: 'application/json', metadata: {} },
+            { entryId: 'dup', event: 2, contentType: 'application/json', metadata: {} },
+          ],
+          options: { metadata: {} },
+        }
+      ),
+      (err) => err instanceof DaprError && err.code === ErrorCodes.PUBLISH_FAILED
+    );
   }
 );

@@ -10,8 +10,13 @@ const { startRedis, startDaprd } = require('../helpers/integration');
 const { startOtelCollector } = require('../helpers/otel-collector');
 const { waitFor } = require('../helpers/wait-for');
 
+function numericSpanAttribute(span, key) {
+  const attribute = span.attributes?.find((item) => item.key === key);
+  return Number(attribute?.value?.intValue);
+}
+
 test(
-  'a real daprd delivery through subscribe into publish exports both spans, sharing one trace, to a real OTLP collector',
+  'a real daprd delivery through subscribe into bulk publish exports nested spans on one trace',
   { timeout: 90000 },
   async (t) => {
     const collector = await startOtelCollector();
@@ -61,7 +66,12 @@ test(
           id: 'clear',
           type: 'function',
           z: 'tab',
-          func: 'msg.dapr = {}; return msg;',
+          func: `msg.payload = [
+  { entryId: 'forwarded-1', payload: msg.payload },
+  { entryId: 'forwarded-2', payload: { orderId: 43 } },
+];
+msg.dapr = { bulk: true };
+return msg;`,
           outputs: 1,
           wires: [['pub1']],
         },
@@ -131,7 +141,7 @@ test(
     const consumer = spans.find((s) => s.name === 'orders process');
     const functionSpan = spans.find((s) => s.name === 'function');
     const nodeSpan = spans.find((s) => s.name === 'dapr-publish');
-    const producer = spans.find((s) => s.name === 'forwarded publish');
+    const producer = spans.find((s) => s.name === 'forwarded bulk publish');
     const names = spans.map((s) => s.name);
     assert.equal(
       spans.filter((s) => s.name === 'orders publish').length,
@@ -141,7 +151,7 @@ test(
     assert.ok(consumer, `expected a consumer span named "orders process", got: ${names}`);
     assert.ok(functionSpan, `expected a flow span named "function", got: ${names}`);
     assert.ok(nodeSpan, `expected a flow span named "dapr-publish", got: ${names}`);
-    assert.ok(producer, `expected a producer span named "forwarded publish", got: ${names}`);
+    assert.ok(producer, `expected a producer span named "forwarded bulk publish", got: ${names}`);
     assert.equal(
       functionSpan.traceId,
       consumer.traceId,
@@ -171,6 +181,8 @@ test(
     // not assumed from either enum's own source.
     assert.equal(consumer.kind, 5, 'CONSUMER');
     assert.equal(producer.kind, 4, 'PRODUCER');
+    assert.equal(numericSpanAttribute(producer, 'dapr.bulk.entry_count'), 2);
+    assert.equal(numericSpanAttribute(producer, 'dapr.bulk.failed_count'), 0);
   }
 );
 

@@ -2,10 +2,32 @@
 
 const { context, propagation, trace, SpanKind } = require('@opentelemetry/api');
 
-const { publish } = require('../lib/dapr-client');
+const { publish, publishBulk } = require('../lib/dapr-client');
 const { DaprError, ErrorCodes } = require('../lib/errors');
-const { preparePublish } = require('../lib/messages');
+const { preparePublish, prepareBulkPublish } = require('../lib/messages');
 const { getTracer, endSpan } = require('../lib/telemetry');
+
+// msg.dapr.bulk, when present, overrides the node's configured Single/Bulk
+// mode for that one message; a missing value preserves the configured mode.
+// msg.dapr itself may be anything (garbage, a string, an array) — this only
+// decides which prepare*/publish* pair to call, so it stays a loose,
+// defensive check; the chosen prepare function is what actually validates
+// msg.dapr's shape.
+function resolveBulkMode(config, msg) {
+  const dapr = msg.dapr;
+  if (
+    dapr &&
+    typeof dapr === 'object' &&
+    !Array.isArray(dapr) &&
+    Object.prototype.hasOwnProperty.call(dapr, 'bulk')
+  ) {
+    if (typeof dapr.bulk !== 'boolean') {
+      throw new DaprError(ErrorCodes.INVALID_MESSAGE, 'msg.dapr.bulk must be a boolean');
+    }
+    return dapr.bulk;
+  }
+  return config.bulkEnabled === true;
+}
 
 module.exports = function registerDaprPublish(RED) {
   function DaprPublishNode(config) {
@@ -46,9 +68,15 @@ module.exports = function registerDaprPublish(RED) {
         done(new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'Dapr sidecar is unavailable'));
         return;
       }
+      let bulk;
       let request;
       try {
-        request = preparePublish(config, msg);
+        bulk = resolveBulkMode(config, msg);
+        request = bulk
+          ? prepareBulkPublish(config, msg, {
+              maxBodyBytes: connection.options.limits.bodyLimitBytes,
+            })
+          : preparePublish(config, msg);
       } catch (err) {
         node.status({ fill: 'red', shape: 'ring', text: 'invalid message' });
         done(err);
@@ -56,12 +84,16 @@ module.exports = function registerDaprPublish(RED) {
       }
 
       // A no-op span (tracing disabled) costs nothing and needs no branch of
-      // its own here. Injected onto request.headers, which preparePublish
-      // already validated — a manually forwarded msg.dapr.headers.traceparent
-      // is preserved when tracing is disabled (propagation.inject() is then a
-      // true no-op) and superseded by the real one once enabled.
+      // its own here. Injected onto request.headers, which preparePublish/
+      // prepareBulkPublish already validated — a manually forwarded
+      // msg.dapr.headers.traceparent is preserved when tracing is disabled
+      // (propagation.inject() is then a true no-op) and superseded by the
+      // real one once enabled. One span covers the whole bulk request —
+      // daprd creates its own per-entry producer spans server-side (see
+      // pkg/api/http/http.go's onBulkPublish); span attributes carry only
+      // the batch and failure counts, never entry payloads or metadata.
       const span = getTracer().startSpan(
-        `${request.topic} publish`,
+        `${request.topic} ${bulk ? 'bulk ' : ''}publish`,
         {
           kind: SpanKind.PRODUCER,
           attributes: {
@@ -69,6 +101,7 @@ module.exports = function registerDaprPublish(RED) {
             'messaging.destination.name': request.topic,
             'messaging.operation.name': 'publish',
             'dapr.pubsub.name': request.pubsubName,
+            ...(bulk ? { 'dapr.bulk.entry_count': request.entries.length } : {}),
           },
         },
         context.active()
@@ -77,24 +110,43 @@ module.exports = function registerDaprPublish(RED) {
 
       const controller = new AbortController();
       inflight.add(controller);
+      const transportOptions = {
+        baseUrl: connection.options.outbound.baseUrl,
+        token: connection.options.daprApiToken,
+        timeoutMs: connection.options.limits.requestTimeoutMs,
+        signal: controller.signal,
+        maxResponseBytes: connection.options.limits.bodyLimitBytes,
+      };
       try {
-        await publish(
-          {
-            baseUrl: connection.options.outbound.baseUrl,
-            token: connection.options.daprApiToken,
-            timeoutMs: connection.options.limits.requestTimeoutMs,
-            signal: controller.signal,
-            maxResponseBytes: connection.options.limits.bodyLimitBytes,
-          },
-          request
-        );
+        if (bulk) {
+          await publishBulk(transportOptions, request);
+          span.setAttribute('dapr.bulk.failed_count', 0);
+          msg.dapr = {
+            ...msg.dapr,
+            bulkResult: { failedEntries: [], entryCount: request.entries.length },
+          };
+        } else {
+          await publish(transportOptions, request);
+        }
         updateStatus(true);
         endSpan(span);
         send(msg);
         done();
       } catch (err) {
+        if (err.code === ErrorCodes.BULK_PUBLISH_PARTIAL) {
+          span.setAttribute('dapr.bulk.failed_count', err.bulkResult.failedEntries.length);
+          msg.dapr = {
+            ...msg.dapr,
+            bulkResult: { ...err.bulkResult, entryCount: request.entries.length },
+          };
+        }
         endSpan(span, err);
-        const text = err.code === ErrorCodes.INVALID_MESSAGE ? 'invalid message' : 'publish failed';
+        const text =
+          err.code === ErrorCodes.INVALID_MESSAGE
+            ? 'invalid message'
+            : err.code === ErrorCodes.BULK_PUBLISH_PARTIAL
+              ? 'bulk publish partial failure'
+              : 'publish failed';
         node.status({ fill: 'red', shape: 'ring', text });
         done(err);
       } finally {

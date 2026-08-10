@@ -246,6 +246,11 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
   policy (`test/integration/bulk.test.js`) — when one entry in a bulk batch
   is never acked and the rest resolve SUCCESS/DROP, only the unacked entry is
   redelivered; the entries that already resolved are not sent again.
+- **Bulk publish runs against both primary and secondary brokers
+  (integration):** `test/integration/nats-bulk.test.js` sends one real bulk
+  publish through daprd + NATS JetStream and observes all entries in one bulk
+  delivery; `test/integration/publish-client.test.js` covers mixed JSON, text,
+  and binary entries through daprd + Redis.
 - **`deadLetterTopic` stalls with `pubsub.jetstream` in Dapr 1.18.1
   (integration, Milestone 9):** confirmed twice via real daprd debug logs —
   the runtime logs the original delivery's failure, then logs "Publishing to

@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { preparePublish } = require('../../lib/messages');
+const { preparePublish, prepareBulkPublish } = require('../../lib/messages');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 
 const baseConfig = {
@@ -188,4 +188,203 @@ test('an illegal contentType is rejected as an invalid message, not left for the
     }).options.contentType,
     'application/json; charset=utf-8'
   );
+});
+
+// --- prepareBulkPublish ---
+
+const assertInvalid = (fn) =>
+  assert.throws(fn, (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_MESSAGE);
+
+test('prepareBulkPublish shapes entries for the wire: entryId, event, contentType, metadata', () => {
+  const request = prepareBulkPublish(baseConfig, {
+    payload: [
+      { entryId: 'e1', payload: { a: 1 } },
+      { entryId: 'e2', payload: 'hello', contentType: 'text/plain', metadata: { x: 'y' } },
+    ],
+  });
+  assert.equal(request.pubsubName, 'orders-pubsub');
+  assert.equal(request.topic, 'orders');
+  assert.deepEqual(request.entries, [
+    { entryId: 'e1', event: { a: 1 }, contentType: 'application/json', metadata: {} },
+    { entryId: 'e2', event: 'hello', contentType: 'text/plain', metadata: { x: 'y' } },
+  ]);
+});
+
+test('prepareBulkPublish base64-encodes a Buffer payload for a binary content type', () => {
+  const request = prepareBulkPublish(baseConfig, {
+    payload: [
+      { entryId: 'e1', payload: Buffer.from([0, 1, 2]), contentType: 'application/octet-stream' },
+    ],
+  });
+  assert.equal(request.entries[0].event, Buffer.from([0, 1, 2]).toString('base64'));
+});
+
+test('a non-Buffer payload for a binary content type is rejected', () => {
+  assertInvalid(() =>
+    prepareBulkPublish(baseConfig, {
+      payload: [
+        { entryId: 'e1', payload: 'not a buffer', contentType: 'application/octet-stream' },
+      ],
+    })
+  );
+});
+
+test('a non-string payload for a text content type is rejected', () => {
+  assertInvalid(() =>
+    prepareBulkPublish(baseConfig, {
+      payload: [{ entryId: 'e1', payload: { a: 1 }, contentType: 'text/plain' }],
+    })
+  );
+});
+
+test('a content type Dapr bulk publish does not support is rejected before contacting daprd', () => {
+  // application/xml is accepted (Dapr's own string-content-type category);
+  // a vendor +json suffix and application/x-protobuf are not, even though
+  // single publish's own isJsonType()/anything-goes rules would allow the
+  // first — bulk's server-side ConvertEventToBytes only recognizes the exact
+  // application/json and application/cloudevents+json strings.
+  for (const contentType of ['application/vnd.example+json', 'application/x-protobuf']) {
+    assertInvalid(() =>
+      prepareBulkPublish(baseConfig, {
+        payload: [{ entryId: 'e1', payload: { a: 1 }, contentType }],
+      })
+    );
+  }
+});
+
+test('missing entry contentType falls back to configured content type, then to payload inference', () => {
+  const configured = prepareBulkPublish(
+    { ...baseConfig, contentType: 'application/cloudevents+json' },
+    { payload: [{ entryId: 'e1', payload: { a: 1 } }] }
+  );
+  assert.equal(configured.entries[0].contentType, 'application/cloudevents+json');
+
+  const inferred = prepareBulkPublish(baseConfig, {
+    payload: [{ entryId: 'e1', payload: 'plain text' }],
+  });
+  assert.equal(inferred.entries[0].contentType, 'text/plain');
+});
+
+test('msg.dapr must be an object in bulk mode too', () => {
+  assertInvalid(() =>
+    prepareBulkPublish(baseConfig, {
+      payload: [{ entryId: 'e1', payload: 1 }],
+      dapr: 'not an object',
+    })
+  );
+});
+
+test('a non-string entry contentType is rejected', () => {
+  assertInvalid(() =>
+    prepareBulkPublish(baseConfig, { payload: [{ entryId: 'e1', payload: 1, contentType: 42 }] })
+  );
+});
+
+test('an empty batch is rejected rather than silently publishing nothing', () => {
+  assertInvalid(() => prepareBulkPublish(baseConfig, { payload: [] }));
+});
+
+test('msg.payload must be an array in bulk mode', () => {
+  assertInvalid(() => prepareBulkPublish(baseConfig, { payload: { entryId: 'e1' } }));
+  assertInvalid(() => prepareBulkPublish(baseConfig, { payload: 'not an array' }));
+});
+
+test('a batch over the entry-count safety cap is rejected before contacting daprd', () => {
+  const payload = Array.from({ length: 1001 }, (_, i) => ({ entryId: `e${i}`, payload: i }));
+  assertInvalid(() => prepareBulkPublish(baseConfig, { payload }));
+  // Exactly at the cap is fine.
+  assert.equal(
+    prepareBulkPublish(baseConfig, { payload: payload.slice(0, 1000) }).entries.length,
+    1000
+  );
+});
+
+test('a duplicate entryId is rejected client-side, matching how daprd fails the whole batch', () => {
+  assertInvalid(() =>
+    prepareBulkPublish(baseConfig, {
+      payload: [
+        { entryId: 'e1', payload: 1 },
+        { entryId: 'e1', payload: 2 },
+      ],
+    })
+  );
+});
+
+test('a missing or blank entryId is rejected', () => {
+  assertInvalid(() => prepareBulkPublish(baseConfig, { payload: [{ payload: 1 }] }));
+  assertInvalid(() => prepareBulkPublish(baseConfig, { payload: [{ entryId: '', payload: 1 }] }));
+});
+
+test('a non-object entry descriptor is rejected', () => {
+  for (const bad of ['not an object', 42, null, ['nested', 'array']]) {
+    assertInvalid(() => prepareBulkPublish(baseConfig, { payload: [bad] }));
+  }
+});
+
+test('entry metadata overrides request metadata for that entry only, matching Dapr precedence', () => {
+  const request = prepareBulkPublish(
+    { ...baseConfig, metadata: '{"partitionKey":"shared"}' },
+    {
+      payload: [
+        { entryId: 'e1', payload: 1 },
+        { entryId: 'e2', payload: 2, metadata: { partitionKey: 'e2-own' } },
+      ],
+    }
+  );
+  assert.deepEqual(request.options.metadata, { partitionKey: 'shared' });
+  assert.deepEqual(request.entries[0].metadata, {});
+  assert.deepEqual(request.entries[1].metadata, { partitionKey: 'e2-own' });
+});
+
+test('msg.dapr can override pubsubName, topic, and merge request metadata for a bulk publish', () => {
+  const request = prepareBulkPublish(
+    { ...baseConfig, metadata: '{"configured":"kept"}' },
+    {
+      payload: [{ entryId: 'e1', payload: 1 }],
+      dapr: { pubsubName: 'other-pubsub', topic: 'other-topic', metadata: { x: 'y' } },
+    }
+  );
+  assert.equal(request.pubsubName, 'other-pubsub');
+  assert.equal(request.topic, 'other-topic');
+  assert.deepEqual(request.options.metadata, { configured: 'kept', x: 'y' });
+});
+
+test('msg.dapr.contentType supplies the default content type for bulk entries', () => {
+  const request = prepareBulkPublish(baseConfig, {
+    payload: [{ entryId: 'e1', payload: 'json string' }],
+    dapr: { contentType: 'application/json' },
+  });
+  assert.equal(request.entries[0].contentType, 'application/json');
+});
+
+test('a missing or unserializable JSON entry payload is INVALID_MESSAGE', () => {
+  assertInvalid(() =>
+    prepareBulkPublish(baseConfig, {
+      payload: [{ entryId: 'missing', contentType: 'application/json' }],
+    })
+  );
+  assertInvalid(() =>
+    prepareBulkPublish(baseConfig, {
+      payload: [{ entryId: 'bigint', payload: 1n, contentType: 'application/json' }],
+    })
+  );
+
+  const circular = {};
+  circular.self = circular;
+  assertInvalid(() =>
+    prepareBulkPublish(baseConfig, {
+      payload: [{ entryId: 'circular', payload: circular, contentType: 'application/json' }],
+    })
+  );
+});
+
+test('an encoded body over the connection body limit is rejected before contacting daprd', () => {
+  const payload = [{ entryId: 'e1', payload: 'x'.repeat(1000) }];
+  assertInvalid(() => prepareBulkPublish(baseConfig, { payload }, { maxBodyBytes: 10 }));
+  assert.ok(prepareBulkPublish(baseConfig, { payload }, { maxBodyBytes: 1_000_000 }));
+});
+
+test('with no maxBodyBytes passed, body size is not bounded by prepareBulkPublish itself', () => {
+  const payload = [{ entryId: 'e1', payload: 'x'.repeat(1000) }];
+  assert.ok(prepareBulkPublish(baseConfig, { payload }));
 });
