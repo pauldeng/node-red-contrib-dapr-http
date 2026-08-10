@@ -48,13 +48,15 @@ function runId() {
   return crypto.randomBytes(4).toString('hex');
 }
 
-function settingsSource(uiPort) {
+function settingsSource(uiPort, { loggingExtra = '' } = {}) {
+  // loggingExtra: see test/helpers/node-red.js's own settingsSource for why
+  // this is a raw source fragment rather than a serializable value.
   return `module.exports = {
   uiPort: ${uiPort},
   httpAdminRoot: '/',
   httpNodeRoot: '/',
   flowFile: 'flows.json',
-  logging: { console: { level: 'info', metrics: false, audit: false } },
+  logging: { console: { level: 'info', metrics: false, audit: false }${loggingExtra} },
   editorTheme: { projects: { enabled: false }, tours: false },
   functionGlobalContext: {},
 };
@@ -85,7 +87,7 @@ class ContainerNodeRed {
     return this._logs.join('');
   }
 
-  async start({ flows = [], readyTimeoutMs = 30000, env = {} } = {}) {
+  async start({ flows = [], readyTimeoutMs = 30000, env = {}, loggingExtra = '' } = {}) {
     await ensureImage(NODE_RED_IMAGE);
     this.port = await freePort();
     this.name = `nrdapr-it-nodered-${runId()}`;
@@ -105,7 +107,10 @@ class ContainerNodeRed {
       await fsp.mkdir(path.dirname(linkPath), { recursive: true });
       await fsp.symlink(WORKSPACE, linkPath, 'dir');
 
-      await fsp.writeFile(path.join(this.userDir, 'settings.js'), settingsSource(this.port));
+      await fsp.writeFile(
+        path.join(this.userDir, 'settings.js'),
+        settingsSource(this.port, { loggingExtra })
+      );
       await fsp.writeFile(path.join(this.userDir, 'flows.json'), JSON.stringify(flows));
       await fsp.chmod(path.join(this.userDir, 'settings.js'), 0o666);
       await fsp.chmod(path.join(this.userDir, 'flows.json'), 0o666);

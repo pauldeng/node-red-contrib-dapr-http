@@ -77,6 +77,7 @@ lib/services.js            registered dapr-service method table
 lib/pending.js             bounded first-wins ack/response correlation
 lib/errors.js              stable internal error types and safe (no-stack-trace) messages
 lib/telemetry.js           OpenTelemetry provider lifecycle, boundary spans, flow-span hooks
+lib/logging-bridge.js      settings.js-installed OTel application-log bridge
 ```
 
 `nodes/*.js` files are thin Node-RED wrappers; behavior lives in `lib/` as
@@ -180,3 +181,70 @@ the integration tier pins `otel/opentelemetry-collector-contrib` (see
 exported OTLP spans directly — real daprd + Redis delivery, through a plain
 function node, into a real outbound publish, checked for one shared trace ID
 and correct span nesting.
+
+### Application logs
+
+A second, independent lease (`lib/telemetry.js`'s `acquireLogs()`/
+`getLogger()`), sharing only resource detection with the trace lease above.
+Enabling it never registers a tracer or activates flow spans; disabling or
+redeploying a traced connection never stops it. Unlike tracing, there is no
+connection checkbox: it is installed once, before any flow deploys, through
+Node-RED's own `settings.js` `logging` configuration — the supported
+extension point for a custom log sink — because that is what lets it capture
+Node-RED's own startup logs and keeps exporter credentials out of flow JSON.
+`lib/logging-bridge.js` is the bridge: a factory Node-RED calls once
+(`settings.logging.<key>.handler`, see `@node-red/util/lib/log.js`'s
+`LogHandler`) that returns the function Node-RED then calls with every log
+entry it decides — via its own level/audit/metrics gating — to report. The
+package exposes it through one stable subpath (`package.json`'s `exports`
+map, `require('@pauldeng/node-red-contrib-dapr-http/logging')`) rather than a
+node, since a node cannot run before the first flow deploy.
+
+Each Node-RED log entry (`{level, msg, [id, type, name, z]}`) is normalized,
+never passed through: fatal/error/warn/info/debug/trace map deterministically
+to their OTel severity; `audit`/`metric` (Node-RED-specific, off by default,
+gated by the operator's own `settings.js`) both report as INFO, distinguished
+by `node_red.level`. Their real Node-RED `event` field becomes the bounded OTel
+event name; an audit record repeats that name as its body, while a metric uses
+its bounded scalar `value` and maps `nodeid` to `node_red.id`. Metric `msgid`
+and all other audit/metric fields remain excluded. Only an allowlisted set of
+attributes is ever attached —
+bounded `node_red.id`/`type`/`name`/`flow_id`/`level` — so an audit entry's
+req-derived `msg.user`/`msg.path`/`msg.ip` is excluded by construction, not by
+remembering to strip it. The body is bounded and never recurses into an
+arbitrary logged object's own properties (mirroring
+`@node-red/util`'s own console handler): a string is used as-is, an `Error`
+contributes bounded `exception.*` attributes plus its message, and any other
+object uses an own string `.message` or the fixed `[object Object]` placeholder;
+arbitrary-object accessors and custom `toString()` implementations are never
+invoked. This does not sanitize text an application explicitly logs: a secret
+passed as a string is still a secret in the exported body, so flows must not log
+one.
+
+The handler captures Node-RED's occurrence timestamp and `context.active()`
+synchronously, before asynchronous provider initialization can leave the
+node's AsyncLocalStorage scope. A log inside a traced node's handler is therefore
+correlated with that node's own span; an out-of-flow log gets neither. Startup
+records wait in a small bounded buffer until the process-lifetime provider is
+ready, after which the handler caches its Logger rather than resolving one on
+every hot-path emission. Normalization, provider, and emission failures are all
+fail-open and cannot become an unhandled rejection.
+
+The provider supports `OTEL_LOGS_EXPORTER=otlp` (default) or `none`, the standard
+OTLP log endpoint/header variables, `OTEL_SDK_DISABLED`, and the four
+`OTEL_BLRP_*` batch-processor controls. Invalid numeric settings fall back to
+the OpenTelemetry defaults, and the configured batch size is capped at the
+queue size. The JavaScript Logs API/SDK remains Development status, so all log
+packages are pinned exactly and upgrades must pass the complete log contract.
+
+Since Node-RED never calls back into this bridge to release it, the lease is
+process-lifetime by construction — the same subpath exports a `shutdown()`
+an operator's own graceful-shutdown code can call to flush and release it
+deliberately; nothing in the ordinary deploy/redeploy path does.
+
+Verified the same way as the trace pipeline: the integration tier's collector
+fixture now runs both a traces and a logs pipeline (two file exporters,
+`test/helpers/otel-collector.js`), and one test proves the correlation
+directly — a real `node.warn()` call inside a real traced flow span, exported
+to the real collector, whose log record carries that exact span's trace and
+span IDs.

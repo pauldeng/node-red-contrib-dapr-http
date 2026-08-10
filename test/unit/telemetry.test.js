@@ -3,6 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { SpanStatusCode, ROOT_CONTEXT, context, propagation, trace } = require('@opentelemetry/api');
+const { logs } = require('@opentelemetry/api-logs');
 const {
   NodeTracerProvider,
   InMemorySpanExporter,
@@ -10,6 +11,11 @@ const {
   AlwaysOnSampler,
   AlwaysOffSampler,
 } = require('@opentelemetry/sdk-trace-node');
+const {
+  LoggerProvider,
+  InMemoryLogRecordExporter,
+  SimpleLogRecordProcessor,
+} = require('@opentelemetry/sdk-logs');
 
 const {
   acquire,
@@ -19,6 +25,10 @@ const {
   startNodeSpan,
   completeNodeSpan,
   registerFlowSpanHooks,
+  acquireLogs,
+  getLogger,
+  resolveLogProcessorOptions,
+  shouldExportLogs,
 } = require('../../lib/telemetry');
 
 // A standalone provider/exporter, entirely separate from the module's own
@@ -197,6 +207,129 @@ test('acquire/release preserves an OpenTelemetry provider installed by the host'
     trace.disable();
     context.disable();
     propagation.disable();
+    await external.provider.shutdown();
+  }
+});
+
+// --- acquireLogs/getLogger: an independent lease sharing only resource
+// detection with the trace lease above. ---
+
+function inMemoryLogger() {
+  const exporter = new InMemoryLogRecordExporter();
+  const provider = new LoggerProvider({
+    processors: [new SimpleLogRecordProcessor({ exporter })],
+  });
+  return { provider, exporter };
+}
+
+test('log batch processor options honor the standard OTEL_BLRP environment variables', () => {
+  assert.deepEqual(resolveLogProcessorOptions({}), {
+    scheduledDelayMillis: 1000,
+    exportTimeoutMillis: 30000,
+    maxQueueSize: 2048,
+    maxExportBatchSize: 512,
+  });
+  assert.deepEqual(
+    resolveLogProcessorOptions({
+      OTEL_BLRP_SCHEDULE_DELAY: '25',
+      OTEL_BLRP_EXPORT_TIMEOUT: '50',
+      OTEL_BLRP_MAX_QUEUE_SIZE: '8',
+      OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: '4',
+    }),
+    {
+      scheduledDelayMillis: 25,
+      exportTimeoutMillis: 50,
+      maxQueueSize: 8,
+      maxExportBatchSize: 4,
+    }
+  );
+});
+
+test('invalid log batch options fall back safely and batch size never exceeds queue size', () => {
+  assert.deepEqual(
+    resolveLogProcessorOptions({
+      OTEL_BLRP_SCHEDULE_DELAY: '-1',
+      OTEL_BLRP_EXPORT_TIMEOUT: 'not-a-number',
+      OTEL_BLRP_MAX_QUEUE_SIZE: '10',
+      OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: '100',
+    }),
+    {
+      scheduledDelayMillis: 1000,
+      exportTimeoutMillis: 30000,
+      maxQueueSize: 10,
+      maxExportBatchSize: 10,
+    }
+  );
+});
+
+test('OTEL_LOGS_EXPORTER and OTEL_SDK_DISABLED can disable log export', () => {
+  assert.equal(shouldExportLogs({}), true);
+  assert.equal(shouldExportLogs({ OTEL_LOGS_EXPORTER: 'otlp' }), true);
+  assert.equal(shouldExportLogs({ OTEL_LOGS_EXPORTER: 'none' }), false);
+  assert.equal(shouldExportLogs({ OTEL_SDK_DISABLED: 'TRUE' }), false);
+});
+
+test('the global logger is a no-op before anything acquires logging', () => {
+  // A no-op Logger accepts emit() and discards it; nothing to assert other
+  // than that it never throws.
+  assert.doesNotThrow(() => getLogger().emit({ body: 'probe' }));
+});
+
+test('acquireLogs() activates the global logger; release() deactivates it', async () => {
+  const handle = await acquireLogs();
+  try {
+    assert.ok(logs.getLoggerProvider() instanceof LoggerProvider);
+  } finally {
+    await handle.release();
+  }
+  assert.equal(logs.getLoggerProvider() instanceof LoggerProvider, false);
+});
+
+test('acquireLogs() ref-counts: the logger stays active until every handle releases', async () => {
+  const a = await acquireLogs();
+  const b = await acquireLogs();
+  const registeredWhileBothHeld = logs.getLoggerProvider();
+  try {
+    await a.release();
+    assert.equal(logs.getLoggerProvider(), registeredWhileBothHeld);
+  } finally {
+    await b.release();
+  }
+  assert.notEqual(logs.getLoggerProvider(), registeredWhileBothHeld);
+});
+
+test('acquireLogs() release() is idempotent', async () => {
+  const handle = await acquireLogs();
+  await handle.release();
+  await assert.doesNotReject(handle.release());
+});
+
+test('enabling logs does not register a tracer, and disabling tracing does not stop logging', async () => {
+  const logsHandle = await acquireLogs();
+  try {
+    assert.equal(getTracer().startSpan('should-be-noop').isRecording(), false);
+
+    const traceHandle = await acquire({ env: ALWAYS_ON });
+    await traceHandle.release();
+    // The trace lease's own disable() calls must never have touched logs.*.
+    assert.doesNotThrow(() => getLogger().emit({ body: 'still up' }));
+  } finally {
+    await logsHandle.release();
+  }
+});
+
+test('acquireLogs preserves a LoggerProvider installed by the host', async () => {
+  const external = inMemoryLogger();
+  const installed = logs.setGlobalLoggerProvider(external.provider);
+  assert.equal(installed, external.provider);
+  try {
+    const handle = await acquireLogs();
+    await handle.release();
+
+    getLogger().emit({ body: 'host-owned' });
+    assert.equal(external.exporter.getFinishedLogRecords().at(-1)?.body, 'host-owned');
+  } finally {
+    logs.disable();
     await external.provider.shutdown();
   }
 });

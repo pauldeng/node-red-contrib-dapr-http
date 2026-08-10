@@ -31,16 +31,33 @@ the same change that ships behavior.
   across a subscribe → publish hop) still works exactly as before when
   tracing is off.
 
+- **First-party OpenTelemetry application-log export, opt-in.** Installed
+  through Node-RED's own `settings.js` `logging` configuration — not a node
+  or connection field — via one stable subpath,
+  `require('@pauldeng/node-red-contrib-dapr-http/logging')`, so it can be set
+  up before any flow deploys and keeps exporter credentials out of flow JSON.
+  Every `node.warn()`/`node.error()`/etc. call and Node-RED's own runtime logs
+  export over OTLP/HTTP, sharing the same standard `OTEL_*` environment
+  variables and resource identity as tracing but as an independent lease:
+  enabling it never enables tracing, and disabling or redeploying a traced
+  connection never stops it. A log emitted inside a traced node's own handler
+  carries that span's trace and span IDs automatically. Only a bounded, safe
+  subset of each entry is exported — node/flow identity, level, a bounded
+  message body, and bounded exception details. It never automatically inspects
+  or attaches a flow message, payload, Dapr token, request header, or arbitrary
+  object shape; application-authored log text remains the operator's
+  responsibility. See `docs/architecture.md`'s "Application logs" section.
+
 ### Changed
 
 - **Runtime dependencies are no longer zero.** The official OpenTelemetry
-  packages (`@opentelemetry/api`, `sdk-trace-node`, `exporter-trace-otlp-http`,
-  `resources`) are now pinned, direct dependencies — see `AGENTS.md`'s "Stack
-  (pinned)" for the policy this replaces (deliberately minimal, not zero; any
-  other new runtime dependency needs the maintainer's explicit approval
-  before it is added). Talking to the sidecar itself is unaffected: every
-  publish, invoke, and health-poll call still goes through
-  `lib/sidecar-http.js` alone.
+  packages (`@opentelemetry/api`, `api-logs`, `sdk-trace-node`, `sdk-logs`,
+  `exporter-trace-otlp-http`, `exporter-logs-otlp-http`, `resources`) are now
+  pinned, direct dependencies — see `AGENTS.md`'s "Stack (pinned)" for the
+  policy this replaces (deliberately minimal, not zero; any other new runtime
+  dependency needs the maintainer's explicit approval before it is added).
+  Talking to the sidecar itself is unaffected: every publish, invoke, and
+  health-poll call still goes through `lib/sidecar-http.js` alone.
 
 ## 0.1.1 - 2026-07-29
 

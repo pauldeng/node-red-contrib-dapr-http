@@ -119,12 +119,14 @@ is deprecated and out of scope), Node-RED itself, as the pinned
 `ContainerNodeRed`), not the host child process the runtime tier uses
 (`NodeRed`, `test/helpers/node-red.js` — unchanged, and still exactly what the
 runtime tier runs), and `otel/opentelemetry-collector-contrib:0.158.0`
-(`test/helpers/otel-collector.js`) for the telemetry integration test —
-configured with an OTLP/HTTP receiver and a file exporter on a host-mounted
-temp directory, so that test asserts on the exported spans directly instead
-of a tracing backend or console-log scraping. All five images are pinned by
-digest, not just tag; see `test/helpers/docker.js` (the shared
-`execFileP`/`ensureImage` plumbing every container helper uses) for the
+(`test/helpers/otel-collector.js`) for the telemetry integration tests —
+configured with one OTLP/HTTP receiver feeding two file exporters (traces and
+logs, each on its own host-mounted temp file), so those tests assert on the
+exported spans and log records directly instead of a tracing backend or
+console-log scraping — including one test that checks a real exported log
+record's trace/span IDs against the real span it was emitted inside. All five
+images are pinned by digest, not just tag; see `test/helpers/docker.js` (the
+shared `execFileP`/`ensureImage` plumbing every container helper uses) for the
 re-pin procedure.
 
 `startDaprd()` (`test/helpers/integration.js`) is broker-agnostic: `redisPort`
@@ -295,7 +297,7 @@ Two-part policy:
   `@node-red/registry`; this test suite never asks the editor to install a
   palette module, so that code path never runs here.
 
-  Permitted advisories (dev-only), last reviewed 2026-08-09:
+  Permitted advisories (dev-only), last reviewed 2026-08-10:
 
   | Advisory                                                                                                                                                                                                                     | Package                 | Reached through                                                                                                                                                        |
   | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

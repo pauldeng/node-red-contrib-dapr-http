@@ -178,8 +178,11 @@ test('the package ships only runtime files, and declares itself a Node-RED packa
   // approval before landing here.
   assert.deepEqual(Object.keys(pkg.dependencies).sort(), [
     '@opentelemetry/api',
+    '@opentelemetry/api-logs',
+    '@opentelemetry/exporter-logs-otlp-http',
     '@opentelemetry/exporter-trace-otlp-http',
     '@opentelemetry/resources',
+    '@opentelemetry/sdk-logs',
     '@opentelemetry/sdk-trace-node',
   ]);
   for (const [name, version] of Object.entries(pkg.dependencies)) {

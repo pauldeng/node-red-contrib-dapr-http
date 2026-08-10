@@ -18,12 +18,13 @@ dependencies are pinned and deliberately minimal, not zero: every call **to
 the sidecar** still goes over `node:http` (`lib/sidecar-http.js`) with no
 second HTTP client for that path, but the official OpenTelemetry JavaScript
 SDK (`@opentelemetry/*`) is accepted as this package's own optional tracing
-integration — hand-rolling a W3C context propagator and OTLP exporter would be
-exactly the kind of one-off reinvention the "why HTTP-only, no SDK" reasoning
-below exists to avoid repeating. **Any other new runtime dependency requires
-the maintainer's explicit approval before it is added** — propose it and wait,
-never add one speculatively. Tests use the native `node:test` runner (no
-Mocha/Jest/Vitest/Sinon/Supertest and no `node-red-node-test-helper`).
+and application-log integration — hand-rolling a W3C context propagator and
+OTLP exporter would be exactly the kind of one-off reinvention the "why
+HTTP-only, no SDK" reasoning below exists to avoid repeating. **Any other new
+runtime dependency requires the maintainer's explicit approval before it is
+added** — propose it and wait, never add one speculatively. Tests use the
+native `node:test` runner (no Mocha/Jest/Vitest/Sinon/Supertest and no
+`node-red-node-test-helper`).
 
 ## Layout
 
@@ -105,10 +106,11 @@ justification, so do not relax one because it looks incidental.
   add a second HTTP client or a runtime dependency to talk to the sidecar — the
   wire format is a handful of documented endpoints, and the previous `@dapr/dapr`
   dependency cost 140 transitive packages plus two workarounds for one call.
-  OTLP span export (when tracing is enabled) is a separate, telemetry-only
-  egress path to a collector, not to the sidecar, so it does not run through
-  `lib/sidecar-http.js` — but it must still fail open: an exporter or collector
-  failure never fails, delays, or retries a Node-RED message.
+  OTLP span and application-log export (when enabled) use separate,
+  telemetry-only egress paths to a collector, not to the sidecar, so they do
+  not run through `lib/sidecar-http.js` — but they must still fail open: an
+  exporter or collector failure never fails, delays, or retries a Node-RED
+  message.
 - **Bodies are bounded in both directions.** The connection's configured body
   limit caps what the app channel buffers from an inbound request _and_ what an
   outbound call accepts back — an invoked app's response is the one body an
