@@ -8,6 +8,7 @@
       pubsubName: { value: '', required: true },
       topic: { value: '', required: true },
       contentType: { value: '' },
+      bulkEnabled: { value: false },
       metadata: {
         value: '',
         validate: function (value) {
@@ -76,6 +77,11 @@
       style="width:70%; resize:vertical"
     ></textarea>
   </div>
+  <div class="form-row">
+    <label for="node-input-bulkEnabled"><i class="fa fa-clone"></i> Bulk publish</label>
+    <input type="checkbox" id="node-input-bulkEnabled" style="display:inline-block; width:auto" />
+    <span>msg.payload is an array of entries</span>
+  </div>
 </script>
 
 <script type="text/html" data-help-name="dapr-publish">
@@ -102,6 +108,11 @@
       <code>traceparent</code> so a subscribe &rarr; publish hop stays in one W3C trace. Header
       names and values are validated; <code>content-type</code> and the Dapr API token cannot be set
       this way.
+    </dd>
+    <dt class="optional">dapr.bulk <span class="property-type">boolean</span></dt>
+    <dd>
+      Overrides the node's configured Single/Bulk mode for this one message. A missing value keeps
+      the configured mode.
     </dd>
   </dl>
 
@@ -134,9 +145,70 @@
     which are sent as strings. Neither source object is modified.
   </p>
 
+  <h3>Bulk publish</h3>
+  <p>
+    With <b>Bulk publish</b> enabled (or <code>msg.dapr.bulk = true</code> for one message),
+    <code>msg.payload</code> must be an array of entries instead of a single payload:
+  </p>
+  <pre>
+msg.payload = [
+  { entryId: "order-1", payload: { orderId: 1 } },
+  { entryId: "order-2", payload: { orderId: 2 }, metadata: { partitionKey: "customer-7" } }
+];
+return msg;</pre>
+  <dl class="message-properties">
+    <dt>entryId <span class="property-type">string</span></dt>
+    <dd>Required, unique within the batch.</dd>
+    <dt>
+      payload
+      <span class="property-type">buffer | string | object | array | number | boolean | null</span>
+    </dt>
+    <dd>
+      This entry's event data. For an <code>application/octet-stream</code> content type it must be
+      a Buffer; for a text or XML content type, a string; otherwise any JSON-serializable value.
+    </dd>
+    <dt class="optional">contentType <span class="property-type">string</span></dt>
+    <dd>
+      Falls back to <code>msg.dapr.contentType</code>, then the node's configured content type, then
+      to the same automatic inference single publish uses. Dapr's bulk publish API only accepts
+      <code>application/json</code>, <code>application/cloudevents+json</code>, a
+      <code>text/*</code> type, <code>application/xml</code>, or
+      <code>application/octet-stream</code> &mdash; an unsupported type is rejected before
+      contacting the sidecar, since Dapr itself would otherwise fail the entire batch.
+    </dd>
+    <dt class="optional">metadata <span class="property-type">object</span></dt>
+    <dd>
+      Per-entry metadata; overrides the request-level (configured/<code>msg.dapr.metadata</code>)
+      metadata for that entry only.
+    </dd>
+  </dl>
+  <p>
+    An empty batch, a missing or duplicate <code>entryId</code>, an unsupported content type, more
+    than 1000 entries, or an encoded body over the connection's body limit all fail as
+    <code>INVALID_MESSAGE</code> before any request is sent.
+  </p>
+  <p>
+    On success, <code>msg.dapr.bulkResult = { failedEntries: [], entryCount }</code> is added before
+    the message is sent on. If Dapr reports any entries failed &mdash; including every entry in the
+    batch &mdash; the node calls <code>done(error)</code> with code
+    <code>BULK_PUBLISH_PARTIAL</code>
+    instead of sending the message, first setting
+    <code
+      >msg.dapr.bulkResult = { failedEntries: [{ entryId, error }], entryCount, errorCode }</code
+    >
+    so a Catch node can inspect and retry only the failed entries; the node never resubmits the
+    batch automatically. A transport failure or a request-level rejection (for example a bug that
+    slipped a duplicate <code>entryId</code> past validation) still follows the existing
+    <code>SIDECAR_UNAVAILABLE</code>/<code>PUBLISH_FAILED</code> contract &mdash; this also covers
+    the rare case where Dapr's own pub/sub component reports a bulk failure with no specific failed
+    entries identified: with nothing for a Catch node to retry, that is reported as
+    <code>PUBLISH_FAILED</code>, not as an empty <code>BULK_PUBLISH_PARTIAL</code>.
+  </p>
+
   <h3>Outputs</h3>
   <p>
-    On success, the original message is sent unchanged. On failure, the node calls
+    On success, single publish sends the original message unchanged; bulk publish adds only the
+    <code>msg.dapr.bulkResult</code> summary described above. On failure, the node calls
     <code>done(error)</code> so a Catch node can handle it; messages are not queued while the
     sidecar is unavailable.
   </p>

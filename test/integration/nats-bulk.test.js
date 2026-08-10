@@ -25,9 +25,10 @@ const { startDaprd } = require('../helpers/integration');
 const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpers/nats');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
+const { publishBulk } = require('../../lib/dapr-client');
 
 test(
-  'real NATS JetStream batches several publishes into one bulk delivery once concurrency: parallel is set',
+  'real NATS JetStream delivers one bulk-publish request as one identifiable bulk subscription batch',
   { timeout: 60000 },
   async (t) => {
     const appId = 'it-nats-bulk';
@@ -113,22 +114,20 @@ return msg;`,
     });
     t.after(() => daprd.stop());
 
-    const publish = (n) =>
-      httpRequest(`${daprd.baseUrl}/v1.0/publish/pubsub/orders`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ n }),
-        timeoutMs: 4000,
-      });
-
-    // Fired back to back, well inside bulkMaxAwaitDurationMs, so daprd has
-    // the chance to coalesce them into one bulk callback — which it can only
-    // do because concurrency: parallel lets more than one Subscribe()
-    // callback be in flight at once.
-    const publishes = await Promise.all([publish(1), publish(2), publish(3)]);
-    for (const r of publishes) {
-      assert.equal(r.status, 204);
-    }
+    await publishBulk(
+      { baseUrl: daprd.baseUrl, timeoutMs: 4000 },
+      {
+        pubsubName: 'pubsub',
+        topic: 'orders',
+        entries: [1, 2, 3].map((n) => ({
+          entryId: `publish-${n}`,
+          event: { n },
+          contentType: 'application/json',
+          metadata: {},
+        })),
+        options: { metadata: {} },
+      }
+    );
 
     await waitFor(() => (capture.received.length >= 3 ? true : null));
     const byN = new Map(capture.received.map((r) => [r.n, r]));

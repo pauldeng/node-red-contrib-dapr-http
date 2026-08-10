@@ -88,8 +88,9 @@ modules with no Node-RED import, so they're directly unit-testable. See
 
 Everything this package sends to the sidecar is a handful of documented HTTP
 endpoints: `POST /v1.0/publish/<pubsub>/<topic>`,
+`POST /v1.0/publish/bulk/<pubsub>/<topic>`,
 `/v1.0/invoke/<app-id>/method/<method>`, and `GET /v1.0/healthz/outbound`. All
-three go through `lib/sidecar-http.js`, so there is exactly one place where
+four go through `lib/sidecar-http.js`, so there is exactly one place where
 deadlines, aborts, Content-Length framing, response bounds, and error mapping
 are implemented.
 
@@ -179,8 +180,8 @@ Verified against real infrastructure, not only the fake-sidecar runtime tier:
 the integration tier pins `otel/opentelemetry-collector-contrib` (see
 `docs/testing.md`) configured with a file exporter, and asserts on the
 exported OTLP spans directly — real daprd + Redis delivery, through a plain
-function node, into a real outbound publish, checked for one shared trace ID
-and correct span nesting.
+function node, into a real outbound bulk publish, checked for one shared trace
+ID, correct span nesting, and bounded batch/failure-count attributes.
 
 ### Application logs
 

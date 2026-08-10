@@ -38,3 +38,19 @@ test('publish help explicitly documents metadata merge precedence and message pr
   assert.match(html, /iana\.org\/assignments\/media-types\/media-types\.xhtml/);
   assert.match(html, /v1-18\.docs\.dapr\.io\/reference\/api\/pubsub_api/);
 });
+
+test('publish editor exposes a bulk publish toggle, off by default', () => {
+  const html = fs.readFileSync(editorPath, 'utf8');
+  assert.match(html, /bulkEnabled:\s*\{\s*value:\s*false\s*\}/);
+  assert.match(html, /node-input-bulkEnabled/);
+});
+
+test('publish help documents the bulk entry contract, its content-type restrictions, and bulkResult', () => {
+  const html = fs.readFileSync(editorPath, 'utf8');
+  assert.match(html, /entryId/);
+  assert.match(html, /BULK_PUBLISH_PARTIAL/);
+  assert.match(html, /bulkResult/);
+  assert.match(html, /msg\.dapr\.bulk\b/);
+  assert.match(html, /1000 entries/);
+  assert.match(html, /entire batch/i);
+});

@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 
-const { publish } = require('../../lib/dapr-client');
+const { publish, publishBulk } = require('../../lib/dapr-client');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 
 async function fakeSidecar(handler) {
@@ -313,4 +313,204 @@ test('every JSON media type serializes as JSON, including parameters and +json s
     })
   );
   assert.equal(sidecar.requests.at(-1).body.toString(), 'raw text');
+});
+
+// --- publishBulk ---
+
+const bulkRequest = (over = {}) => ({
+  pubsubName: 'pubsub',
+  topic: 'orders',
+  entries: [{ entryId: 'e1', event: { id: 1 }, contentType: 'application/json', metadata: {} }],
+  options: { metadata: {} },
+  ...over,
+});
+
+test('publishBulk POSTs the entries array to the bulk endpoint as JSON, with request metadata as query params', async (t) => {
+  const sidecar = await recordingSidecar(204);
+  t.after(() => sidecar.stop());
+
+  await publishBulk(
+    { baseUrl: sidecar.baseUrl, token: 'realtoken', timeoutMs: 5000 },
+    bulkRequest({ options: { metadata: { partitionKey: 'p1' } } })
+  );
+
+  const [received] = sidecar.requests;
+  assert.equal(received.method, 'POST');
+  assert.equal(received.path, '/v1.0/publish/bulk/pubsub/orders');
+  assert.deepEqual(received.query, { 'metadata.partitionKey': 'p1' });
+  assert.equal(received.headers['content-type'], 'application/json');
+  assert.equal(received.headers['dapr-api-token'], 'realtoken');
+  assert.deepEqual(JSON.parse(received.body.toString()), [
+    { entryId: 'e1', event: { id: 1 }, contentType: 'application/json', metadata: {} },
+  ]);
+});
+
+test('publishBulk encodes pubsub and topic so neither can escape the bulk publish route', async (t) => {
+  const sidecar = await recordingSidecar(204);
+  t.after(() => sidecar.stop());
+
+  await publishBulk(
+    { baseUrl: sidecar.baseUrl },
+    bulkRequest({ pubsubName: '../secrets', topic: 'a/b' })
+  );
+  assert.equal(sidecar.requests[0].path, '/v1.0/publish/bulk/..%2Fsecrets/a%2Fb');
+});
+
+test('publishBulk resolves with no result on any 2xx status', async (t) => {
+  for (const status of [200, 202, 204]) {
+    const sidecar = await recordingSidecar(status);
+    t.after(() => sidecar.stop());
+    await assert.doesNotReject(publishBulk({ baseUrl: sidecar.baseUrl }, bulkRequest()));
+  }
+});
+
+test('a non-2xx response carrying failedEntries becomes BULK_PUBLISH_PARTIAL with that result attached', async (t) => {
+  const sidecar = await recordingSidecar(
+    500,
+    JSON.stringify({
+      failedEntries: [{ entryId: 'e1', error: 'broker unavailable' }],
+      errorCode: 'ERR_PUBSUB_PUBLISH_MESSAGE',
+    })
+  );
+  t.after(() => sidecar.stop());
+
+  await assert.rejects(publishBulk({ baseUrl: sidecar.baseUrl }, bulkRequest()), (err) => {
+    assert.ok(err instanceof DaprError);
+    assert.equal(err.code, ErrorCodes.BULK_PUBLISH_PARTIAL);
+    assert.deepEqual(err.bulkResult, {
+      failedEntries: [{ entryId: 'e1', error: 'broker unavailable' }],
+      errorCode: 'ERR_PUBSUB_PUBLISH_MESSAGE',
+    });
+    return true;
+  });
+});
+
+test('BULK_PUBLISH_PARTIAL is used even when every entry failed, not a separate total-failure code', async (t) => {
+  const sidecar = await recordingSidecar(
+    500,
+    JSON.stringify({
+      failedEntries: [
+        { entryId: 'e1', error: 'broker unavailable' },
+        { entryId: 'e2', error: 'broker unavailable' },
+      ],
+    })
+  );
+  t.after(() => sidecar.stop());
+
+  await assert.rejects(
+    publishBulk({ baseUrl: sidecar.baseUrl }, bulkRequest()),
+    (err) =>
+      err.code === ErrorCodes.BULK_PUBLISH_PARTIAL && err.bulkResult.failedEntries.length === 2
+  );
+});
+
+test('an empty failedEntries array cannot identify retryable entries and remains PUBLISH_FAILED', async (t) => {
+  const sidecar = await recordingSidecar(500, JSON.stringify({ failedEntries: [] }));
+  t.after(() => sidecar.stop());
+
+  await assert.rejects(
+    publishBulk({ baseUrl: sidecar.baseUrl }, bulkRequest()),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.PUBLISH_FAILED
+  );
+});
+
+test('a non-2xx response with no failedEntries (a request-level rejection) is PUBLISH_FAILED, not partial', async (t) => {
+  // Matches real daprd's response to a duplicate/missing entryId or an
+  // unsupported content type: its own generic error envelope, no
+  // failedEntries key at all -- the whole batch was rejected, not partially
+  // published.
+  const sidecar = await recordingSidecar(
+    400,
+    JSON.stringify({ errorCode: 'ERR_PUBSUB_EVENTS_SER', message: 'entryId is duplicated' })
+  );
+  t.after(() => sidecar.stop());
+
+  await assert.rejects(
+    publishBulk({ baseUrl: sidecar.baseUrl }, bulkRequest()),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.PUBLISH_FAILED
+  );
+});
+
+test('a non-JSON, non-2xx body is PUBLISH_FAILED, not partial', async (t) => {
+  const sidecar = await recordingSidecar(502, 'upstream error');
+  t.after(() => sidecar.stop());
+
+  await assert.rejects(
+    publishBulk({ baseUrl: sidecar.baseUrl }, bulkRequest()),
+    (err) => err.code === ErrorCodes.PUBLISH_FAILED
+  );
+});
+
+test('publishBulk forwards caller headers, dropping hop-by-hop and token overrides', async (t) => {
+  const sidecar = await recordingSidecar(204);
+  t.after(() => sidecar.stop());
+
+  await publishBulk(
+    { baseUrl: sidecar.baseUrl, token: 'realtoken' },
+    bulkRequest({
+      headers: {
+        traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        'transfer-encoding': 'chunked',
+        'dapr-api-token': 'attacker-supplied',
+        'content-type': 'text/plain',
+      },
+    })
+  );
+  const received = sidecar.requests[0].headers;
+  assert.equal(received.traceparent, '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01');
+  assert.equal(received['transfer-encoding'], undefined);
+  assert.equal(received['dapr-api-token'], 'realtoken');
+  assert.equal(received['content-type'], 'application/json');
+});
+
+test('an unserializable direct bulk request is INVALID_MESSAGE before transport', async () => {
+  await assert.rejects(
+    publishBulk(
+      { baseUrl: 'http://127.0.0.1:1' },
+      bulkRequest({
+        entries: [{ entryId: 'bad', event: 1n, contentType: 'application/json', metadata: {} }],
+      })
+    ),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_MESSAGE
+  );
+});
+
+test('an over-size bulk response body is RESPONSE_TOO_LARGE, not a sidecar outage', async (t) => {
+  const sidecar = await recordingSidecar(500, 'x'.repeat(4096));
+  t.after(() => sidecar.stop());
+
+  await assert.rejects(
+    publishBulk({ baseUrl: sidecar.baseUrl, maxResponseBytes: 1024 }, bulkRequest()),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.RESPONSE_TOO_LARGE
+  );
+});
+
+test('publishBulk rejects when it exceeds its deadline', async (t) => {
+  const sidecar = await fakeSidecar((req) => req.resume());
+  t.after(() => sidecar.stop());
+
+  await assert.rejects(
+    publishBulk({ baseUrl: sidecar.baseUrl, timeoutMs: 200 }, bulkRequest()),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.SIDECAR_UNAVAILABLE
+  );
+});
+
+test('publishBulk aborts in flight when its signal is aborted', async (t) => {
+  const sidecar = await fakeSidecar((req) => req.resume());
+  t.after(() => sidecar.stop());
+
+  const controller = new AbortController();
+  const pending = publishBulk(
+    { baseUrl: sidecar.baseUrl, timeoutMs: 5000, signal: controller.signal },
+    bulkRequest()
+  );
+  controller.abort();
+  await assert.rejects(pending, (err) => err instanceof DaprError);
+});
+
+test('a bulk publish transport failure becomes SIDECAR_UNAVAILABLE, not PUBLISH_FAILED', async () => {
+  await assert.rejects(
+    publishBulk({ baseUrl: 'http://127.0.0.1:1', timeoutMs: 500 }, bulkRequest()),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.SIDECAR_UNAVAILABLE
+  );
 });

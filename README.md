@@ -40,19 +40,18 @@ node's own dialog rather than dragged from the palette.
 
 Two Dapr building blocks, over HTTP only. Every call to the sidecar is a plain
 `node:http` request; the only runtime dependencies are the pinned official
-OpenTelemetry packages used by optional tracing:
+OpenTelemetry packages used by optional tracing and application-log export:
 
-- **Pub/sub** — publish, subscribe (CEL routing rules, bulk delivery, raw
-  payloads, dead-letter topics), and explicit SUCCESS/RETRY/DROP
+- **Pub/sub** — publish (single and bulk), subscribe (CEL routing rules, bulk
+  delivery, raw payloads, dead-letter topics), and explicit SUCCESS/RETRY/DROP
   acknowledgement.
 - **Service invocation** — calling another app-id's method, and exposing methods
   other apps can call.
 
 Deliberately **not** covered: state management, bindings, secrets,
 configuration, actors, workflows, distributed lock, jobs, the conversation API,
-gRPC transport, and bulk _publish_ (bulk _subscribe_ is supported; the bulk
-publish API is still alpha in Dapr 1.18.1). A flow that needs one of those can
-reach it with a `dapr-invoke` node or a core `http request` node against the
+and gRPC transport. A flow that needs one of those can reach it with a
+`dapr-invoke` node or a core `http request` node against the
 sidecar's own API in the meantime.
 
 ## OpenTelemetry tracing
