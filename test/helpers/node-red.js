@@ -26,19 +26,23 @@ function freePort() {
   });
 }
 
-function settingsSource(uiPort) {
+function settingsSource(uiPort, { loggingExtra = '' } = {}) {
   // Minimal, deterministic settings: fixed port, default admin/node roots,
   // no editor auth, projects/tours off, info logging for readiness detection.
   // telemetry.enabled=false skips the first-run "Enable Update Notifications"
   // consent modal entirely — undocumented in a fresh userDir, it otherwise
   // blocks every editor interaction behind a full-screen shade (found via a
-  // real browser drive while building the e2e tier).
+  // real browser drive while building the e2e tier). loggingExtra is a raw
+  // source fragment (not a serializable value: it needs its own require()
+  // call) spliced into the `logging` object for tests exercising the
+  // settings.js-installed OTel logging bridge; the default preserves every
+  // other test's exact prior settings.js output.
   return `module.exports = {
   uiPort: ${uiPort},
   httpAdminRoot: '/',
   httpNodeRoot: '/',
   flowFile: 'flows.json',
-  logging: { console: { level: 'info', metrics: false, audit: false } },
+  logging: { console: { level: 'info', metrics: false, audit: false }${loggingExtra} },
   editorTheme: { projects: { enabled: false }, tours: false },
   telemetry: { enabled: false },
   functionGlobalContext: {},
@@ -75,7 +79,7 @@ class NodeRed {
     return this.logs.join('');
   }
 
-  async start({ flows = [], readyTimeoutMs = 30000, env = {} } = {}) {
+  async start({ flows = [], readyTimeoutMs = 30000, env = {}, loggingExtra = '' } = {}) {
     this.port = await freePort();
     // Transactional: if any step fails (including readiness), tear down the
     // process and temp directory before rethrowing so nothing leaks.
@@ -93,7 +97,10 @@ class NodeRed {
       await fsp.mkdir(path.dirname(this._linkPath), { recursive: true });
       await fsp.symlink(WORKSPACE, this._linkPath, 'dir');
 
-      await fsp.writeFile(path.join(this.userDir, 'settings.js'), settingsSource(this.port));
+      await fsp.writeFile(
+        path.join(this.userDir, 'settings.js'),
+        settingsSource(this.port, { loggingExtra })
+      );
       await fsp.writeFile(path.join(this.userDir, 'flows.json'), JSON.stringify(flows));
 
       // Run red.js with our own Node binary so the runtime uses the same version

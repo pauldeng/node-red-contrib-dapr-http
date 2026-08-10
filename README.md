@@ -1,7 +1,8 @@
 # @pauldeng/node-red-contrib-dapr-http
 
 Node-RED nodes for Dapr pub/sub and service invocation, talking to a Dapr
-sidecar over its HTTP API only, with optional first-party OpenTelemetry tracing.
+sidecar over its HTTP API only, with optional first-party OpenTelemetry
+tracing and application-log export.
 
 ## Prerequisites
 
@@ -67,6 +68,60 @@ provider, the nodes reuse it without replacing or shutting it down.
 Export is batched and off the message path; an unavailable collector never
 changes message delivery. See [Telemetry](docs/architecture.md#telemetry) for
 the lifecycle and span model.
+
+## OpenTelemetry application logs
+
+A separate opt-in, installed through Node-RED's own `settings.js`
+`logging` configuration rather than a node or connection field — that keeps
+exporter credentials out of flow JSON and lets it capture Node-RED's own
+startup logs before any flow deploys:
+
+```js
+// settings.js
+module.exports = {
+  // ...
+  logging: {
+    console: { level: 'info' }, // unaffected; keep or drop independently
+    otel: {
+      level: 'info', // Node-RED's own gating: fatal/error/warn/info/debug/trace
+      metrics: false, // opt in to export RED.log metric() events too
+      audit: false, // opt in to export audit events too
+      handler: require('@pauldeng/node-red-contrib-dapr-http/logging'),
+    },
+  },
+};
+```
+
+Every `node.warn()`/`node.error()`/etc. call and Node-RED's own runtime logs
+export over OTLP/HTTP using the same standard `OTEL_*` environment variables
+as tracing, and reuse the same resource identity — but logging is an
+independent lease: enabling it never enables tracing or flow spans, and
+disabling or redeploying a traced connection never stops it. A log emitted
+from inside a traced node's own handler carries that span's trace and span
+IDs automatically; an out-of-flow log (including everything logged before the
+first flow deploys) has neither. Only a bounded, safe subset of each log
+entry is exported — node id/type/name, flow id, level, a bounded message body,
+and bounded exception details for an `Error`. The bridge never inspects or
+automatically attaches a flow message, payload, Dapr token, request header, or
+arbitrary object shape. Log text is still application-authored: explicitly
+logging a secret string exports that string, so flows must not log secrets.
+
+`OTEL_LOGS_EXPORTER` supports `otlp` (the default) and `none`;
+`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` and `OTEL_EXPORTER_OTLP_LOGS_HEADERS`
+configure the OTLP/HTTP destination, and `OTEL_BLRP_*` controls the bounded
+batch queue, batch size, schedule delay, and export timeout. `OTEL_SDK_DISABLED`
+also disables export. Records produced during asynchronous provider startup use
+a bounded startup buffer and retain their original Node-RED timestamp and
+active trace context.
+
+The OpenTelemetry JavaScript Logs API/SDK is still classified as Development,
+so its packages are pinned exactly and are upgraded only with the complete log
+contract passing.
+
+This lease is process-lifetime: nothing in the ordinary deploy/redeploy path
+releases it. An operator managing their own graceful shutdown can call
+`require('@pauldeng/node-red-contrib-dapr-http/logging').shutdown()` to flush
+and release it deliberately.
 
 ## A minimal flow
 

@@ -59,8 +59,13 @@ function collectorConfigYaml() {
 processors:
   batch:
 exporters:
-  file:
+  file/traces:
     path: /output/spans.jsonl
+    rotation:
+      max_megabytes: 1
+      max_backups: 1
+  file/logs:
+    path: /output/logs.jsonl
     rotation:
       max_megabytes: 1
       max_backups: 1
@@ -69,7 +74,11 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [file]
+      exporters: [file/traces]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [file/logs]
 `;
 }
 
@@ -105,6 +114,7 @@ async function startOtelCollector() {
   ]);
 
   const outputPath = path.join(outputDir, 'spans.jsonl');
+  const logsOutputPath = path.join(outputDir, 'logs.jsonl');
   const deadline = Date.now() + 20000;
   let ready = false;
   while (Date.now() < deadline && !ready) {
@@ -125,41 +135,53 @@ async function startOtelCollector() {
     throw new Error(`otel collector did not become ready: ${logs}`);
   }
 
+  // Parses one file exporter's newline-delimited OTLP JSON output (one JSON
+  // object per export batch) into a flat list of the leaf records `extract`
+  // pulls from each resource/scope wrapper. A batch mid-write at read time is
+  // read on the NEXT poll instead, so a partial-line parse failure here is
+  // swallowed rather than thrown.
+  async function readJsonlRecords(filePath, extract) {
+    let text;
+    try {
+      text = await fsp.readFile(filePath, 'utf8');
+    } catch {
+      return [];
+    }
+    const records = [];
+    for (const line of text.split('\n')) {
+      if (!line.trim()) {
+        continue;
+      }
+      let doc;
+      try {
+        doc = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      records.push(...extract(doc));
+    }
+    return records;
+  }
+
   return {
     port,
     name,
     // Every span the file exporter has flushed so far, parsed from its OTLP
-    // JSON representation. The file exporter appends one JSON object per
-    // export batch (newline-delimited); a batch mid-write at read time is
-    // read on the NEXT poll instead, so a partial-line parse failure here is
-    // swallowed rather than thrown.
-    async readSpans() {
-      let text;
-      try {
-        text = await fsp.readFile(outputPath, 'utf8');
-      } catch {
-        return [];
-      }
-      const spans = [];
-      for (const line of text.split('\n')) {
-        if (!line.trim()) {
-          continue;
-        }
-        let doc;
-        try {
-          doc = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        for (const resourceSpan of doc.resourceSpans || []) {
-          for (const scopeSpan of resourceSpan.scopeSpans || []) {
-            spans.push(...(scopeSpan.spans || []));
-          }
-        }
-      }
-      return spans;
-    },
-    logs: () => dockerLogs(name),
+    // JSON representation.
+    readSpans: () =>
+      readJsonlRecords(outputPath, (doc) =>
+        (doc.resourceSpans || []).flatMap((rs) =>
+          (rs.scopeSpans || []).flatMap((ss) => ss.spans || [])
+        )
+      ),
+    // Every log record the file exporter has flushed so far.
+    readLogRecords: () =>
+      readJsonlRecords(logsOutputPath, (doc) =>
+        (doc.resourceLogs || []).flatMap((rl) =>
+          (rl.scopeLogs || []).flatMap((sl) => sl.logRecords || [])
+        )
+      ),
+    dockerLogs: () => dockerLogs(name),
     stop: async () => {
       await dockerStop(name);
       await fsp.rm(configDir, { recursive: true, force: true });
