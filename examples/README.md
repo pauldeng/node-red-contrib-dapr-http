@@ -20,6 +20,10 @@ Redis or broker-side dead-letter handling instead. See
 Service invocation examples do not need Redis or NATS. They need `daprd` plus
 another Dapr app to call, or another caller that invokes this app.
 
+The state-management example needs Redis (or another Dapr state store), but
+not NATS or a broker component at all -- state management never touches
+pub/sub.
+
 ## Run the basic pub/sub example locally
 
 1. Install this package into your Node-RED user directory, then start Node-RED:
@@ -78,6 +82,11 @@ metadata, dead-letter topic, raw-payload mode, CEL rules, or bulk settings.
 - `inbound-service.json` exposes `POST /orders/echo` and replies through
   `dapr-response`. Invoke it from another Dapr app or with daprd's service
   invocation API.
+- `state-management.json` saves a value to a Dapr state store, then reads it
+  back with a separate `dapr-state` (get) node. It needs
+  `redis-statestore-component.yaml` (or another Dapr state-store component
+  named `statestore`), started the same way as this quickstart's Redis
+  pub/sub option: `docker run -d -p 6379:6379 redis:7.4-alpine`.
 
 For `cel-routing.json` or `bulk-acknowledgement.json`, create the NATS stream
 with the `orders` subject too:

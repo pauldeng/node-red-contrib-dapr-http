@@ -1,11 +1,12 @@
 # @pauldeng/node-red-contrib-dapr-http — Engineering Guide
 
-Node-RED nodes that publish and receive Dapr pub/sub messages and invoke and
-expose Dapr services through a Dapr sidecar. HTTP over TCP only. **Published
-publicly** to npm as `@pauldeng/node-red-contrib-dapr-http` under the MIT license,
-and listed in the Node-RED library — so the README, node help, and examples are
-consumer-facing documentation, not internal notes, and a breaking change to a
-node's config fields or `msg.dapr` contract is a breaking change for strangers.
+Node-RED nodes that publish and receive Dapr pub/sub messages, invoke and
+expose Dapr services, and manage state through a Dapr sidecar. HTTP over TCP
+only. **Published publicly** to npm as `@pauldeng/node-red-contrib-dapr-http`
+under the MIT license, and listed in the Node-RED library — so the README,
+node help, and examples are consumer-facing documentation, not internal
+notes, and a breaking change to a node's config fields or `msg.dapr` contract
+is a breaking change for strangers.
 
 This file is the single, provider-neutral source of durable instructions for
 any engineer or coding agent working in this repository. `CLAUDE.md` imports it
@@ -102,10 +103,11 @@ justification, so do not relax one because it looks incidental.
   via `done(error)` and drive status from a bounded-backoff health poll of
   `/v1.0/healthz/outbound` (outbound excludes the app channel — the right probe).
 - **HTTP-only, one outbound path.** Every outbound call — publish, service
-  invocation, and the health poll — goes through `lib/sidecar-http.js`, so there
-  is one place where deadlines, aborts, framing, and response bounds are correct.
-  Publish and invoke use Node's process-global keep-alive agent (centrally owned,
-  never a per-node agent); the health poll is the only caller that passes
+  invocation, state management, and the health poll — goes through
+  `lib/sidecar-http.js`, so there is one place where deadlines, aborts,
+  framing, and response bounds are correct. Publish, invoke, and state calls
+  use Node's process-global keep-alive agent (centrally owned, never a
+  per-node agent); the health poll is the only caller that passes
   `agent: false`, so a sidecar going down leaves no pooled socket behind. Do not
   add a second HTTP client or a runtime dependency to talk to the sidecar — the
   wire format is a handful of documented endpoints, and the previous `@dapr/dapr`
@@ -121,9 +123,10 @@ justification, so do not relax one because it looks incidental.
   operator does not control. Over-size fails as `RESPONSE_TOO_LARGE`, never as
   `SIDECAR_UNAVAILABLE`: the sidecar answered.
 - **Sidecar paths are built, never interpolated.** Any app id, method, pubsub
-  name, or topic that reaches a URL is validated and percent-encoded
-  (`buildInvokePath`, `publish`), so a `..` segment can never redirect a
-  token-bearing request to another Dapr control-plane API.
+  name, topic, state store, or state key that reaches a URL is validated and
+  percent-encoded (`buildInvokePath`, `publish`, `buildStatePath`), so a `..`
+  segment can never redirect a token-bearing request to another Dapr
+  control-plane API.
 
 ## Security boundaries
 

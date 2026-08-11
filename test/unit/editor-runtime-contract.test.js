@@ -10,6 +10,7 @@ const { resolveOptions } = require('../../lib/options');
 const { ErrorCodes } = require('../../lib/errors');
 const { buildService } = require('../../lib/services');
 const { preparePublish } = require('../../lib/messages');
+const { prepareStateSave } = require('../../lib/state-messages');
 const { buildSubscription } = require('../../lib/subscriptions');
 const { parseRequestHeaders } = require('../../lib/http-headers');
 
@@ -245,6 +246,17 @@ test('pub/sub metadata: both editors match their runtime normalizer', () => {
     mode: 'exact',
   });
   assertContract({
+    label: 'dapr-state metadata',
+    editor: loadEditorValidator('dapr-state.html', 'metadata'),
+    runtime: (metadata) =>
+      prepareStateSave(
+        { storeName: 's', key: 'k', consistency: '', concurrency: '', ttlSeconds: '', metadata },
+        { payload: 'x' }
+      ),
+    cases: METADATA,
+    mode: 'exact',
+  });
+  assertContract({
     label: 'dapr-subscribe metadata',
     editor: loadEditorValidator('dapr-subscribe.html', 'metadata'),
     runtime: (metadata) =>
@@ -349,6 +361,22 @@ test('numeric editor fields never accept a value their runtime bound rejects', (
           topic: 't',
           bulkSubscribe: { enabled: true, maxAwaitDurationMs: v },
         }),
+    ],
+    [
+      'ttlSeconds',
+      'dapr-state.html',
+      (v) =>
+        prepareStateSave(
+          {
+            storeName: 's',
+            key: 'k',
+            consistency: '',
+            concurrency: '',
+            ttlSeconds: v,
+            metadata: '',
+          },
+          { payload: 'x' }
+        ),
     ],
   ];
   for (const [property, file, runtime] of pairs) {

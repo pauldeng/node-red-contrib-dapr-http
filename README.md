@@ -1,8 +1,8 @@
 # @pauldeng/node-red-contrib-dapr-http
 
-Node-RED nodes for Dapr pub/sub and service invocation, talking to a Dapr
-sidecar over its HTTP API only, with optional first-party OpenTelemetry
-tracing and application-log export.
+Node-RED nodes for Dapr pub/sub, service invocation, and state management,
+talking to a Dapr sidecar over its HTTP API only, with optional first-party
+OpenTelemetry tracing and application-log export.
 
 ## Prerequisites
 
@@ -22,7 +22,7 @@ Or from your Node-RED user directory (typically `~/.node-red`):
 npm install @pauldeng/node-red-contrib-dapr-http
 ```
 
-Then restart Node-RED. Six of the seven nodes below appear in the palette
+Then restart Node-RED. Seven of the eight nodes below appear in the palette
 under **network**; `dapr-connection` is a config node, created from another
 node's own dialog rather than dragged from the palette.
 
@@ -35,30 +35,35 @@ node's own dialog rather than dragged from the palette.
 | `dapr-invoke`     | Call a method on another Dapr app-id.                                                    |
 | `dapr-service`    | Expose a method other Dapr apps can invoke.                                              |
 | `dapr-response`   | Reply to a `dapr-service` invocation.                                                    |
+| `dapr-state`      | Get, save, delete, bulk get, or transactionally update state-store values.               |
 
 ## Scope
 
-Two Dapr building blocks, over HTTP only. Every call to the sidecar is a plain
-`node:http` request; the only runtime dependencies are the pinned official
-OpenTelemetry packages used by optional tracing and application-log export:
+Three Dapr building blocks, over HTTP only. Every call to the sidecar is a
+plain `node:http` request; the only runtime dependencies are the pinned
+official OpenTelemetry packages used by optional tracing and application-log
+export:
 
 - **Pub/sub** — publish (single and bulk), subscribe (CEL routing rules, bulk
   delivery, raw payloads, dead-letter topics), and explicit SUCCESS/RETRY/DROP
   acknowledgement.
 - **Service invocation** — calling another app-id's method, and exposing methods
   other apps can call.
+- **State management** — get, save, delete, bulk get, and transaction, with
+  ETag-based optimistic concurrency. Dapr's state query API is not
+  supported: it remains alpha and depends on store-specific query
+  capabilities.
 
-Deliberately **not** covered: state management, bindings, secrets,
-configuration, actors, workflows, distributed lock, jobs, the conversation API,
-and gRPC transport. A flow that needs one of those can reach it with a
-`dapr-invoke` node or a core `http request` node against the
-sidecar's own API in the meantime.
+Deliberately **not** covered: bindings, secrets, configuration, actors,
+workflows, distributed lock, jobs, the conversation API, and gRPC transport. A
+flow that needs one of those can reach it with a `dapr-invoke` node or a core
+`http request` node against the sidecar's own API in the meantime.
 
 ## OpenTelemetry tracing
 
 Tracing is disabled by default. Enable **Tracing** on any `dapr-connection` to
-export Dapr publish, subscribe, invoke, and service boundary spans plus spans
-for the Node-RED nodes traversed by each message. The integration propagates
+export Dapr publish, subscribe, invoke, service, and state boundary spans plus
+spans for the Node-RED nodes traversed by each message. The integration propagates
 W3C `traceparent` and `tracestate` automatically and uses standard `OTEL_*`
 environment variables for service identity, the OTLP/HTTP collector endpoint,
 authentication, and sampling. If Node-RED already owns a global OpenTelemetry
@@ -127,19 +132,21 @@ and release it deliberately.
 Import `examples/basic-pubsub.json` (menu → Import → paste or select the
 file) for the smallest complete flow: publish a message, receive it back on
 the same topic. `examples/README.md` has the NATS JetStream + `daprd`
-quickstart. All five example flows are in `examples/`:
+quickstart. All six example flows are in `examples/`:
 
 - `basic-pubsub.json` — publish and subscribe.
 - `cel-routing.json` — subscribe with CEL routing rules.
 - `bulk-acknowledgement.json` — bulk subscribe with per-entry acknowledgement.
 - `outbound-invocation.json` — call another app-id's method.
 - `inbound-service.json` — expose a method and reply with `dapr-response`.
+- `state-management.json` — save a value to a state store, then read it back.
 
 `examples/nats-jetstream-pubsub-component.yaml` is the beginner pub/sub
 component. `examples/memorydb-pubsub-component.yaml` is for AWS MemoryDB
-operators. These are Dapr **components**, not flows: the nodes never see the
-broker, so `basic-pubsub.json` works against either component unchanged. See
-`docs/deployment.md`.
+operators. `examples/redis-statestore-component.yaml` backs
+`state-management.json`. These are Dapr **components**, not flows: the nodes
+never see the broker or store, so a flow works against any component of the
+matching name/type unchanged. See `docs/deployment.md`.
 
 ## NATS JetStream
 

@@ -30,7 +30,7 @@ npm run test:e2e         # Playwright tests against the real Node-RED editor
 
 npm run test:integration:nats      # NATS JetStream-backed tests only (test/integration/nats-*.test.js)
 npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown)
-npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish
+npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish, state management
 npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
 
@@ -49,6 +49,15 @@ test happens to need an image first. A focused script run standalone still
 works correctly without it — each container helper calls `ensureImage()`
 itself — it just risks a slow cold pull counting against that test's own
 timeout instead.
+
+`test/integration/state.test.js` lives in the Redis bucket for a different
+reason than the pub/sub tests beside it: state management has no
+primary/secondary broker split the way pub/sub does (NATS JetStream vs.
+Redis) — it needs exactly one backing store, and Redis is the one this
+package already has pinned and Docker-tested. It proves `dapr-state`'s five
+operations against a real `state.redis` component: a save/get round trip's
+real ETag, genuine 409s on stale-etag save/delete, the generic 500 daprd 1.18.1
+returns for a transactional ETag conflict, bulk get, and an atomic transaction.
 
 ## The optional MemoryDB tier
 

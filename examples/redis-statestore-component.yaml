@@ -1,0 +1,21 @@
+# Redis as the state store for examples/state-management.json.
+#
+# There is no Redis-specific example FLOW: the state-management nodes never
+# see the backing store, so the flow works unchanged against any Dapr
+# state-store component named "statestore". Only this component differs.
+#
+# Redis must be running and reachable before daprd starts:
+#
+#   docker run -d -p 6379:6379 redis:7.4-alpine
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: statestore # matches the "Store" field in examples/state-management.json
+spec:
+  type: state.redis
+  version: v1
+  metadata:
+    - name: redisHost
+      value: 127.0.0.1:6379
+    - name: redisPassword
+      value: ''
