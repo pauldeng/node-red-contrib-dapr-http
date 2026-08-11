@@ -16,10 +16,31 @@ test('durable docs list every test tier and CI enforces cheap completion gates',
 
   const workflow = read('.github/workflows/ci.yml');
   const pkg = JSON.parse(read('package.json'));
+  // A serialized chain of focused per-broker scripts (test:integration:nats
+  // runs first, per docs/testing.md's NATS-primary rebalance), not one glob
+  // over the whole directory — each focused script stays independently
+  // runnable for local iteration.
   assert.equal(
     pkg.scripts['test:integration'],
-    'node --test --test-concurrency=1 "test/integration/**/*.test.js"'
+    'npm run test:integration:nats && npm run test:integration:dapr && npm run test:integration:redis && node --test --test-concurrency=1 test/integration/telemetry.test.js test/integration/memorydb-pubsub.test.js'
   );
+  assert.equal(
+    pkg.scripts['test:integration:nats'],
+    'node --test --test-concurrency=1 "test/integration/nats-*.test.js"'
+  );
+  const integrationScripts = [
+    pkg.scripts['test:integration'],
+    pkg.scripts['test:integration:dapr'],
+    pkg.scripts['test:integration:redis'],
+  ];
+  const omitted = fs
+    .readdirSync(path.resolve(__dirname, '../integration'))
+    .filter((name) => name.endsWith('.test.js'))
+    .filter(
+      (name) =>
+        !name.startsWith('nats-') && !integrationScripts.some((script) => script.includes(name))
+    );
+  assert.deepEqual(omitted, [], `integration files omitted from the complete gate: ${omitted}`);
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /docker:\n[\s\S]*?timeout-minutes: 20/);
   assert.match(workflow, /npm run test:integration\n\s+timeout-minutes: 10/);

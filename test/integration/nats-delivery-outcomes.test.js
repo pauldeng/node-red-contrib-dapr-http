@@ -1,10 +1,13 @@
 'use strict';
 
-// Two real-daprd-specific delivery outcomes not covered by pubsub.test.js,
-// retry.test.js, or dead-letter.test.js: an explicit DROP (no redelivery, no
-// dead-letter needed), and our own ack-timeout firing RETRY without the flow
-// ever calling dapr-ack — both need to observe REAL daprd's redelivery
-// behavior (or absence of it), which a fake sidecar can't prove.
+// Two real-daprd-specific delivery outcomes not covered by
+// nats-pubsub.test.js, retry.test.js, or dead-letter.test.js: an explicit
+// DROP (no redelivery, no dead-letter needed), and our own ack-timeout
+// firing RETRY without the flow ever calling dapr-ack — both need to
+// observe REAL daprd's redelivery behavior (or absence of it), which a fake
+// sidecar can't prove. Moved from Redis to NATS JetStream per Milestone 3's
+// NATS-primary rebalance — these are Dapr runtime-layer behaviors
+// (ack-timeout, DROP handling, sidecar recovery), not broker-specific ones.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -12,15 +15,16 @@ const assert = require('node:assert/strict');
 const { freePort } = require('../helpers/node-red');
 const { ContainerNodeRed } = require('../helpers/node-red-container');
 const { httpRequest } = require('../helpers/http');
-const { startRedis, startDaprd } = require('../helpers/integration');
+const { startDaprd } = require('../helpers/integration');
+const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpers/nats');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
 
 test(
-  'an explicit DROP is never redelivered, and an unacknowledged delivery times out and IS redelivered, by real daprd',
+  'an explicit DROP is never redelivered, and an unacknowledged delivery times out and IS redelivered, by real daprd backed by NATS JetStream',
   { timeout: 60000 },
   async (t) => {
-    const appId = 'it-delivery-outcomes';
+    const appId = 'it-nats-delivery-outcomes';
     const appPort = await freePort();
     const daprHttpPort = await freePort();
     const capture = await startCapture();
@@ -30,7 +34,7 @@ test(
     t.after(() => nr.stop());
     await nr.start({
       flows: [
-        { id: 'tab', type: 'tab', label: 'it-delivery-outcomes' },
+        { id: 'tab', type: 'tab', label: 'it-nats-delivery-outcomes' },
         {
           id: 'c1',
           type: 'dapr-connection',
@@ -122,8 +126,18 @@ return msg;`,
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    t.after(() => redis.stop());
+    const nats = await startNats();
+    t.after(() => nats.stop());
+    await provisionStream(nats.port, {
+      streamName: 'nrdapr-it',
+      subjects: ['drop-topic', 'noack-topic'],
+    });
+
+    const component = jetstreamComponentYaml({
+      name: 'pubsub',
+      natsPort: nats.port,
+      streamName: 'nrdapr-it',
+    });
     // Without a Resiliency retry policy, real daprd gives a failing delivery
     // exactly ONE attempt and never redelivers it (matching dead-letter.test.js's
     // "no retry policy" finding) — the no-ack scenario below needs the SAME
@@ -133,8 +147,8 @@ return msg;`,
     const daprd = await startDaprd({
       appId,
       appPort,
-      redisPort: redis.port,
       httpPort: daprHttpPort,
+      components: [{ filename: 'pubsub-jetstream.yaml', yaml: component }],
       extraFixtures: ['resiliency-retry.yaml'],
     });
     t.after(() => daprd.stop());
@@ -179,10 +193,10 @@ return msg;`,
 );
 
 test(
-  'a real daprd going down mid-run fails fast, and publishing recovers once a fresh daprd starts',
+  'a real daprd going down mid-run fails fast, and publishing recovers once a fresh daprd starts, backed by NATS JetStream',
   { timeout: 60000 },
   async (t) => {
-    const appId = 'it-sidecar-recovery';
+    const appId = 'it-nats-sidecar-recovery';
     const appPort = await freePort();
     const daprHttpPort = await freePort();
 
@@ -190,7 +204,7 @@ test(
     t.after(() => nr.stop());
     await nr.start({
       flows: [
-        { id: 'tab', type: 'tab', label: 'it-sidecar-recovery' },
+        { id: 'tab', type: 'tab', label: 'it-nats-sidecar-recovery' },
         {
           id: 'c1',
           type: 'dapr-connection',
@@ -234,9 +248,22 @@ test(
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    t.after(() => redis.stop());
-    let daprd = await startDaprd({ appId, appPort, redisPort: redis.port, httpPort: daprHttpPort });
+    const nats = await startNats();
+    t.after(() => nats.stop());
+    await provisionStream(nats.port, { streamName: 'nrdapr-it', subjects: ['orders'] });
+    const component = jetstreamComponentYaml({
+      name: 'pubsub',
+      natsPort: nats.port,
+      streamName: 'nrdapr-it',
+    });
+    const daprdComponents = [{ filename: 'pubsub-jetstream.yaml', yaml: component }];
+
+    let daprd = await startDaprd({
+      appId,
+      appPort,
+      httpPort: daprHttpPort,
+      components: daprdComponents,
+    });
     t.after(() => daprd.stop());
 
     const tryPublish = () =>
@@ -265,7 +292,12 @@ test(
 
     // A fresh real daprd on the SAME port: health recovers and publishing
     // works again, without redeploying Node-RED at all.
-    daprd = await startDaprd({ appId, appPort, redisPort: redis.port, httpPort: daprHttpPort });
+    daprd = await startDaprd({
+      appId,
+      appPort,
+      httpPort: daprHttpPort,
+      components: daprdComponents,
+    });
     t.after(() => daprd.stop());
     const recovered = await waitFor(async () => {
       const r = await tryPublish();

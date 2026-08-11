@@ -94,6 +94,9 @@ test(
 
     const redis = await startRedis();
     t.after(() => redis.stop());
+    // DAPR_API_TOKEN enforcement is exercised below via a real publish call
+    // (invoke does not enforce it — see the comment further down), so this
+    // sidecar needs a real broker, unlike acl/invoke/invoke-matrix/shutdown.
     const daprd = await startDaprd({
       appId,
       appPort,

@@ -12,8 +12,14 @@
 // A Node-RED-level flow always fans a bulk delivery out into one msg.send()
 // per entry (see nodes/dapr-subscribe.js) — there is no way to observe "one
 // HTTP request with multiple entries" at the flow level. The proof used here
-// (and in test/integration/bulk.test.js's Redis-tier equivalent) is that
-// every entry in the same underlying bulk delivery shares one msg.dapr.batchId.
+// is that every entry in the same underlying bulk delivery shares one
+// msg.dapr.batchId.
+//
+// Also covers the mixed per-entry ack outcome (SUCCESS, DROP, and one entry
+// that never gets acked at all) formerly proven separately against Redis in
+// test/integration/bulk.test.js — merged here per Milestone 3's NATS-primary
+// rebalance, since per-entry ack independence is a Dapr runtime-layer
+// behavior, not a broker-specific one.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -28,7 +34,7 @@ const { startCapture } = require('../helpers/capture');
 const { publishBulk } = require('../../lib/dapr-client');
 
 test(
-  'real NATS JetStream delivers one bulk-publish request as one identifiable bulk subscription batch',
+  'real NATS JetStream delivers one bulk-publish request as one identifiable bulk subscription batch, and a mixed SUCCESS/DROP/no-ack outcome resolves each entry independently',
   { timeout: 60000 },
   async (t) => {
     const appId = 'it-nats-bulk';
@@ -49,6 +55,9 @@ test(
           daprPort: String(daprHttpPort),
           bindAddress: '127.0.0.1',
           appPort: String(appPort),
+          // Short so entry n=3 (never acked) resolves its internal RETRY
+          // timeout quickly, instead of waiting out a long default.
+          requestTimeoutSec: '1',
         },
         {
           id: 'sub1',
@@ -57,31 +66,37 @@ test(
           connection: 'c1',
           pubsubName: 'pubsub',
           topic: 'orders',
-          ackMode: 'auto',
+          ackMode: 'manual',
           metadata: '{}',
           bulkEnabled: true,
           bulkMaxMessagesCount: '10',
           bulkMaxAwaitDurationMs: '2000',
-          wires: [['report']],
+          wires: [['route']],
         },
         {
-          id: 'report',
+          id: 'route',
           type: 'function',
           z: 'tab',
-          func: `msg.url = ${JSON.stringify(capture.url)};
-msg.method = 'POST';
-msg.headers = { 'content-type': 'application/json' };
-msg.payload = JSON.stringify({
+          func: `const n = msg.payload && msg.payload.n;
+const key = 'attempt_' + n;
+const attempt = (context.get(key) || 0) + 1;
+context.set(key, attempt);
+const report = Object.assign({}, msg);
+report.url = ${JSON.stringify(capture.url)};
+report.method = 'POST';
+report.headers = { 'content-type': 'application/json' };
+report.payload = JSON.stringify({
   entryId: msg.dapr.entryId,
   batchId: msg.dapr.batchId,
-  n: msg.payload && msg.payload.n,
+  n,
+  attempt,
 });
-return msg;`,
-          outputs: 1,
-          wires: [['req']],
+return [report, msg];`,
+          outputs: 2,
+          wires: [['reportReq'], ['decide']],
         },
         {
-          id: 'req',
+          id: 'reportReq',
           type: 'http request',
           z: 'tab',
           method: 'use',
@@ -89,6 +104,20 @@ return msg;`,
           url: '',
           wires: [[]],
         },
+        {
+          id: 'decide',
+          type: 'function',
+          z: 'tab',
+          func: `const n = msg.payload && msg.payload.n;
+if (n === 3) {
+  return null; // never acked — resolves as RETRY via our own timeout
+}
+msg.dapr.status = n === 2 ? 'DROP' : 'SUCCESS';
+return msg;`,
+          outputs: 1,
+          wires: [['ack']],
+        },
+        { id: 'ack', type: 'dapr-ack', z: 'tab', connection: 'c1', wires: [[]] },
       ],
     });
     await waitFor(async () => {
@@ -106,11 +135,16 @@ return msg;`,
       streamName: 'nrdapr-it',
       concurrency: 'parallel',
     });
+    // Without a Resiliency retry policy, a failing delivery gets exactly one
+    // attempt and is never redelivered — the whole point of entry n=3 here is
+    // to prove redelivery targets ONLY the entry that failed, which needs
+    // this fixture or there would be nothing to observe.
     const daprd = await startDaprd({
       appId,
       appPort,
       httpPort: daprHttpPort,
       components: [{ filename: 'pubsub-jetstream.yaml', yaml: component }],
+      extraFixtures: ['resiliency-retry.yaml'],
     });
     t.after(() => daprd.stop());
 
@@ -129,11 +163,15 @@ return msg;`,
       }
     );
 
-    await waitFor(() => (capture.received.length >= 3 ? true : null));
-    const byN = new Map(capture.received.map((r) => [r.n, r]));
+    await waitFor(
+      () =>
+        [1, 2, 3].every((n) => capture.received.some((r) => r.n === n && r.attempt === 1)) || null
+    );
+    const firstAttempts = capture.received.filter((r) => r.attempt === 1);
+    const byN = new Map(firstAttempts.map((r) => [r.n, r]));
     assert.equal(byN.size, 3, 'all three entries were delivered to the flow');
 
-    const batchIds = new Set(capture.received.map((r) => r.batchId));
+    const batchIds = new Set(firstAttempts.map((r) => r.batchId));
     assert.equal(
       batchIds.size,
       1,
@@ -141,7 +179,27 @@ return msg;`,
     );
     assert.ok([...batchIds][0], 'the shared batchId is non-empty');
 
-    const entryIds = new Set(capture.received.map((r) => r.entryId));
+    const entryIds = new Set(firstAttempts.map((r) => r.entryId));
     assert.equal(entryIds.size, 3, 'each entry keeps its own distinct entryId within the batch');
+
+    // Entry n=3 was never acked, so its own RETRY (fired by our ack timeout)
+    // must actually be redelivered by real daprd, per the fastRetry policy —
+    // and entries n=1 (SUCCESS) and n=2 (DROP) must NOT be redelivered
+    // alongside it, proving redelivery targets only the failed entry within
+    // the batch, not the whole batch over again.
+    await waitFor(() => capture.received.filter((r) => r.n === 3).length >= 2 || null, {
+      timeoutMs: 30000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1500)); // past fastRetry's window
+    assert.equal(
+      capture.received.filter((r) => r.n === 1).length,
+      1,
+      'entry n=1 (SUCCESS) must remain single-delivery'
+    );
+    assert.equal(
+      capture.received.filter((r) => r.n === 2).length,
+      1,
+      'entry n=2 (DROP) must remain single-delivery'
+    );
   }
 );

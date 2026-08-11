@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const { freePort } = require('../helpers/node-red');
 const { ContainerNodeRed } = require('../helpers/node-red-container');
 const { httpRequest } = require('../helpers/http');
-const { startRedis, startDaprd } = require('../helpers/integration');
+const { startDaprd } = require('../helpers/integration');
 const { waitFor } = require('../helpers/wait-for');
 
 test(
@@ -86,12 +86,11 @@ test(
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    t.after(() => redis.stop());
+    // Service invocation never touches pub/sub, so this sidecar needs no
+    // broker at all.
     const daprd = await startDaprd({
       appId,
       appPort,
-      redisPort: redis.port,
       httpPort: daprHttpPort,
     });
     t.after(() => daprd.stop());

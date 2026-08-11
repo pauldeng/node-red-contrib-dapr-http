@@ -463,7 +463,25 @@ test(
     const nr = new NodeRed();
     await nr.start();
     t.after(() => nr.stop());
-    await nr.deploy(serviceFlow(appPort, dapr.port));
+    await nr.deploy([
+      ...serviceFlow(appPort, dapr.port),
+      // An ordinary HTTP In endpoint, deployed on the SAME Node-RED process
+      // (bound to httpNodeRoot on the editor/admin port) — this must not be
+      // reachable through the separate app-channel port either (formerly
+      // test/integration/admin-isolation.test.js's own real-daprd
+      // reconfirmation; moved here per Milestone 3, since none of this is
+      // owned by daprd or a broker — the fake sidecar's own healthz answer is
+      // enough to bring the app-channel listener up for real).
+      {
+        id: 'httpin',
+        type: 'http in',
+        z: 'tab',
+        url: '/arbitrary',
+        method: 'get',
+        wires: [['httpres']],
+      },
+      { id: 'httpres', type: 'http response', z: 'tab' },
+    ]);
 
     const ok = await waitFor(async () => {
       const r = await httpRequest(serviceUrl(appPort, '/orders'), {
@@ -505,6 +523,19 @@ test(
       (await httpRequest(serviceUrl(appPort, '/settings'), { timeoutMs: 2000 })).status,
       404
     );
+    // Nor is the editor index itself, or an arbitrary HTTP In endpoint
+    // registered by an ordinary node in the same flow.
+    assert.equal((await httpRequest(serviceUrl(appPort, '/'), { timeoutMs: 2000 })).status, 404);
+    assert.equal(
+      (await httpRequest(serviceUrl(appPort, '/arbitrary'), { timeoutMs: 2000 })).status,
+      404
+    );
+    // The editor/admin origin, on the other hand, really does serve all of
+    // these — confirming the isolation is specific to the app-channel port,
+    // not a broken deploy.
+    assert.equal((await httpRequest(nr.adminUrl('/flows'), { timeoutMs: 2000 })).status, 200);
+    assert.equal((await httpRequest(nr.adminUrl('/settings'), { timeoutMs: 2000 })).status, 200);
+    assert.equal((await httpRequest(nr.nodeUrl('/arbitrary'), { timeoutMs: 2000 })).status, 200);
   }
 );
 
