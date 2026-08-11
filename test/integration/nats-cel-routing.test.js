@@ -1,11 +1,19 @@
 'use strict';
 
-// One CEL-routing smoke test only: routing is evaluated by the Dapr runtime
-// against the CloudEvent envelope, after the component delivers — broker-
-// agnostic by construction, low risk. The Redis-tier cel-routing.test.js
-// already proves real daprd's own CEL evaluator resolves overlapping rules
-// by order; this just confirms the same mechanism still works when the
-// underlying broker is NATS JetStream instead of Redis.
+// Proves real daprd's own CEL evaluator resolves overlapping routing rules by
+// order, first-match-wins — the runtime tier's CEL test delivers directly to
+// each rule's own pre-known route (test/runtime/subscribe-routing.test.js),
+// which proves our route/ruleId wiring but never actually exercises daprd's
+// CEL parser or its precedence semantics. This does, through a real publish.
+// Routing itself is evaluated by the Dapr runtime against the CloudEvent
+// envelope, after the component delivers — broker-agnostic by construction —
+// so per Milestone 3's NATS-primary rebalance this is the only place the full
+// matrix runs (formerly duplicated against Redis in cel-routing.test.js).
+//
+// Also confirms: CEL rules match against event.data.<field> (the published
+// payload), not event.type/event.source, which real daprd fixes to constants
+// (com.dapr.event.sent / the publishing app-id) regardless of payload content
+// — matching on those would never differentiate real published messages.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -19,7 +27,7 @@ const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
 
 test(
-  'real daprd evaluates CEL routing rules the same way when backed by NATS JetStream',
+  'real daprd evaluates overlapping CEL rules and routes first-match-wins, backed by NATS JetStream',
   { timeout: 60000 },
   async (t) => {
     const appId = 'it-nats-cel';
@@ -50,7 +58,13 @@ test(
           topic: 'orders',
           ackMode: 'auto',
           metadata: '{}',
-          rules: [{ id: 'ruleUrgent', match: 'event.data.kind == "urgent"' }],
+          // ruleA and ruleB both match kind == "shared" — listed first,
+          // ruleA must win for it. ruleB alone matches kind == "onlyB".
+          // Anything else falls through to the default (no ruleId).
+          rules: [
+            { id: 'ruleA', match: 'event.data.kind == "shared" || event.data.kind == "onlyA"' },
+            { id: 'ruleB', match: 'event.data.kind == "shared" || event.data.kind == "onlyB"' },
+          ],
           wires: [['fwd']],
         },
         {
@@ -109,12 +123,22 @@ return msg;`,
         return r.status === 204 ? r : null;
       });
 
-    await publish('urgent');
-    await publish('normal');
+    await publish('shared');
+    await publish('onlyB');
+    await publish('other');
 
-    await waitFor(() => (capture.received.length >= 2 ? true : null));
+    await waitFor(() => (capture.received.length >= 3 ? true : null));
     const byKind = new Map(capture.received.map((r) => [r.kind, r.ruleId]));
-    assert.equal(byKind.get('urgent'), 'ruleUrgent', 'the matching rule routes correctly');
-    assert.equal(byKind.get('normal'), null, 'a non-matching message falls through to the default');
+    assert.equal(
+      byKind.get('shared'),
+      'ruleA',
+      'ruleA wins the overlap because it is listed first, even though ruleB also matches'
+    );
+    assert.equal(byKind.get('onlyB'), 'ruleB', 'ruleB matches when ruleA does not');
+    assert.equal(
+      byKind.get('other'),
+      null,
+      'no rule matches, so it falls through to the default route'
+    );
   }
 );

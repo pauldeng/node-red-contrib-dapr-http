@@ -1,18 +1,24 @@
 'use strict';
 
+// Redeploy behavior moved from Redis to NATS JetStream per Milestone 3's
+// NATS-primary rebalance — these are Dapr-runtime/app-channel-layer
+// behaviors (stable delivery routes across redeploy, the restart-sidecar
+// fingerprint, and drain-on-close), not broker-specific ones.
+
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { freePort } = require('../helpers/node-red');
 const { ContainerNodeRed } = require('../helpers/node-red-container');
 const { httpRequest } = require('../helpers/http');
-const { startRedis, startDaprd } = require('../helpers/integration');
+const { startDaprd } = require('../helpers/integration');
+const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpers/nats');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
 
 function flow({ daprHttpPort, appPort, topic, captureUrl }) {
   return [
-    { id: 'tab', type: 'tab', label: 'it-redeploy' },
+    { id: 'tab', type: 'tab', label: 'it-nats-redeploy' },
     {
       id: 'c1',
       type: 'dapr-connection',
@@ -49,10 +55,10 @@ return msg;`,
 }
 
 test(
-  'an unchanged full redeploy keeps a real daprd delivering, no sidecar restart needed',
+  'an unchanged full redeploy keeps a real daprd delivering, no sidecar restart needed, backed by NATS JetStream',
   { timeout: 60000 },
   async (t) => {
-    const appId = 'it-redeploy-unchanged';
+    const appId = 'it-nats-redeploy-unchanged';
     const appPort = await freePort();
     const daprHttpPort = await freePort();
     const capture = await startCapture();
@@ -67,13 +73,19 @@ test(
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    t.after(() => redis.stop());
+    const nats = await startNats();
+    t.after(() => nats.stop());
+    await provisionStream(nats.port, { streamName: 'nrdapr-it', subjects: ['orders'] });
+    const component = jetstreamComponentYaml({
+      name: 'pubsub',
+      natsPort: nats.port,
+      streamName: 'nrdapr-it',
+    });
     const daprd = await startDaprd({
       appId,
       appPort,
-      redisPort: redis.port,
       httpPort: daprHttpPort,
+      components: [{ filename: 'pubsub-jetstream.yaml', yaml: component }],
     });
     t.after(() => daprd.stop());
 
@@ -116,10 +128,10 @@ test(
 );
 
 test(
-  'changing a subscription surfaces the restart-sidecar warning, and restarting daprd activates it',
+  'changing a subscription surfaces the restart-sidecar warning, and restarting daprd activates it, backed by NATS JetStream',
   { timeout: 90000 },
   async (t) => {
-    const appId = 'it-redeploy-changed';
+    const appId = 'it-nats-redeploy-changed';
     const appPort = await freePort();
     const daprHttpPort = await freePort();
     const capture = await startCapture();
@@ -134,9 +146,24 @@ test(
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    t.after(() => redis.stop());
-    let daprd = await startDaprd({ appId, appPort, redisPort: redis.port, httpPort: daprHttpPort });
+    const nats = await startNats();
+    t.after(() => nats.stop());
+    await provisionStream(nats.port, {
+      streamName: 'nrdapr-it',
+      subjects: ['orders', 'orders-v2'],
+    });
+    const component = jetstreamComponentYaml({
+      name: 'pubsub',
+      natsPort: nats.port,
+      streamName: 'nrdapr-it',
+    });
+    const daprdComponents = [{ filename: 'pubsub-jetstream.yaml', yaml: component }];
+    let daprd = await startDaprd({
+      appId,
+      appPort,
+      httpPort: daprHttpPort,
+      components: daprdComponents,
+    });
     t.after(() => daprd.stop());
 
     const publishTo = (topic, n) =>
@@ -182,7 +209,12 @@ test(
     // process — it re-fetches /dapr/subscribe against the app that's
     // already running and picks up the new topic.
     await daprd.stop();
-    daprd = await startDaprd({ appId, appPort, redisPort: redis.port, httpPort: daprHttpPort });
+    daprd = await startDaprd({
+      appId,
+      appPort,
+      httpPort: daprHttpPort,
+      components: daprdComponents,
+    });
     t.after(() => daprd.stop());
 
     await publishTo('orders-v2', 3);
@@ -194,7 +226,7 @@ test(
 
 function pendingAckFlow({ daprHttpPort, appPort, captureUrl }) {
   return [
-    { id: 'tab', type: 'tab', label: 'it-redeploy-interruption' },
+    { id: 'tab', type: 'tab', label: 'it-nats-redeploy-interruption' },
     {
       id: 'c1',
       type: 'dapr-connection',
@@ -264,10 +296,10 @@ return msg;`,
 }
 
 test(
-  'a delivery pending at redeploy is left retryable and redelivered by real daprd, without corrupting the subscription',
+  'a delivery pending at redeploy is left retryable and redelivered by real daprd, without corrupting the subscription, backed by NATS JetStream',
   { timeout: 60000 },
   async (t) => {
-    const appId = 'it-redeploy-interruption';
+    const appId = 'it-nats-redeploy-interruption';
     const appPort = await freePort();
     const daprHttpPort = await freePort();
     const capture = await startCapture();
@@ -282,8 +314,14 @@ test(
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    t.after(() => redis.stop());
+    const nats = await startNats();
+    t.after(() => nats.stop());
+    await provisionStream(nats.port, { streamName: 'nrdapr-it', subjects: ['orders'] });
+    const component = jetstreamComponentYaml({
+      name: 'pubsub',
+      natsPort: nats.port,
+      streamName: 'nrdapr-it',
+    });
     // Without a Resiliency retry policy, a retryable outcome and a terminal
     // one (SUCCESS/DROP) are indistinguishable from outside — none of them
     // get redelivered — so this fixture is what makes actual redelivery the
@@ -292,8 +330,8 @@ test(
     const daprd = await startDaprd({
       appId,
       appPort,
-      redisPort: redis.port,
       httpPort: daprHttpPort,
+      components: [{ filename: 'pubsub-jetstream.yaml', yaml: component }],
       extraFixtures: ['resiliency-retry.yaml'],
     });
     t.after(() => daprd.stop());
@@ -332,9 +370,7 @@ test(
     // actual proof the drain left it retryable, not a coincidence of some
     // other timeout: with requestTimeoutSec: 120, nothing else in this flow
     // could produce a retryable outcome within 10s of the redeploy — only
-    // the close handler's own drain can. (Mutation-tested: skipping the
-    // nr.deploy() call above and rerunning leaves this wait to time out,
-    // since nothing else resolves the pending delivery this fast.)
+    // the close handler's own drain can.
     await waitFor(() => capture.received.some((r) => r && r.n === 1 && r.attempt === 2) || null, {
       timeoutMs: 10000,
     });

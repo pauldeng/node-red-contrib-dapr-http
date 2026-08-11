@@ -7,7 +7,7 @@ const http = require('node:http');
 const { freePort } = require('../helpers/node-red');
 const { ContainerNodeRed } = require('../helpers/node-red-container');
 const { closeHttpServer, httpRequest } = require('../helpers/http');
-const { startRedis, startDaprd } = require('../helpers/integration');
+const { startDaprd } = require('../helpers/integration');
 const { waitFor } = require('../helpers/wait-for');
 
 // A minimal stand-in "caller" app: just enough for its own daprd sidecar to
@@ -88,12 +88,9 @@ test(
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    cleanup.defer(() => redis.stop());
     const targetDaprd = await startDaprd({
       appId: targetAppId,
       appPort,
-      redisPort: redis.port,
       httpPort: daprHttpPort,
       configFixture: 'config-acl.yaml',
     });
@@ -102,13 +99,14 @@ test(
     // "allowed-caller" matches config-acl.yaml's explicit allow rule for
     // POST /orders; "disallowed-caller" matches nothing. Both sidecars run
     // with mTLS off (the harness default), so neither call actually carries
-    // a verifiable identity daprd can match against the policy.
+    // a verifiable identity daprd can match against the policy. Service
+    // invocation never touches pub/sub, so none of these sidecars need a
+    // broker at all.
     const allowedStub = await startStubApp();
     cleanup.defer(() => allowedStub.stop());
     const allowedDaprd = await startDaprd({
       appId: 'allowed-caller',
       appPort: allowedStub.port,
-      redisPort: redis.port,
     });
     cleanup.defer(() => allowedDaprd.stop());
 
@@ -117,7 +115,6 @@ test(
     const disallowedDaprd = await startDaprd({
       appId: 'disallowed-caller',
       appPort: disallowedStub.port,
-      redisPort: redis.port,
     });
     cleanup.defer(() => disallowedDaprd.stop());
 

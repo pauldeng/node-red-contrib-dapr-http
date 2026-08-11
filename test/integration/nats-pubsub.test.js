@@ -2,12 +2,18 @@
 
 // Re-runs the broker-sensitive slice of the Milestone 8 matrix against real
 // NATS JetStream instead of Redis: publish/subscribe, the CloudEvents round
-// trip, and raw payload. Invocation, ACL, Admin-API isolation, and the HTTP
-// client's serialization concerns never reach a broker-specific code path,
-// so none of that matrix is re-run here. This component's own AddConsumer()
-// call means the baseline component below carries no durableName/
-// queueGroupName — those are component-wide and reserved for the dedicated
-// competing-consumers fixture.
+// trip, raw payload, a content-type/body mismatch, publish-time metadata
+// pass-through, and a malformed CloudEvent envelope being DROPped without
+// crashing (formerly test/integration/pubsub-payloads.test.js's own matrix,
+// against Redis — merged here per Milestone 3's NATS-primary rebalance;
+// these behaviors are broker-agnostic payload/parser concerns, not
+// Redis-specific, so testing them once against NATS is enough). Invocation,
+// ACL, Admin-API isolation, and the HTTP client's serialization concerns
+// never reach a broker-specific code path, so none of that matrix is re-run
+// here. This component's own AddConsumer() call means the baseline
+// component below carries no durableName/queueGroupName — those are
+// component-wide and reserved for the dedicated competing-consumers
+// fixture.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -49,6 +55,7 @@ msg.payload = JSON.stringify({
   isBuffer: Buffer.isBuffer(msg.payload),
   payload,
   cloudEvent: msg.dapr.cloudEvent,
+  metadata: msg.dapr.metadata,
 });
 return msg;`,
     outputs: 1,
@@ -69,7 +76,7 @@ function forwardingReq(id) {
 }
 
 test(
-  'publish/subscribe, the CloudEvents round trip, and raw payload all behave correctly against real NATS JetStream',
+  'publish/subscribe, the CloudEvents round trip, raw payload, a content-type/body mismatch, publish metadata, and a malformed envelope all behave correctly against real NATS JetStream',
   { timeout: 60000 },
   async (t) => {
     const appId = 'it-nats-pubsub';
@@ -97,6 +104,15 @@ test(
         forwardingSub('sub-raw', 'raw-topic', { rawPayload: true }),
         forwardingFn('sub-raw', capture.url),
         forwardingReq('sub-raw'),
+        forwardingSub('sub-malformed', 'malformed-topic'),
+        forwardingFn('sub-malformed', capture.url),
+        forwardingReq('sub-malformed'),
+        forwardingSub('sub-metadata', 'metadata-topic'),
+        forwardingFn('sub-metadata', capture.url),
+        forwardingReq('sub-metadata'),
+        forwardingSub('sub-malformed-envelope', 'malformed-envelope-topic'),
+        forwardingFn('sub-malformed-envelope', capture.url),
+        forwardingReq('sub-malformed-envelope'),
       ],
     });
     await waitFor(async () => {
@@ -108,7 +124,13 @@ test(
     t.after(() => nats.stop());
     await provisionStream(nats.port, {
       streamName: 'nrdapr-it',
-      subjects: ['orders', 'raw-topic'],
+      subjects: [
+        'orders',
+        'raw-topic',
+        'malformed-topic',
+        'metadata-topic',
+        'malformed-envelope-topic',
+      ],
     });
 
     const component = jetstreamComponentYaml({
@@ -161,5 +183,62 @@ test(
     );
     assert.equal(rawDelivered.isBuffer, true);
     assert.equal(rawDelivered.payload, '{"hello":"raw"}');
+
+    // daprd does not validate that a JSON-content-typed publish body is
+    // actually valid JSON — it passes the raw text through as a plain
+    // CloudEvent "data" string, and our own parseDelivery must expose that
+    // as a plain string, not throw and not silently coerce it to a Buffer.
+    await publish('malformed-topic', 'not-valid-json{{{');
+    const malformedDelivered = await waitFor(
+      () => capture.received.find((r) => r && r.topic === 'malformed-topic') || null
+    );
+    assert.equal(malformedDelivered.isBuffer, false);
+    assert.equal(malformedDelivered.payload, 'not-valid-json{{{');
+
+    // Publish-time metadata (ttlInSeconds) must not break ordinary delivery,
+    // and msg.dapr.metadata (the delivery's own request headers, e.g.
+    // traceparent) must be a real, non-empty object, not dropped or stubbed.
+    await publish('metadata-topic', JSON.stringify({ ok: true }), {
+      query: '?metadata.ttlInSeconds=60',
+    });
+    const metadataDelivered = await waitFor(
+      () => capture.received.find((r) => r && r.topic === 'metadata-topic') || null
+    );
+    assert.equal(metadataDelivered.isBuffer, false);
+    assert.deepEqual(metadataDelivered.payload, { ok: true });
+    assert.ok(
+      metadataDelivered.metadata && Object.keys(metadataDelivered.metadata).length > 0,
+      "delivery metadata (from daprd's own request headers) is a non-empty object"
+    );
+
+    // A malformed CloudEvent envelope — something real daprd would never
+    // itself construct, but our own parser must still handle without
+    // crashing — is DROPped without ever reaching the flow, and logged.
+    const malformedRoute = await waitFor(async () => {
+      const r = await httpRequest(`http://127.0.0.1:${appPort}/dapr/subscribe`, {
+        timeoutMs: 1000,
+      });
+      if (r.status !== 200) {
+        return null;
+      }
+      const subs = JSON.parse(r.text);
+      const sub = subs.find((s) => s.topic === 'malformed-envelope-topic');
+      return sub ? sub.route : null;
+    });
+    const malformedRes = await httpRequest(`http://127.0.0.1:${appPort}${malformedRoute}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/cloudevents+json' },
+      body: JSON.stringify({ not: 'a valid CloudEvent' }),
+      timeoutMs: 4000,
+    });
+    assert.equal(malformedRes.status, 200);
+    assert.deepEqual(JSON.parse(malformedRes.text), { status: 'DROP' });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    assert.equal(
+      capture.received.some((r) => r && r.topic === 'malformed-envelope-topic'),
+      false,
+      'a malformed envelope never reaches the flow'
+    );
+    assert.match(nr.logText(), /malformed delivery on malformed-envelope-topic/);
   }
 );

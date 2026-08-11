@@ -7,13 +7,13 @@ No Mocha/Jest/Vitest/Sinon/Supertest and no `node-red-node-test-helper`.
 
 ## Tiers
 
-| Tier        | Location                                   | What it proves                                                                                           | Needs                                        |
-| ----------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| Unit        | `test/unit/`                               | `lib/` module contracts in isolation.                                                                    | Node only.                                   |
-| Runtime     | `test/runtime/`                            | Real Node-RED loads, registers, wires, and runs the nodes; a fake Dapr HTTP sidecar stands in for daprd. | Node + `node-red` CLI.                       |
-| Integration | `test/integration/`                        | Behavior against real daprd 1.18.1, with Redis or NATS JetStream as the pub/sub broker.                  | Docker.                                      |
-| E2E         | `test/e2e/`                                | Editor dialogs, validation, and a full publish/subscribe + invoke/service flow.                          | Playwright + Node-RED.                       |
-| MemoryDB    | `test/integration/memorydb-pubsub.test.js` | The same chain against a real AWS MemoryDB cluster: TLS, Redis ACL auth, cluster mode.                   | **Optional** — a live cluster + VPC routing. |
+| Tier        | Location                                   | What it proves                                                                                                                       | Needs                                        |
+| ----------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| Unit        | `test/unit/`                               | `lib/` module contracts in isolation.                                                                                                | Node only.                                   |
+| Runtime     | `test/runtime/`                            | Real Node-RED loads, registers, wires, and runs the nodes; a fake Dapr HTTP sidecar stands in for daprd.                             | Node + `node-red` CLI.                       |
+| Integration | `test/integration/`                        | Behavior against real daprd 1.18.1, with NATS JetStream as the primary pub/sub broker and Redis as a secondary compatibility target. | Docker.                                      |
+| E2E         | `test/e2e/`                                | Editor dialogs, validation, and a full publish/subscribe + invoke/service flow.                                                      | Playwright + Node-RED.                       |
+| MemoryDB    | `test/integration/memorydb-pubsub.test.js` | The same chain against a real AWS MemoryDB cluster: TLS, Redis ACL auth, cluster mode.                                               | **Optional** — a live cluster + VPC routing. |
 
 Visual inspection of every node's editor dialog (light/dark, three viewports) is
 consolidated in the E2E tier, which captures a screenshot per node per
@@ -25,18 +25,30 @@ covered there like every other node. Runtime tests confirm each node loads.
 ```bash
 npm test                 # unit
 npm run test:runtime     # real Node-RED child-process harness
-npm run test:integration # real daprd 1.18.1 via Docker (Redis and NATS JetStream)
+npm run test:integration # the complete serialized gate: NATS, then no-broker daprd, then Redis
 npm run test:e2e         # Playwright tests against the real Node-RED editor
 
+npm run test:integration:nats      # NATS JetStream-backed tests only (test/integration/nats-*.test.js)
+npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown)
+npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish
 npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
 
-`npm run test:integration` first runs `pretest:integration`
+`npm run test:integration` chains the three focused scripts above, NATS
+first, then a trailing invocation for the two files that belong to neither
+bucket — `telemetry.test.js`'s broker-free trace/log correlation test and
+`memorydb-pubsub.test.js`'s self-gated optional one. Each `--test-concurrency=1`
+sub-invocation stays fully serialized, so the chain as a whole is too; running
+a focused script on its own during local iteration is faster and just as
+serialized. `npm run test:integration` (only) first runs `pretest:integration`
 (`test/helpers/pull-images.js`), which pre-pulls all five pinned images. A
 cold pull can take minutes on a fresh runner — far longer than a single
 integration test's own timeout, which includes its setup — so pulling happens
 once, up front, outside any individual test's clock, not lazily on whichever
-test happens to need an image first.
+test happens to need an image first. A focused script run standalone still
+works correctly without it — each container helper calls `ensureImage()`
+itself — it just risks a slow cold pull counting against that test's own
+timeout instead.
 
 ## The optional MemoryDB tier
 
@@ -224,7 +236,7 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
   verbatim as the delivery body. Only marking both ends raw produces the
   original bytes in `data_base64` that `lib/subscriptions.js`'s
   `extractCloudEvent` comment describes. See
-  `test/integration/pubsub-payloads.test.js`.
+  `test/integration/nats-pubsub.test.js`.
 - **daprd does not validate a JSON-content-typed publish body (integration):**
   publishing a non-JSON string with `content-type: application/json` still
   succeeds (204) — daprd passes the raw text through as a plain CloudEvent
@@ -236,21 +248,24 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
   app-id, while placing application fields under `event.data`. Differentiate
   ordinary `dapr-publish` messages with `event.data.<field>`. A producer-supplied
   custom CloudEvent can set its own `event.type`, so type-based rules remain
-  valid for that case. `test/integration/cel-routing.test.js` confirms real
+  valid for that case. `test/integration/nats-cel-routing.test.js` confirms real
   daprd's own CEL evaluator resolves overlapping rules by order
   (first-match-wins); the runtime tier's CEL test delivers directly to each
   rule's pre-known route and so never exercises daprd's actual CEL parser or
   precedence at all.
 - **Bulk redelivery targets only the failed entry, not the whole batch
   (integration):** confirmed against real daprd with a fastRetry Resiliency
-  policy (`test/integration/bulk.test.js`) — when one entry in a bulk batch
-  is never acked and the rest resolve SUCCESS/DROP, only the unacked entry is
-  redelivered; the entries that already resolved are not sent again.
-- **Bulk publish runs against both primary and secondary brokers
-  (integration):** `test/integration/nats-bulk.test.js` sends one real bulk
-  publish through daprd + NATS JetStream and observes all entries in one bulk
-  delivery; `test/integration/publish-client.test.js` covers mixed JSON, text,
-  and binary entries through daprd + Redis.
+  policy (`test/integration/nats-bulk.test.js`) — when one entry in a bulk
+  batch is never acked and the rest resolve SUCCESS/DROP, only the unacked
+  entry is redelivered; the entries that already resolved are not sent again.
+- **Bulk publish (integration):** `test/integration/nats-bulk.test.js` sends
+  one real bulk publish through daprd + NATS JetStream and observes all
+  entries in one bulk delivery; `test/integration/nats-publish-client.test.js`
+  covers mixed JSON, text, and binary entries and the duplicate-`entryId`
+  whole-batch rejection, both against daprd + NATS JetStream — the wire
+  client itself only talks to daprd's own HTTP API, never the broker
+  directly, so which broker backs daprd is not a variable this client-level
+  suite needs to hold constant (see "NATS-primary rebalance" below).
 - **`deadLetterTopic` stalls with `pubsub.jetstream` in Dapr 1.18.1
   (integration, Milestone 9):** confirmed twice via real daprd debug logs —
   the runtime logs the original delivery's failure, then logs "Publishing to

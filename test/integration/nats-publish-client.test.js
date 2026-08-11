@@ -3,7 +3,10 @@
 // Verifies lib/dapr-client.js's own HTTP publish client against real daprd —
 // not the local fake sidecar used in test/unit/dapr-client.test.js. Delivery
 // back to a Node-RED dapr-subscribe node is the only way to observe, from
-// outside, exactly what went on the wire.
+// outside, exactly what went on the wire. Moved from Redis to NATS
+// JetStream per Milestone 3's NATS-primary rebalance — the client only
+// talks to daprd's own HTTP API, never the broker directly, so which broker
+// backs daprd is not a variable this suite needs to hold constant.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -11,17 +14,18 @@ const assert = require('node:assert/strict');
 const { freePort } = require('../helpers/node-red');
 const { ContainerNodeRed } = require('../helpers/node-red-container');
 const { httpRequest } = require('../helpers/http');
-const { startRedis, startDaprd } = require('../helpers/integration');
+const { startDaprd } = require('../helpers/integration');
+const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpers/nats');
 const { publish, publishBulk } = require('../../lib/dapr-client');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
 
 test(
-  'the HTTP publish client publishes falsy bodies, Buffer bodies, metadata, and extra headers correctly against real daprd',
+  'the HTTP publish client publishes falsy bodies, Buffer bodies, metadata, and extra headers correctly against real daprd backed by NATS JetStream',
   { timeout: 60000 },
   async (t) => {
-    const appId = 'it-sdk-adapter';
+    const appId = 'it-nats-sdk-adapter';
     const appPort = await freePort();
     const daprHttpPort = await freePort();
     const capture = await startCapture();
@@ -30,7 +34,7 @@ test(
     const nr = new ContainerNodeRed();
     await nr.start({
       flows: [
-        { id: 'tab', type: 'tab', label: 'it-sdk-adapter' },
+        { id: 'tab', type: 'tab', label: 'it-nats-sdk-adapter' },
         {
           id: 'c1',
           type: 'dapr-connection',
@@ -80,13 +84,19 @@ return msg;`,
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    t.after(() => redis.stop());
+    const nats = await startNats();
+    t.after(() => nats.stop());
+    await provisionStream(nats.port, { streamName: 'nrdapr-it', subjects: ['probe'] });
+    const component = jetstreamComponentYaml({
+      name: 'pubsub',
+      natsPort: nats.port,
+      streamName: 'nrdapr-it',
+    });
     const daprd = await startDaprd({
       appId,
       appPort,
-      redisPort: redis.port,
       httpPort: daprHttpPort,
+      components: [{ filename: 'pubsub-jetstream.yaml', yaml: component }],
     });
     t.after(() => daprd.stop());
 
@@ -187,10 +197,10 @@ return msg;`,
 );
 
 test(
-  'publishBulk delivers JSON, string, and binary entries to a real subscriber through real daprd + Redis',
+  'publishBulk delivers JSON, string, and binary entries to a real subscriber through real daprd + NATS JetStream',
   { timeout: 60000 },
   async (t) => {
-    const appId = 'it-bulk-publish-client';
+    const appId = 'it-nats-bulk-publish-client';
     const appPort = await freePort();
     const daprHttpPort = await freePort();
     const capture = await startCapture();
@@ -199,7 +209,7 @@ test(
     const nr = new ContainerNodeRed();
     await nr.start({
       flows: [
-        { id: 'tab', type: 'tab', label: 'it-bulk-publish-client' },
+        { id: 'tab', type: 'tab', label: 'it-nats-bulk-publish-client' },
         {
           id: 'c1',
           type: 'dapr-connection',
@@ -249,13 +259,19 @@ return msg;`,
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    t.after(() => redis.stop());
+    const nats = await startNats();
+    t.after(() => nats.stop());
+    await provisionStream(nats.port, { streamName: 'nrdapr-it', subjects: ['bulk-probe'] });
+    const component = jetstreamComponentYaml({
+      name: 'pubsub',
+      natsPort: nats.port,
+      streamName: 'nrdapr-it',
+    });
     const daprd = await startDaprd({
       appId,
       appPort,
-      redisPort: redis.port,
       httpPort: daprHttpPort,
+      components: [{ filename: 'pubsub-jetstream.yaml', yaml: component }],
     });
     t.after(() => daprd.stop());
 
@@ -292,14 +308,14 @@ test(
   'publishBulk surfaces a duplicate entryId as a whole-batch PUBLISH_FAILED, matching real daprd, not a partial result',
   { timeout: 60000 },
   async (t) => {
-    const appId = 'it-bulk-publish-client-dup';
+    const appId = 'it-nats-bulk-publish-client-dup';
     const appPort = await freePort();
     const daprHttpPort = await freePort();
 
     const nr = new ContainerNodeRed();
     await nr.start({
       flows: [
-        { id: 'tab', type: 'tab', label: 'it-bulk-publish-dup' },
+        { id: 'tab', type: 'tab', label: 'it-nats-bulk-publish-dup' },
         {
           id: 'c1',
           type: 'dapr-connection',
@@ -316,13 +332,19 @@ test(
       return r.status === 204 ? true : null;
     });
 
-    const redis = await startRedis();
-    t.after(() => redis.stop());
+    const nats = await startNats();
+    t.after(() => nats.stop());
+    await provisionStream(nats.port, { streamName: 'nrdapr-it', subjects: ['bulk-dup'] });
+    const component = jetstreamComponentYaml({
+      name: 'pubsub',
+      natsPort: nats.port,
+      streamName: 'nrdapr-it',
+    });
     const daprd = await startDaprd({
       appId,
       appPort,
-      redisPort: redis.port,
       httpPort: daprHttpPort,
+      components: [{ filename: 'pubsub-jetstream.yaml', yaml: component }],
     });
     t.after(() => daprd.stop());
 

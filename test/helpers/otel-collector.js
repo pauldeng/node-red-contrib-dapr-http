@@ -82,12 +82,19 @@ service:
 `;
 }
 
-// Starts a fresh collector container on a dynamically allocated host port,
-// with its file exporter's output directory bind-mounted so the caller can
-// read it directly. Resolves once the collector's own health check answers.
-async function startOtelCollector() {
+// Starts a fresh collector container on a dynamically allocated host port
+// (or the given fixed one — see below), with its file exporter's output
+// directory bind-mounted so the caller can read it directly. Resolves once
+// the collector's own health check answers.
+//
+// `port`, when given, is reused as-is instead of allocating a new one: a
+// test proving telemetry export resumes after a collector restart needs the
+// SAME already-running Node-RED process (whose OTEL_EXPORTER_OTLP_ENDPOINT
+// env var was fixed at its own startup) to reach the replacement collector
+// without itself being restarted.
+async function startOtelCollector({ port: fixedPort } = {}) {
   await ensureImage(OTEL_COLLECTOR_IMAGE);
-  const port = await freePort();
+  const port = fixedPort ?? (await freePort());
   const name = `nrdapr-it-otelcol-${runId()}`;
   const configDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'nrdapr-otelcol-config-'));
   const outputDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'nrdapr-otelcol-output-'));
