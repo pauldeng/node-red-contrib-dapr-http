@@ -24,6 +24,7 @@ const NODES = [
   { id: 'e2e-invoke', type: 'dapr-invoke' },
   { id: 'e2e-svc', type: 'dapr-service' },
   { id: 'e2e-resp', type: 'dapr-response' },
+  { id: 'e2e-state', type: 'dapr-state' },
 ];
 
 // A regression lock for a real bug found while building this tier: a field

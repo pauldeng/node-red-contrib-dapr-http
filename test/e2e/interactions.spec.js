@@ -189,7 +189,7 @@ test('CEL routing rules can be added, edited, reordered, and removed', async ({
 
 // Help sidebar coverage (finding: the interaction suite never opened Help,
 // so a style-guide or content regression there would be invisible to CI).
-// Covers all seven types via the same path, including the config node,
+// Covers all eight types via the same path, including the config node,
 // which has no canvas presence and no direct per-dialog Help button.
 for (const type of Object.keys(HELP_LABELS)) {
   test(`Help sidebar shows ${type}'s own documentation`, async ({

@@ -115,11 +115,11 @@ async function closeDialog(page, { save = true, config = false } = {}) {
   await waitForTraySettled(page);
 }
 
-// A complete flow exercising all seven node types together: publish,
+// A complete flow exercising all eight node types together: publish,
 // subscribe with a CEL rule and bulk delivery enabled, manual acknowledgement,
-// outbound invocation, and an inbound service replying via dapr-response —
-// the "complete publish/subscribe and invoke/service flow" the e2e tier must
-// verify configures and deploys.
+// outbound invocation, an inbound service replying via dapr-response, and a
+// state get — the "complete publish/subscribe and invoke/service flow" the
+// e2e tier must verify configures and deploys.
 function fullFlow({ appPort, daprPort }) {
   return [
     { id: 'e2e-tab', type: 'tab', label: 'e2e' },
@@ -212,6 +212,23 @@ function fullFlow({ appPort, daprPort }) {
       y: 320,
       wires: [],
     },
+    {
+      id: 'e2e-state',
+      type: 'dapr-state',
+      z: 'e2e-tab',
+      name: 'get order',
+      connection: 'e2e-conn',
+      operation: 'get',
+      storeName: 'statestore',
+      key: 'order-1',
+      consistency: '',
+      concurrency: '',
+      ttlSeconds: '',
+      metadata: '{}',
+      x: 160,
+      y: 400,
+      wires: [[]],
+    },
   ];
 }
 
@@ -280,7 +297,7 @@ async function assertNoHorizontalOverflow(page) {
   }
 }
 
-// Every node's Help tree label, keyed by type. Six of the seven have an
+// Every node's Help tree label, keyed by type. Seven of the eight have an
 // explicit `paletteLabel` ('dapr publish', 'dapr subscribe', ...); the
 // config node (`dapr-connection`) has none and falls back to its raw,
 // hyphenated type — confirmed by driving a real Help search for each.
@@ -292,10 +309,11 @@ const HELP_LABELS = {
   'dapr-invoke': 'dapr invoke',
   'dapr-service': 'dapr service',
   'dapr-response': 'dapr response',
+  'dapr-state': 'dapr state',
 };
 
 // Opens the Help sidebar and navigates straight to one node type's own
-// documentation via its search box — this works uniformly for all seven
+// documentation via its search box — this works uniformly for all eight
 // types, including the config node (which has no canvas presence to select
 // and no direct per-dialog Help button; confirmed by driving a real editor).
 // `.last()` on the tree-label match sidesteps an unrelated, currently

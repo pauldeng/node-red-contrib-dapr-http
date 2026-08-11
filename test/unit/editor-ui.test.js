@@ -63,6 +63,15 @@ test('response status editor uses a native number input', () => {
   assert.match(input, /step="1"/);
 });
 
+test('state TTL editor uses a non-negative integer input', () => {
+  const html = readNode('dapr-state');
+  const input = inputById(html, 'node-input-ttlSeconds');
+
+  assert.match(input, /type="number"/);
+  assert.match(input, /min="0"/);
+  assert.match(input, /step="1"/);
+});
+
 test('credential inputs opt out of browser password autofill', () => {
   const html = readNode('dapr-connection');
 

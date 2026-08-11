@@ -1,7 +1,7 @@
 {
   "name": "@pauldeng/node-red-contrib-dapr-http",
   "version": "0.1.1",
-  "description": "Node-RED nodes for Dapr pub/sub and service invocation over the Dapr HTTP sidecar API.",
+  "description": "Node-RED nodes for Dapr pub/sub, service invocation, and state management over HTTP.",
   "license": "MIT",
   "author": {
     "name": "Paul Deng",
@@ -27,6 +27,7 @@
     "pubsub",
     "publish-subscribe",
     "service-invocation",
+    "state-management",
     "cloudevents",
     "sidecar",
     "microservices"
@@ -64,7 +65,8 @@
       "dapr-ack": "nodes/dapr-ack.js",
       "dapr-invoke": "nodes/dapr-invoke.js",
       "dapr-service": "nodes/dapr-service.js",
-      "dapr-response": "nodes/dapr-response.js"
+      "dapr-response": "nodes/dapr-response.js",
+      "dapr-state": "nodes/dapr-state.js"
     }
   },
   "scripts": {
@@ -76,7 +78,7 @@
     "test:integration": "npm run test:integration:nats && npm run test:integration:dapr && npm run test:integration:redis && node --test --test-concurrency=1 test/integration/telemetry.test.js test/integration/memorydb-pubsub.test.js",
     "test:integration:nats": "node --test --test-concurrency=1 \"test/integration/nats-*.test.js\"",
     "test:integration:dapr": "node --test --test-concurrency=1 test/integration/acl.test.js test/integration/invoke.test.js test/integration/invoke-matrix.test.js test/integration/shutdown.test.js",
-    "test:integration:redis": "node --test --test-concurrency=1 test/integration/pubsub.test.js test/integration/retry.test.js test/integration/dead-letter.test.js test/integration/token.test.js",
+    "test:integration:redis": "node --test --test-concurrency=1 test/integration/pubsub.test.js test/integration/retry.test.js test/integration/dead-letter.test.js test/integration/token.test.js test/integration/state.test.js",
     "test:integration:memorydb": "node --test test/integration/memorydb-pubsub.test.js",
     "test:e2e": "playwright test",
     "validate": "npx --yes node-red-dev@latest validate",

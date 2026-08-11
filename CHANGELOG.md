@@ -67,6 +67,25 @@ the same change that ships behavior.
   `PUBLISH_FAILED`, not an empty `BULK_PUBLISH_PARTIAL`. One producer span
   covers the whole request, carrying only the batch and failure counts.
 
+- **A new `dapr-state` node** for Dapr's State Management HTTP API: get,
+  save, delete, bulk get, and transaction, selected by a configured
+  **Operation** field or a per-message `msg.dapr.operation` override. `get`
+  resolves `msg.payload` to the stored value (or `null` when the key does
+  not exist — an ordinary outcome, not an error) and `msg.dapr.etag` to the
+  store's ETag; `save`/`delete`/`transaction` pass `msg` through, adding only
+  `msg.dapr`; `bulkGet` resolves `msg.payload` to the store's own per-key
+  result array (`{key, data, etag, error}`). Consistency, concurrency, and
+  TTL (`metadata.ttlInSeconds`, sent as a string) are validated before any
+  request is sent, and an enforced stale ETag on save/delete fails with a
+  distinct `STATE_ETAG_MISMATCH` (HTTP 409) rather than the generic
+  `STATE_OPERATION_FAILED`, so a Catch node can reload and retry specifically.
+  Dapr 1.18.1 surfaces a Redis transactional ETag conflict as a generic 500,
+  so transaction retains `STATE_OPERATION_FAILED` rather than guessing from
+  store-specific error text. `save` and transactional upsert do not accept a
+  Buffer value (Dapr's state API is JSON-native, with no raw-bytes path the way pub/sub has
+  `application/octet-stream`). Dapr's state query API remains unsupported —
+  it is alpha and depends on store-specific query capabilities.
+
 ### Changed
 
 - **Runtime dependencies are no longer zero.** The official OpenTelemetry

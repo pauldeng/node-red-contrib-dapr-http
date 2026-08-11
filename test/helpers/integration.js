@@ -89,6 +89,28 @@ spec:
 `;
 }
 
+// A real Dapr Redis state-store component, for the state-management
+// integration tier. Distinct from pubsubComponentYaml's `pubsub.redis`
+// component -- same backing Redis, a different Dapr component type -- so a
+// suite that needs only state (no broker) passes this through startDaprd's
+// broker-agnostic `components` array instead of `redisPort` (which would
+// also write the pub/sub component this suite has no use for).
+function stateComponentYaml(redisPort, { name = 'statestore' } = {}) {
+  return `apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: ${name}
+spec:
+  type: state.redis
+  version: v1
+  metadata:
+    - name: redisHost
+      value: 127.0.0.1:${redisPort}
+    - name: redisPassword
+      value: ''
+`;
+}
+
 // Starts a fresh, isolated Redis container on a dynamically allocated host
 // port. Waits for it to accept connections before resolving.
 async function startRedis() {
@@ -283,4 +305,12 @@ async function startDaprd({
   };
 }
 
-module.exports = { startRedis, startDaprd, waitForHttp, DAPRD_IMAGE, REDIS_IMAGE, FIXTURES_DIR };
+module.exports = {
+  startRedis,
+  startDaprd,
+  waitForHttp,
+  stateComponentYaml,
+  DAPRD_IMAGE,
+  REDIS_IMAGE,
+  FIXTURES_DIR,
+};

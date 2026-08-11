@@ -1,0 +1,246 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-state', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      operation: { value: 'get', required: true },
+      storeName: { value: '', required: true },
+      key: { value: '' },
+      consistency: { value: '' },
+      concurrency: { value: '' },
+      ttlSeconds: {
+        value: '',
+        validate: function (value) {
+          if (value === undefined || value === null || value === '') {
+            return true;
+          }
+          const n = Number(value);
+          return Number.isInteger(n) && n >= 0;
+        },
+      },
+      metadata: {
+        value: '',
+        validate: function (value) {
+          try {
+            const parsed = JSON.parse(value || '{}');
+            return (
+              parsed !== null &&
+              typeof parsed === 'object' &&
+              !Array.isArray(parsed) &&
+              Object.entries(parsed).every(
+                ([key, item]) =>
+                  key.trim() !== '' &&
+                  (typeof item === 'string' ||
+                    typeof item === 'number' ||
+                    typeof item === 'boolean')
+              )
+            );
+          } catch {
+            return false;
+          }
+        },
+      },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-database',
+    paletteLabel: 'dapr state',
+    label: function () {
+      return this.name || `state ${this.operation || 'get'}`;
+    },
+    oneditprepare: function () {
+      if ($('#node-input-metadata').val() === '{}') {
+        $('#node-input-metadata').val('');
+      }
+      const updateFieldVisibility = () => {
+        const operation = $('#node-input-operation').val();
+        $('#node-state-key-field').toggle(['get', 'save', 'delete'].includes(operation));
+        $('#node-state-consistency-field').toggle(['get', 'save', 'delete'].includes(operation));
+        $('#node-state-concurrency-field').toggle(['save', 'delete'].includes(operation));
+        $('#node-state-ttl-field').toggle(operation === 'save');
+      };
+      $('#node-input-operation').on('change', updateFieldVisibility);
+      updateFieldVisibility();
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-state">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-operation"><i class="fa fa-cogs"></i> Operation</label>
+    <select id="node-input-operation" style="width:70%">
+      <option value="get">Get</option>
+      <option value="save">Save</option>
+      <option value="delete">Delete</option>
+      <option value="bulkGet">Bulk get</option>
+      <option value="transaction">Transaction</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-storeName"><i class="fa fa-database"></i> Store</label>
+    <input type="text" id="node-input-storeName" placeholder="statestore" />
+  </div>
+  <div class="form-row" id="node-state-key-field">
+    <label for="node-input-key"><i class="fa fa-key"></i> Key</label>
+    <input type="text" id="node-input-key" placeholder="order-1" />
+  </div>
+  <div class="form-row" id="node-state-consistency-field">
+    <label for="node-input-consistency"><i class="fa fa-balance-scale"></i> Consistency</label>
+    <select id="node-input-consistency" style="width:70%">
+      <option value="">Store default</option>
+      <option value="strong">Strong</option>
+      <option value="eventual">Eventual</option>
+    </select>
+  </div>
+  <div class="form-row" id="node-state-concurrency-field">
+    <label for="node-input-concurrency"><i class="fa fa-random"></i> Concurrency</label>
+    <select id="node-input-concurrency" style="width:70%">
+      <option value="">Store default</option>
+      <option value="first-write">First write wins</option>
+      <option value="last-write">Last write wins</option>
+    </select>
+  </div>
+  <div class="form-row" id="node-state-ttl-field">
+    <label for="node-input-ttlSeconds"><i class="fa fa-clock-o"></i> TTL (seconds)</label>
+    <input type="number" id="node-input-ttlSeconds" min="0" step="1" placeholder="Forever" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-metadata"><i class="fa fa-list"></i> Metadata</label>
+    <textarea
+      id="node-input-metadata"
+      rows="4"
+      placeholder='{"contentType":"application/json"}'
+      style="width:70%; resize:vertical"
+    ></textarea>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-state">
+  <p>Gets, saves, deletes, bulk-gets, or transactionally updates values in a Dapr state store.</p>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt class="optional">dapr.operation <span class="property-type">string</span></dt>
+    <dd>
+      Overrides the configured operation for this message: <code>get</code>, <code>save</code>,
+      <code>delete</code>, <code>bulkGet</code>, or <code>transaction</code>.
+    </dd>
+    <dt class="optional">dapr.storeName <span class="property-type">string</span></dt>
+    <dd>Overrides the configured state store name.</dd>
+    <dt class="optional">dapr.key <span class="property-type">string</span></dt>
+    <dd>Overrides the configured key. Required (from config or here) for get/save/delete.</dd>
+    <dt class="optional">dapr.etag <span class="property-type">string</span></dt>
+    <dd>
+      An ETag from a prior get, for optimistic concurrency on save/delete. For save (and a
+      transaction upsert), select <code>first-write</code> concurrency to enforce it; Dapr's
+      <code>last-write</code> mode ignores the ETag. A stale ETag that Dapr reports as HTTP 409
+      fails with a distinct <code>STATE_ETAG_MISMATCH</code> rather than the generic
+      <code>STATE_OPERATION_FAILED</code>, so a Catch node can reload and retry specifically.
+    </dd>
+    <dt class="optional">dapr.consistency <span class="property-type">string</span></dt>
+    <dd>
+      Overrides the configured consistency for get/save/delete: <code>strong</code> or
+      <code>eventual</code>.
+    </dd>
+    <dt class="optional">dapr.concurrency <span class="property-type">string</span></dt>
+    <dd>
+      Overrides the configured concurrency for save/delete: <code>first-write</code> or
+      <code>last-write</code>.
+    </dd>
+    <dt class="optional">dapr.ttlSeconds <span class="property-type">number</span></dt>
+    <dd>Overrides the configured TTL for save, as a non-negative integer number of seconds.</dd>
+    <dt class="optional">dapr.metadata <span class="property-type">object</span></dt>
+    <dd>Per-message state metadata, merged over the configured metadata (message keys win).</dd>
+  </dl>
+
+  <h3>Get</h3>
+  <p>
+    On success, <code>msg.payload</code> is the stored value (decoded by the sidecar's response
+    content type), or <code>null</code> if the key does not exist &mdash; a missing key is an
+    ordinary outcome, not an error. <code>msg.dapr.etag</code> carries the store's ETag (<code
+      >undefined</code
+    >
+    when the key does not exist).
+  </p>
+
+  <h3>Save</h3>
+  <p>
+    <code>msg.payload</code> is the value to save at <b>Key</b> (or <code>dapr.key</code>). It must
+    be JSON-serializable; a Buffer payload is rejected &mdash; base64-encode it into the value
+    yourself. <code>msg</code> is otherwise sent on unchanged.
+  </p>
+
+  <h3>Delete</h3>
+  <p>
+    <code>msg</code> is passed through unchanged except for <code>msg.dapr</code>, described below.
+  </p>
+
+  <h3>Bulk get</h3>
+  <p>
+    <code>msg.payload</code> (or <code>dapr.keys</code>) is an array of key strings. On success,
+    <code>msg.payload</code> becomes the store's own per-key result array:
+  </p>
+  <pre>[{ key: "a", data: ..., etag: "..." }, { key: "b", error: "..." }]</pre>
+  <p>
+    A per-item <code>error</code> does not fail the whole call &mdash; only a transport-level
+    failure to the store does.
+  </p>
+
+  <h3>Transaction</h3>
+  <p>
+    <code>msg.payload</code> (or <code>dapr.operations</code>) is an array of operations, applied
+    atomically:
+  </p>
+  <pre>
+msg.payload = [
+  { operation: "upsert", key: "a", value: { total: 1 } },
+  { operation: "delete", key: "b" }
+];
+return msg;</pre>
+  <p>
+    Each operation's <code>operation</code> must be exactly <code>upsert</code> or
+    <code>delete</code> (not <code>set</code>); an <code>upsert</code> requires a JSON-serializable
+    <code>value</code>. Buffer values are rejected; base64-encode them first. Each operation may
+    also carry its own <code>etag</code>, <code>consistency</code>, <code>concurrency</code>, and
+    <code>metadata</code>. <code>msg</code> is otherwise sent on unchanged.
+  </p>
+  <p>
+    Dapr 1.18.1 returns a Redis transactional ETag conflict as a generic HTTP 500, so that case is
+    <code>STATE_OPERATION_FAILED</code>; the node does not guess from store-specific error text.
+  </p>
+
+  <h3>Outputs</h3>
+  <p>
+    On success, <code>msg.dapr = { operation, storeName, statusCode, ... }</code> (plus
+    <code>key</code> for get/save/delete, and <code>etag</code> for get). On failure, the node calls
+    <code>done(error)</code> so a Catch node can handle it; messages are not queued while the
+    sidecar is unavailable. A validation failure is reported as <code>INVALID_MESSAGE</code>, an
+    etag conflict (HTTP 409) as <code>STATE_ETAG_MISMATCH</code>, and any other non-2xx response as
+    <code>STATE_OPERATION_FAILED</code>.
+  </p>
+  <p>
+    A call still in flight when the flow is redeployed is aborted rather than finished after the
+    node is gone, so it fails (reaching a Catch node if one is wired) instead of completing
+    silently.
+  </p>
+  <p>
+    Dapr's state query API (<code>POST /v1.0-alpha1/state/&lt;store&gt;/query</code>) is not
+    supported by this node: it remains alpha and depends on store-specific query capabilities.
+  </p>
+
+  <h3>Example</h3>
+  <pre>
+msg.dapr = { operation: "save", key: "order-42" };
+msg.payload = { orderId: "ORD-42", status: "created" };
+return msg;</pre>
+</script>
