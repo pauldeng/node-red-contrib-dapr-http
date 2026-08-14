@@ -158,6 +158,17 @@ the same change that ships behavior.
   store" (`500`/`SECRET_OPERATION_FAILED`, indistinguishable from any other
   component-level failure — Dapr itself doesn't distinguish them).
 
+- **A new "Test Connection" button on `dapr-connection`.** Calls the
+  sidecar's own `GET /v1.0/metadata` against the _deployed_ connection (never
+  the still-open dialog's own unsaved fields) and shows the app id, runtime
+  version, the first 20 loaded component names/types, and total component and
+  subscription counts. Dapr's component entries do not contain component
+  configuration values, and the route excludes every other metadata field —
+  including the arbitrary top-level `extended` map — plus raw bodies, tokens,
+  and raw errors. The permission-guarded `RED.httpAdmin` route is separate from
+  the Dapr-facing app channel, aborts when the editor disconnects or the
+  connection redeploys, and is not a new palette node.
+
 ### Changed
 
 - **Runtime dependencies are no longer zero.** The official OpenTelemetry

@@ -29,7 +29,7 @@ npm run test:integration # the complete serialized gate: NATS, then no-broker da
 npm run test:e2e         # Playwright tests against the real Node-RED editor
 
 npm run test:integration:nats      # NATS JetStream-backed tests only (test/integration/nats-*.test.js)
-npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown, output bindings, secrets)
+npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown, output bindings, secrets, metadata)
 npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish, state management, dynamic configuration
 npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
@@ -103,6 +103,11 @@ exist: `nodes/dapr-secret-get.html` documents the same guarantee against a
 fake sidecar at the unit and runtime tiers, but only a real daprd response
 proves the sanitization holds against the actual wire text, not an assumed
 shape.
+
+`test/integration/metadata.test.js` also needs no broker. It starts real daprd
+1.18.1 with the existing local-file secret component and verifies that Test
+Connection reports the real app id, runtime version, component name/type, and
+counts while exposing none of daprd's other metadata fields.
 
 ## The optional MemoryDB tier
 
@@ -371,7 +376,7 @@ Two-part policy:
   `@node-red/registry`; this test suite never asks the editor to install a
   palette module, so that code path never runs here.
 
-  Permitted advisories (dev-only), last reviewed 2026-08-10:
+  Permitted advisories (dev-only), last reviewed 2026-08-15:
 
   | Advisory                                                                                                                                                                                                                     | Package                 | Reached through                                                                                                                                                        |
   | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -13,8 +13,9 @@ A `dapr-connection` node manages two things that never share a listener:
   invocation, `lib/state-client.js` for state management,
   `lib/configuration-client.js` for dynamic configuration,
   `lib/binding-client.js` for output bindings, `lib/secret-client.js` for
-  scoped secret retrieval). Plain outgoing HTTP requests; no server or
-  Node-RED HTTP infrastructure is involved on this side.
+  scoped secret retrieval, `lib/metadata-client.js` for read-only sidecar
+  metadata). Plain outgoing HTTP requests; no server or Node-RED HTTP
+  infrastructure is involved on this side.
 - **Inbound app channel** (`lib/app-channel.js`) — a dedicated `node:http`
   server the connection node starts itself, for the sidecar to call back into
   this app. It exposes exactly:
@@ -32,6 +33,19 @@ This listener is never attached to `RED.httpAdmin`, `RED.httpNode`, or the
 editor port. Doing so would expose the Node-RED Admin API (remote flow
 read/deploy) to the Dapr mesh, and would let admin routes shadow service
 methods. See `docs/security.md` for the auth rules this listener enforces.
+
+A completely separate thing, not a violation of the rule above: the
+`RED.httpAdmin` route (`GET
+/dapr-connection/:id/metadata`, guarded by
+`RED.auth.needsPermission('dapr-connection.read')`) backs `dapr-connection`'s
+own **Test Connection** editor button. It is Node-RED editor-support tooling,
+not an app-channel route; whether the Admin API is network-reachable is an
+operator deployment and `adminAuth` concern. It calls `GET /v1.0/metadata`
+against the _deployed_ connection's already-resolved options, caps names,
+types, and the displayed component list, and excludes every other metadata
+field (including `extended`), the sidecar's raw response, tokens, and raw
+errors. Browser disconnect and connection-node shutdown both abort the
+outbound request.
 
 ## Listener lifecycle across redeploy
 
@@ -89,6 +103,7 @@ lib/state-client.js        state management client (get/save/delete/bulk get/tra
 lib/configuration-client.js  configuration client (get/subscribe/unsubscribe)
 lib/binding-client.js      output-binding invoke client
 lib/secret-client.js       secret get client (never forwards daprd's own error text)
+lib/metadata-client.js     read-only sidecar metadata client (GET /v1.0/metadata)
 lib/http-headers.js        header allow-listing/normalization shared by both directions
 lib/app-channel.js         listener registry, router, auth, limits, sockets
 lib/subscriptions.js       subscription definitions, canonical fingerprints, generations
@@ -110,13 +125,13 @@ endpoints: `POST /v1.0/publish/<pubsub>/<topic>`,
 `POST /v1.0/publish/bulk/<pubsub>/<topic>`,
 `/v1.0/invoke/<app-id>/method/<method>`, `/v1.0/state/<store>/...`,
 `/v1.0/configuration/<store>/...`, `/v1.0/bindings/<name>`,
-`/v1.0/secrets/<store>/<key>`, and `GET /v1.0/healthz/outbound`. All go
-through `lib/sidecar-http.js`, so there is exactly one place where
-deadlines, aborts, Content-Length framing, response bounds, and error
-mapping are implemented.
+`/v1.0/secrets/<store>/<key>`, `GET /v1.0/metadata`, and
+`GET /v1.0/healthz/outbound`. All go through `lib/sidecar-http.js`, so there
+is exactly one place where deadlines, aborts, Content-Length framing,
+response bounds, and error mapping are implemented.
 
-Publish, invoke, state, configuration, binding, and secret calls ride
-Node's process-global keep-alive agent, so keep-alive is owned centrally
+Publish, invoke, state, configuration, binding, secret, and metadata calls
+ride Node's process-global keep-alive agent, so keep-alive is owned centrally
 rather than per node instance. The health poll is the single caller that
 opts out
 (`agent: false`): it runs

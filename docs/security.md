@@ -119,6 +119,23 @@ only reachable through explicit configuration, and:
 
 `0.0.0.0` is not loopback: it binds every interface, including public ones.
 
+## Node-RED Admin API
+
+The `dapr-connection` dialog's **Test Connection** action uses a Node-RED Admin
+API route, not the Dapr app channel. It requires `dapr-connection.read`, so a
+deployment with `adminAuth` applies Node-RED's normal permission checks. With no
+`adminAuth`, anyone who can reach the Admin API has Node-RED's default editor
+access and can also call this route; protect the editor port with the same
+network and authentication controls as the rest of the Admin API.
+
+The route looks up an existing deployed `dapr-connection` by id and uses its
+stored options; unsaved form fields and credentials are never sent to it. Its
+response contains only bounded app/runtime text, at most 20 bounded component
+names/types, and total component/subscription counts. Dapr's arbitrary
+top-level `extended` metadata, component capabilities/version, raw body, API
+token, configuration, and raw errors are excluded. Closing the dialog or
+redeploying the connection aborts the sidecar request.
+
 ## Request limits
 
 Before buffering any request data, the listener enforces:
