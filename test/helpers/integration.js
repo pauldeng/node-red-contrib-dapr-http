@@ -154,6 +154,26 @@ spec:
 `;
 }
 
+// A real Dapr local-file secret store, for the secrets integration tier.
+// Needs no broker or store at all -- secretsFile points at the static
+// test/integration/fixtures/secrets.json fixture, mounted read-only at
+// /components alongside every other component YAML this suite writes.
+// Component name is fixed at "secretstore" to match
+// test/integration/fixtures/secret-scopes.yaml's own scope declaration.
+function secretComponentYaml() {
+  return `apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: secretstore
+spec:
+  type: secretstores.local.file
+  version: v1
+  metadata:
+    - name: secretsFile
+      value: /components/secrets.json
+`;
+}
+
 // Starts a fresh, isolated Redis container on a dynamically allocated host
 // port. Waits for it to accept connections before resolving.
 // `notifyKeyspaceEvents`, when set, is passed as redis-server's own
@@ -363,6 +383,7 @@ module.exports = {
   stateComponentYaml,
   configurationComponentYaml,
   bindingComponentYaml,
+  secretComponentYaml,
   DAPRD_IMAGE,
   REDIS_IMAGE,
   FIXTURES_DIR,

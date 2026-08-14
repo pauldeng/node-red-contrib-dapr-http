@@ -115,7 +115,7 @@ async function closeDialog(page, { save = true, config = false } = {}) {
   await waitForTraySettled(page);
 }
 
-// A complete flow exercising all eleven node types together: publish,
+// A complete flow exercising every node type together: publish,
 // subscribe with a CEL rule and bulk delivery enabled, manual acknowledgement,
 // outbound invocation, an inbound service replying via dapr-response, a
 // state get, a configuration get, and a configuration subscribe — the
@@ -269,6 +269,20 @@ function fullFlow({ appPort, daprPort }) {
       y: 640,
       wires: [[]],
     },
+    {
+      id: 'e2e-secret-get',
+      type: 'dapr-secret-get',
+      z: 'e2e-tab',
+      name: 'get credential',
+      connection: 'e2e-conn',
+      storeName: 'vault',
+      key: 'apiKey',
+      property: 'payload',
+      metadata: '{}',
+      x: 160,
+      y: 720,
+      wires: [[]],
+    },
   ];
 }
 
@@ -337,7 +351,7 @@ async function assertNoHorizontalOverflow(page) {
   }
 }
 
-// Every node's Help tree label, keyed by type. Ten of the eleven have an
+// Every node's Help tree label, keyed by type. Palette nodes have an
 // explicit `paletteLabel` ('dapr publish', 'dapr subscribe', ...); the
 // config node (`dapr-connection`) has none and falls back to its raw,
 // hyphenated type — confirmed by driving a real Help search for each.
@@ -353,10 +367,11 @@ const HELP_LABELS = {
   'dapr-config-get': 'dapr config get',
   'dapr-config-subscribe': 'dapr config subscribe',
   'dapr-binding-out': 'dapr binding out',
+  'dapr-secret-get': 'dapr secret get',
 };
 
 // Opens the Help sidebar and navigates straight to one node type's own
-// documentation via its search box — this works uniformly for all eleven
+// documentation via its search box — this works uniformly for every node
 // types, including the config node (which has no canvas presence to select
 // and no direct per-dialog Help button; confirmed by driving a real editor).
 // `.last()` on the tree-label match sidesteps an unrelated, currently

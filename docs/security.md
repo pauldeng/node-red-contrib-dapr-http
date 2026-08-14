@@ -84,6 +84,27 @@ If topic-level authorization matters, configure these on the pubsub
 component directly; this package's nodes have no visibility into or control
 over them.
 
+### Secrets: store scopes and telemetry boundaries
+
+`dapr-secret-get` relies on Dapr's `spec.secrets.scopes` policy for per-store,
+per-key authorization. Configure `defaultAccess` with `allowedSecrets` or
+`deniedSecrets` in the Dapr Configuration resource; the node does not create
+or weaken that policy. Protect the outbound sidecar API with the Dapr API
+token and the same loopback/network controls used for every other outbound
+call.
+
+This node does not automatically attach a secret key or value to its status,
+generated errors, or secret boundary span, and it discards daprd's raw error
+body. The user-authored node name still appears in generic flow telemetry, so
+do not put a secret or sensitive key name there. That boundary ends at the
+sidecar: daprd receives the key in the HTTP path, and daprd's own logs and
+traces can contain the secret key. Treat those sinks as sensitive and
+configure their collection and retention accordingly.
+
+The successful response is necessarily placed on the flow message. A Debug
+node, Function node, application log, or exported/captured message can reveal
+it; flows must consume the value and avoid logging or retaining it.
+
 ## Non-loopback binding
 
 The app-channel listener binds `127.0.0.1` by default. A non-loopback bind is

@@ -49,6 +49,20 @@ function interactionsFlow({ appPort, daprPort }) {
       y: 200,
       wires: [[]],
     },
+    {
+      id: 'secret',
+      type: 'dapr-secret-get',
+      z: 'tab',
+      name: 'get credential',
+      connection: 'conn',
+      storeName: 'vault',
+      key: 'apiKey',
+      property: 'payload',
+      metadata: '{}',
+      x: 200,
+      y: 280,
+      wires: [[]],
+    },
   ];
 }
 
@@ -135,6 +149,37 @@ test('publish bulk mode is off for a legacy flow and persists when enabled', asy
   await expect(page.locator('#node-input-bulkEnabled')).toBeChecked();
 });
 
+test('secret output property is a static msg path, not a message-directed destination', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'secret');
+  const propertyContainer = page.locator('#node-input-property + .red-ui-typedInput-container');
+  const property = propertyContainer.locator('.red-ui-typedInput-input');
+  await expect(propertyContainer).toBeVisible();
+
+  await property.fill('payload[msg._msgid]');
+  await property.blur();
+  await expect(propertyContainer).toHaveClass(/input-error/);
+
+  await property.fill('dapr.secret');
+  await property.blur();
+  await expect(propertyContainer).toHaveClass(/input-error/);
+
+  await property.fill('__proto__.secret');
+  await property.blur();
+  await expect(propertyContainer).toHaveClass(/input-error/);
+
+  await property.fill('secret.value');
+  await property.blur();
+  await expect(propertyContainer).not.toHaveClass(/input-error/);
+});
+
 test('CEL routing rules can be added, edited, reordered, and removed', async ({
   page,
   nr,
@@ -189,7 +234,7 @@ test('CEL routing rules can be added, edited, reordered, and removed', async ({
 
 // Help sidebar coverage (finding: the interaction suite never opened Help,
 // so a style-guide or content regression there would be invisible to CI).
-// Covers all eleven types via the same path, including the config node,
+// Covers every type via the same path, including the config node,
 // which has no canvas presence and no direct per-dialog Help button.
 for (const type of Object.keys(HELP_LABELS)) {
   test(`Help sidebar shows ${type}'s own documentation`, async ({

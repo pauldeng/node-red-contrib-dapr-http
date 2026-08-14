@@ -12,8 +12,9 @@ A `dapr-connection` node manages two things that never share a listener:
   (`lib/dapr-client.js` for pub/sub, `lib/invoke-client.js` for service
   invocation, `lib/state-client.js` for state management,
   `lib/configuration-client.js` for dynamic configuration,
-  `lib/binding-client.js` for output bindings). Plain outgoing HTTP requests;
-  no server or Node-RED HTTP infrastructure is involved on this side.
+  `lib/binding-client.js` for output bindings, `lib/secret-client.js` for
+  scoped secret retrieval). Plain outgoing HTTP requests; no server or
+  Node-RED HTTP infrastructure is involved on this side.
 - **Inbound app channel** (`lib/app-channel.js`) — a dedicated `node:http`
   server the connection node starts itself, for the sidecar to call back into
   this app. It exposes exactly:
@@ -74,17 +75,20 @@ nodes/dapr-state.js        state management wrapper (get/save/delete/bulk get/tr
 nodes/dapr-config-get.js   configuration get wrapper (message-triggered)
 nodes/dapr-config-subscribe.js  configuration subscribe wrapper (deploy-time, long-lived)
 nodes/dapr-binding-out.js  output-binding invoke wrapper (message-triggered)
+nodes/dapr-secret-get.js   scoped single-secret retrieval wrapper (message-triggered)
 lib/options.js             config/env precedence and validation
 lib/messages.js            content-type inference and CloudEvent conversion
 lib/state-messages.js      per-message state request validation and shaping
 lib/configuration-messages.js  configuration get/subscribe request validation and shaping
 lib/binding-messages.js    per-message binding invoke request validation and shaping
+lib/secret-messages.js     per-message secret get request validation and shaping
 lib/sidecar-http.js        the one outbound HTTP request path to the sidecar
 lib/dapr-client.js         pub/sub publish client (paths, metadata, serialization)
 lib/invoke-client.js       outbound service-invocation client
 lib/state-client.js        state management client (get/save/delete/bulk get/transaction)
 lib/configuration-client.js  configuration client (get/subscribe/unsubscribe)
 lib/binding-client.js      output-binding invoke client
+lib/secret-client.js       secret get client (never forwards daprd's own error text)
 lib/http-headers.js        header allow-listing/normalization shared by both directions
 lib/app-channel.js         listener registry, router, auth, limits, sockets
 lib/subscriptions.js       subscription definitions, canonical fingerprints, generations
@@ -105,14 +109,16 @@ Everything this package sends to the sidecar is a handful of documented HTTP
 endpoints: `POST /v1.0/publish/<pubsub>/<topic>`,
 `POST /v1.0/publish/bulk/<pubsub>/<topic>`,
 `/v1.0/invoke/<app-id>/method/<method>`, `/v1.0/state/<store>/...`,
-`/v1.0/configuration/<store>/...`, `/v1.0/bindings/<name>`, and
-`GET /v1.0/healthz/outbound`. All go through `lib/sidecar-http.js`, so there
-is exactly one place where deadlines, aborts, Content-Length framing,
-response bounds, and error mapping are implemented.
+`/v1.0/configuration/<store>/...`, `/v1.0/bindings/<name>`,
+`/v1.0/secrets/<store>/<key>`, and `GET /v1.0/healthz/outbound`. All go
+through `lib/sidecar-http.js`, so there is exactly one place where
+deadlines, aborts, Content-Length framing, response bounds, and error
+mapping are implemented.
 
-Publish, invoke, state, configuration, and binding calls ride Node's
-process-global keep-alive agent, so keep-alive is owned centrally rather
-than per node instance. The health poll is the single caller that opts out
+Publish, invoke, state, configuration, binding, and secret calls ride
+Node's process-global keep-alive agent, so keep-alive is owned centrally
+rather than per node instance. The health poll is the single caller that
+opts out
 (`agent: false`): it runs
 every 10 s against a sidecar that may be on its way down, and a pooled
 socket to a dead sidecar is only something the next poll would have to
@@ -158,8 +164,10 @@ the host; the checkbox only manages the package-owned fallback provider.
 Three layers, each independently useful:
 
 - **Boundary spans.** A producer span on `dapr-publish`, client spans on
-  `dapr-invoke`, `dapr-state`, `dapr-config-get`, and `dapr-binding-out`,
-  consumer spans on
+  `dapr-invoke`, `dapr-state`, `dapr-config-get`, `dapr-binding-out`, and
+  `dapr-secret-get` (the store name only, deliberately never the secret's
+  own key — generic flow spans still include the user-authored node name,
+  and daprd's own tracing can record the key-bearing request path), consumer spans on
   `dapr-subscribe` (single and bulk, extracting the W3C trace context from
   the delivery's headers or, for a bulk entry, its CloudEvent with metadata
   as a fallback — bulk has no per-message HTTP headers) and
