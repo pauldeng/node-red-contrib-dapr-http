@@ -29,7 +29,7 @@ npm run test:integration # the complete serialized gate: NATS, then no-broker da
 npm run test:e2e         # Playwright tests against the real Node-RED editor
 
 npm run test:integration:nats      # NATS JetStream-backed tests only (test/integration/nats-*.test.js)
-npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown, output bindings)
+npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown, output bindings, secrets)
 npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish, state management, dynamic configuration
 npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
@@ -86,6 +86,23 @@ the component's real response round-trips back through `msg.payload`/
 `500`/`ERR_INVOKE_OUTPUT_BINDING` from real daprd 1.18.1 — confirming the
 source-level finding that daprd gives no dedicated not-found status for
 this endpoint (see `nodes/dapr-binding-out.html`).
+
+`test/integration/secret-get.test.js` lives in the same no-broker bucket:
+secrets need no store or broker at all beyond a real
+`secretstores.local.file` component pointed at a static test fixture
+(`test/integration/fixtures/secrets.json`), plus a real Dapr Configuration
+resource (`test/integration/fixtures/secret-scopes.yaml`) exercising real
+secret-scoping (`spec.secrets.scopes`). It proves the three real, distinct
+outcomes daprd 1.18.1 actually produces -- allowed-and-present (`200`),
+allowed-but-absent (`500`/`SECRET_OPERATION_FAILED`), and denied-by-scope
+(`403`/`SECRET_ACCESS_DENIED`, which happens before the component is ever
+called and so never overlaps with "absent") -- and asserts that daprd's own
+real error messages, which embed the requested key by name, never reach the
+flow's own HTTP response. That assertion is this node's whole reason to
+exist: `nodes/dapr-secret-get.html` documents the same guarantee against a
+fake sidecar at the unit and runtime tiers, but only a real daprd response
+proves the sanitization holds against the actual wire text, not an assumed
+shape.
 
 ## The optional MemoryDB tier
 

@@ -131,6 +131,34 @@ metadata, dead-letter topic, raw-payload mode, CEL rules, or bulk settings.
         value: http://127.0.0.1:8080/orders
   ```
 
+- `secret-get.json` reads `apiKey` from a secret store named `vault`. It
+  needs no broker at all; the simplest local secret store is
+  `secretstores.local.file`, backed by a plain JSON file. This component is
+  development-only and not for production. Create the file with owner-only
+  permissions:
+
+  ```bash
+  umask 077
+  printf '%s\n' '{"apiKey": "local-dev-value"}' > secrets.json
+  ```
+
+  ```yaml
+  apiVersion: dapr.io/v1alpha1
+  kind: Component
+  metadata:
+    name: vault
+  spec:
+    type: secretstores.local.file
+    version: v1
+    metadata:
+      - name: secretsFile
+        value: /absolute/path/to/secrets.json
+  ```
+
+  The example replaces the returned value with a boolean confirmation before
+  sending anything to Debug. Real flows should likewise consume the secret
+  without logging or retaining it.
+
 For `cel-routing.json` or `bulk-acknowledgement.json`, create the NATS stream
 with the `orders` subject too:
 

@@ -28,6 +28,7 @@ const NODES = [
   { id: 'e2e-config-get', type: 'dapr-config-get' },
   { id: 'e2e-config-sub', type: 'dapr-config-subscribe' },
   { id: 'e2e-binding-out', type: 'dapr-binding-out' },
+  { id: 'e2e-secret-get', type: 'dapr-secret-get' },
 ];
 
 // A regression lock for a real bug found while building this tier: a field

@@ -134,6 +134,30 @@ the same change that ships behavior.
   startup, so wiring one up needs a sidecar restart and a lifecycle design of
   its own.
 
+- **A new `dapr-secret-get` node for scoped, single-secret retrieval.**
+  Message-triggered: `storeName` and `key` are configured, message-overridable
+  fields; the result is written to a configured message property
+  (`payload` by default), never a fixed one, and that property is
+  deliberately not message-overridable — letting an upstream message
+  redirect where a secret lands is the wrong direction to leave open. Bulk
+  secret retrieval is not exposed: Dapr's own bulk endpoint applies
+  secret-scoping per returned name and silently drops denied entries rather
+  than failing, a materially larger accidental-disclosure surface than one
+  deny-or-allow lookup. **This node does not automatically attach the key or
+  value to its status text, generated errors, or secret boundary span** — it
+  deliberately never forwards daprd's response text. Generic flow telemetry
+  still includes the user-authored node name, so that name must not contain a
+  secret or sensitive key name. Real daprd 1.18.1 embeds the requested
+  secret's key directly in its own error messages. daprd itself sees the key in
+  the request path and its own logs and traces can contain it; that
+  sidecar-owned telemetry is outside this package's control. Verified end to
+  end against a real daprd 1.18.1 + `secretstores.local.file` component and
+  real Dapr secret-scoping (`spec.secrets.scopes`): a store-scoping denial
+  (`403`/`SECRET_ACCESS_DENIED`) happens before the component is ever
+  called, so it never overlaps with "key not found in an otherwise-valid
+  store" (`500`/`SECRET_OPERATION_FAILED`, indistinguishable from any other
+  component-level failure — Dapr itself doesn't distinguish them).
+
 ### Changed
 
 - **Runtime dependencies are no longer zero.** The official OpenTelemetry

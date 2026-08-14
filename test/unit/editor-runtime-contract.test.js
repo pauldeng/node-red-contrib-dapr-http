@@ -12,6 +12,8 @@ const { buildService } = require('../../lib/services');
 const { preparePublish } = require('../../lib/messages');
 const { prepareStateSave } = require('../../lib/state-messages');
 const { prepareBindingRequest } = require('../../lib/binding-messages');
+const { prepareSecretGet, resolveSecretProperty } = require('../../lib/secret-messages');
+const { normalisePropertyExpression } = require('@node-red/util').util;
 const { buildSubscription } = require('../../lib/subscriptions');
 const { parseRequestHeaders } = require('../../lib/http-headers');
 
@@ -41,12 +43,15 @@ function loadEditorIsLoopback() {
 
 // Extract one `validate:` function from a node's `defaults`, along with any
 // top-level helpers declared beside it in the same script block (isBlank, etc),
-// which the validator may call.
+// which the validator may call. `validate:` may be an inline function
+// expression OR a bare identifier referencing a top-level helper (e.g.
+// `validate: isStaticMessageProperty`) -- both forms resolve correctly
+// against the same `helpers` block below.
 function loadEditorValidator(file, property) {
   const html = readNode(file);
   const source = html.match(
     new RegExp(
-      `${property}: \\{[\\s\\S]*?validate: (function \\(v(?:alue)?\\) \\{[\\s\\S]*?\\n {8}\\})`
+      `${property}: \\{[\\s\\S]*?validate: (function \\(v(?:alue)?\\) \\{[\\s\\S]*?\\n {8}\\}|[A-Za-z_$][A-Za-z0-9_$]*)`
     )
   );
   assert.ok(source, `could not find the ${property} validate function in nodes/${file}`);
@@ -272,6 +277,43 @@ test('pub/sub metadata: both editors match their runtime normalizer', () => {
       prepareBindingRequest({ bindingName: 'b', operation: 'create', metadata }, { payload: 'x' }),
     cases: METADATA,
     mode: 'exact',
+  });
+  assertContract({
+    label: 'dapr-secret-get metadata',
+    editor: loadEditorValidator('dapr-secret-get.html', 'metadata'),
+    runtime: (metadata) => prepareSecretGet({ storeName: 's', key: 'k', metadata }, {}),
+    cases: METADATA,
+    mode: 'exact',
+  });
+});
+
+test('dapr-secret-get property: the editor never accepts a path the runtime rejects', () => {
+  // 'no-looser', not 'exact': the runtime defaults a blank value to "payload"
+  // (defensive handling for hand-authored/legacy flow JSON), while the
+  // editor's own `required: true` already independently blocks saving a
+  // blank value -- that one divergence is the safe direction (editor
+  // stricter), not the dangerous one this contract exists to catch.
+  assertContract({
+    label: 'dapr-secret-get property',
+    editor: loadEditorValidator('dapr-secret-get.html', 'property'),
+    runtime: (property) => resolveSecretProperty(property, normalisePropertyExpression),
+    cases: [
+      '',
+      'payload',
+      'msg.payload',
+      'secret',
+      'secret.nested',
+      'dapr',
+      'msg.dapr',
+      'dapr.secret',
+      '__proto__',
+      'secret.__proto__.polluted',
+      'secret[msg.topic]',
+      '..',
+      'secret.',
+      '   ',
+    ],
+    mode: 'no-looser',
   });
 });
 
