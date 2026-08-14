@@ -113,6 +113,24 @@ metadata, dead-letter topic, raw-payload mode, CEL rules, or bulk settings.
         value: ''
   ```
 
+- `output-binding.json` invokes a binding named `orders-binding` with a
+  `create` operation. It needs no broker or store at all -- any output
+  binding component works; a `bindings.http` component pointed at any HTTP
+  endpoint you control is the simplest to try locally:
+
+  ```yaml
+  apiVersion: dapr.io/v1alpha1
+  kind: Component
+  metadata:
+    name: orders-binding
+  spec:
+    type: bindings.http
+    version: v1
+    metadata:
+      - name: url
+        value: http://127.0.0.1:8080/orders
+  ```
+
 For `cel-routing.json` or `bulk-acknowledgement.json`, create the NATS stream
 with the `orders` subject too:
 

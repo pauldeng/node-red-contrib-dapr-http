@@ -113,6 +113,27 @@ the same change that ships behavior.
   callbacks are registered as internal app-channel routes, so mesh service
   callers carrying `dapr-caller-app-id` cannot forge configuration updates.
 
+- **A new `dapr-binding-out` node for Dapr's output bindings.** Message-triggered:
+  `msg.payload` is sent as the binding's own `data` field; `bindingName` and
+  `operation` are configured, message-overridable fields (operation is a plain
+  text field, not a closed enum — bindings define their own open-ended
+  operation vocabulary). On success, `msg.payload` is the component's own
+  response body and `msg.dapr = { bindingName, operation, statusCode, metadata }`,
+  where `metadata` is the component's response metadata (Dapr carries it as
+  `metadata.<key>` response headers; Node's own HTTP client lower-cases every
+  header name, so a component-set `statusCode` key arrives as `statuscode`).
+  Verified against real daprd 1.18.1 and the `bindings.http` component source:
+  every failure mode this endpoint can report — an unconfigured binding name,
+  an operation the binding does not support, or the component's own operation
+  failing — collapses to the same `500`/`ERR_INVOKE_OUTPUT_BINDING`, with no
+  dedicated not-found status the way state has for a missing key; and on an
+  HTTP-type binding's non-2xx target response, the component's real response
+  body is discarded by daprd's own error handling before it reaches this node.
+  Both are documented plainly in the node's help rather than hidden. Input
+  bindings remain out of scope: daprd probes input-binding app routes once at
+  startup, so wiring one up needs a sidecar restart and a lifecycle design of
+  its own.
+
 ### Changed
 
 - **Runtime dependencies are no longer zero.** The official OpenTelemetry

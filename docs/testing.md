@@ -29,7 +29,7 @@ npm run test:integration # the complete serialized gate: NATS, then no-broker da
 npm run test:e2e         # Playwright tests against the real Node-RED editor
 
 npm run test:integration:nats      # NATS JetStream-backed tests only (test/integration/nats-*.test.js)
-npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown)
+npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown, output bindings)
 npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish, state management, dynamic configuration
 npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
@@ -72,6 +72,20 @@ that a fresh subscription id receives both the current snapshot and later
 updates. Finally, it exercises `v1.0` and `v1.0-alpha1` unsubscribe against two
 independently live subscriptions and mutates Redis afterward, proving both
 prefixes stop delivery rather than merely returning HTTP 200.
+
+`test/integration/binding-out.test.js` lives in the no-broker bucket beside
+`acl.test.js`/`invoke.test.js`/`shutdown.test.js`, not the Redis bucket:
+output bindings need no store or broker at all — `bindings.http`'s own `url`
+metadata points directly at a plain HTTP target
+(`test/helpers/integration.js`'s `bindingComponentYaml`), here this suite's
+own `startCapture()` server. It proves a real `dapr-binding-out` invoke
+reaches that target as a genuine POST (asserted from the capture server's
+own independently-observed received body, not this package's code) and that
+the component's real response round-trips back through `msg.payload`/
+`msg.dapr`, plus that an unconfigured binding name produces a real
+`500`/`ERR_INVOKE_OUTPUT_BINDING` from real daprd 1.18.1 — confirming the
+source-level finding that daprd gives no dedicated not-found status for
+this endpoint (see `nodes/dapr-binding-out.html`).
 
 ## The optional MemoryDB tier
 

@@ -11,6 +11,7 @@ const { ErrorCodes } = require('../../lib/errors');
 const { buildService } = require('../../lib/services');
 const { preparePublish } = require('../../lib/messages');
 const { prepareStateSave } = require('../../lib/state-messages');
+const { prepareBindingRequest } = require('../../lib/binding-messages');
 const { buildSubscription } = require('../../lib/subscriptions');
 const { parseRequestHeaders } = require('../../lib/http-headers');
 
@@ -261,6 +262,14 @@ test('pub/sub metadata: both editors match their runtime normalizer', () => {
     editor: loadEditorValidator('dapr-subscribe.html', 'metadata'),
     runtime: (metadata) =>
       buildSubscription({ nodeId: 'n1', pubsubName: 'p', topic: 't', metadata }),
+    cases: METADATA,
+    mode: 'exact',
+  });
+  assertContract({
+    label: 'dapr-binding-out metadata',
+    editor: loadEditorValidator('dapr-binding-out.html', 'metadata'),
+    runtime: (metadata) =>
+      prepareBindingRequest({ bindingName: 'b', operation: 'create', metadata }, { payload: 'x' }),
     cases: METADATA,
     mode: 'exact',
   });

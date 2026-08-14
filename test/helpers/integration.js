@@ -135,6 +135,25 @@ spec:
 `;
 }
 
+// A real Dapr HTTP output-binding component, for the output-bindings
+// integration tier. Needs no broker or store at all -- `url` points directly
+// at an HTTP target this test itself controls (startDaprd runs daprd with
+// --network host, so a host-side 127.0.0.1 URL is reachable from inside the
+// container unchanged).
+function bindingComponentYaml(url) {
+  return `apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: orders-binding
+spec:
+  type: bindings.http
+  version: v1
+  metadata:
+    - name: url
+      value: '${url}'
+`;
+}
+
 // Starts a fresh, isolated Redis container on a dynamically allocated host
 // port. Waits for it to accept connections before resolving.
 // `notifyKeyspaceEvents`, when set, is passed as redis-server's own
@@ -343,6 +362,7 @@ module.exports = {
   waitForHttp,
   stateComponentYaml,
   configurationComponentYaml,
+  bindingComponentYaml,
   DAPRD_IMAGE,
   REDIS_IMAGE,
   FIXTURES_DIR,
