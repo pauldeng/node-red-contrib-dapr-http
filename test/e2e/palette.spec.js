@@ -3,7 +3,7 @@
 const { test, expect } = require('./helpers/fixtures');
 const { gotoEditor } = require('./helpers/editor');
 
-// Nine of the ten node types are draggable palette entries; dapr-connection
+// Ten of the eleven node types are draggable palette entries; dapr-connection
 // is a config node and never appears in the palette itself (confirmed by
 // inspecting a real editor's palette DOM) — it's checked separately below via
 // the node-type registry, the same thing the editor itself consults to offer
@@ -18,9 +18,10 @@ const PALETTE_NODE_TYPES = [
   'dapr-state',
   'dapr-config-get',
   'dapr-config-subscribe',
+  'dapr-binding-out',
 ];
 
-test('all ten node types register with the editor', async ({ page, nr }) => {
+test('all eleven node types register with the editor', async ({ page, nr }) => {
   await gotoEditor(page, nr);
 
   for (const type of PALETTE_NODE_TYPES) {

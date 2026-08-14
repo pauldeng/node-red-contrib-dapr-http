@@ -1,0 +1,148 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-binding-out', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      bindingName: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          return typeof value === 'string' && value.trim() !== '' && !/[/?#]/.test(value);
+        },
+      },
+      operation: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          return typeof value === 'string' && value.trim() !== '';
+        },
+      },
+      metadata: {
+        value: '',
+        validate: function (value) {
+          try {
+            const parsed = JSON.parse(value || '{}');
+            return (
+              parsed !== null &&
+              typeof parsed === 'object' &&
+              !Array.isArray(parsed) &&
+              Object.entries(parsed).every(
+                ([key, item]) =>
+                  key.trim() !== '' &&
+                  (typeof item === 'string' ||
+                    typeof item === 'number' ||
+                    typeof item === 'boolean')
+              )
+            );
+          } catch {
+            return false;
+          }
+        },
+      },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-sign-out',
+    paletteLabel: 'dapr binding out',
+    label: function () {
+      return this.name || 'dapr binding out';
+    },
+    oneditprepare: function () {
+      if ($('#node-input-metadata').val() === '{}') {
+        $('#node-input-metadata').val('');
+      }
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-binding-out">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-bindingName"><i class="fa fa-sign-out"></i> Binding</label>
+    <input type="text" id="node-input-bindingName" placeholder="orders-binding" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-operation"><i class="fa fa-cogs"></i> Operation</label>
+    <input type="text" id="node-input-operation" placeholder="create" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-metadata"><i class="fa fa-list"></i> Metadata</label>
+    <textarea
+      id="node-input-metadata"
+      rows="4"
+      placeholder="{}"
+      style="width:70%; resize:vertical"
+    ></textarea>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-binding-out">
+  <p>Invokes a Dapr output binding with an explicit, component-specific operation.</p>
+
+  <h3>Inputs</h3>
+  <p>
+    When present, <code>msg.payload</code> is JSON-serialized as the binding's own
+    <code>data</code> field.
+  </p>
+  <dl class="message-properties">
+    <dt class="optional">dapr.bindingName <span class="property-type">string</span></dt>
+    <dd>Overrides the configured binding name.</dd>
+    <dt class="optional">dapr.operation <span class="property-type">string</span></dt>
+    <dd>
+      Overrides the configured operation. Operations are component-specific (for example, an HTTP
+      binding accepts an HTTP method name); there is no fixed list.
+    </dd>
+    <dt class="optional">dapr.metadata <span class="property-type">object</span></dt>
+    <dd>
+      Per-message binding metadata, merged over the configured metadata (message keys win). Values
+      are coerced to strings, matching every Dapr component metadata map.
+    </dd>
+  </dl>
+  <p>
+    <code>msg.payload</code> must not be a Buffer &mdash; base64-encode a binary payload into a
+    string yourself before sending it, matching the component's own binary convention (Dapr does not
+    define one).
+  </p>
+
+  <h3>Outputs</h3>
+  <p>
+    On success, <code>msg.payload</code> is the component's own response body, decoded by its
+    response content type (or <code>null</code> for a <code>204</code>, meaning the component
+    returned no data). <code>msg.dapr = { bindingName, operation, statusCode, metadata }</code>,
+    where <code>metadata</code> is any response metadata the component returned &mdash; Dapr carries
+    it as <code>metadata.&lt;key&gt;</code> response headers, and this node strips the prefix.
+    Node's own HTTP client lower-cases every header name, so a component-set key such as
+    <code>statusCode</code> arrives as <code>statuscode</code>.
+  </p>
+  <p>
+    On failure, the node calls <code>done(error)</code> so a Catch node can handle it; messages are
+    not queued while the sidecar is unavailable. Real daprd 1.18.1 reports an unconfigured binding
+    name, an operation the binding does not support, and the component's own operation failure
+    identically &mdash; the same status and error code for all three, distinguishable only by the
+    free-text message, not a dedicated code the way state has for a missing key.
+  </p>
+  <p>
+    For an HTTP-type binding specifically: when its target responds with a non-2xx status, the
+    component's own real response body is discarded by daprd's error handling before it reaches this
+    node &mdash; only the generic failure message survives, not the downstream response.
+  </p>
+  <p>
+    A call still in flight when the flow is redeployed is aborted rather than finished after the
+    node is gone, so it fails (reaching a Catch node if one is wired) instead of completing
+    silently.
+  </p>
+
+  <h3>Example</h3>
+  <pre>
+msg.dapr = { operation: "create" };
+return msg;</pre>
+</script>

@@ -1,7 +1,7 @@
 {
   "name": "@pauldeng/node-red-contrib-dapr-http",
   "version": "0.1.1",
-  "description": "Node-RED nodes for Dapr pub/sub, service invocation, state management, and dynamic configuration over HTTP.",
+  "description": "Node-RED nodes for Dapr pub/sub, service invocation, state management, dynamic configuration, and output bindings over HTTP.",
   "license": "MIT",
   "author": {
     "name": "Paul Deng",
@@ -29,6 +29,7 @@
     "service-invocation",
     "state-management",
     "dynamic-configuration",
+    "output-bindings",
     "cloudevents",
     "sidecar",
     "microservices"
@@ -69,7 +70,8 @@
       "dapr-response": "nodes/dapr-response.js",
       "dapr-state": "nodes/dapr-state.js",
       "dapr-config-get": "nodes/dapr-config-get.js",
-      "dapr-config-subscribe": "nodes/dapr-config-subscribe.js"
+      "dapr-config-subscribe": "nodes/dapr-config-subscribe.js",
+      "dapr-binding-out": "nodes/dapr-binding-out.js"
     }
   },
   "scripts": {
@@ -80,7 +82,7 @@
     "pretest:integration": "node test/helpers/pull-images.js",
     "test:integration": "npm run test:integration:nats && npm run test:integration:dapr && npm run test:integration:redis && node --test --test-concurrency=1 test/integration/telemetry.test.js test/integration/memorydb-pubsub.test.js",
     "test:integration:nats": "node --test --test-concurrency=1 \"test/integration/nats-*.test.js\"",
-    "test:integration:dapr": "node --test --test-concurrency=1 test/integration/acl.test.js test/integration/invoke.test.js test/integration/invoke-matrix.test.js test/integration/shutdown.test.js",
+    "test:integration:dapr": "node --test --test-concurrency=1 test/integration/acl.test.js test/integration/invoke.test.js test/integration/invoke-matrix.test.js test/integration/shutdown.test.js test/integration/binding-out.test.js",
     "test:integration:redis": "node --test --test-concurrency=1 test/integration/pubsub.test.js test/integration/retry.test.js test/integration/dead-letter.test.js test/integration/token.test.js test/integration/state.test.js test/integration/configuration.test.js",
     "test:integration:memorydb": "node --test test/integration/memorydb-pubsub.test.js",
     "test:e2e": "playwright test",

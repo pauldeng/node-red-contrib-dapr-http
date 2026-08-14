@@ -215,3 +215,14 @@ test('the package ships only runtime files, and declares itself a Node-RED packa
     assert.ok(read(name).length > 0, `${name} must exist and be non-empty`);
   }
 });
+
+test('the consumer README lists every shipped example flow', () => {
+  const readme = read('README.md');
+  const examples = fs
+    .readdirSync(path.resolve(__dirname, '../../examples'))
+    .filter((name) => name.endsWith('.json'));
+
+  for (const name of examples) {
+    assert.match(readme, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+});

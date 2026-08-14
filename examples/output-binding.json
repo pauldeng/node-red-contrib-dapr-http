@@ -1,0 +1,62 @@
+[
+  {
+    "id": "ex-binding-tab",
+    "type": "tab",
+    "label": "Dapr: output binding",
+    "disabled": false,
+    "info": "Invokes an output binding with an explicit operation. Set the connection node's Dapr host/port and app port before deploying. This flow uses a binding named \"orders-binding\" -- see examples/README.md for a real backing component with that name."
+  },
+  {
+    "id": "ex-binding-conn",
+    "type": "dapr-connection",
+    "name": "sidecar",
+    "daprHost": "",
+    "daprPort": "",
+    "bindAddress": "127.0.0.1",
+    "appPort": "3000",
+    "bodyLimitMb": "",
+    "requestTimeoutSec": ""
+  },
+  {
+    "id": "ex-binding-inject",
+    "type": "inject",
+    "z": "ex-binding-tab",
+    "name": "create order",
+    "props": [{ "p": "payload" }],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"id\":1,\"item\":\"widget\"}",
+    "payloadType": "json",
+    "x": 170,
+    "y": 100,
+    "wires": [["ex-binding-out"]]
+  },
+  {
+    "id": "ex-binding-out",
+    "type": "dapr-binding-out",
+    "z": "ex-binding-tab",
+    "name": "create order",
+    "connection": "ex-binding-conn",
+    "bindingName": "orders-binding",
+    "operation": "create",
+    "metadata": "{}",
+    "x": 400,
+    "y": 100,
+    "wires": [["ex-binding-debug"]]
+  },
+  {
+    "id": "ex-binding-debug",
+    "type": "debug",
+    "z": "ex-binding-tab",
+    "name": "component response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 650,
+    "y": 100
+  }
+]

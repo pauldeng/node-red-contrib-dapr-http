@@ -1,8 +1,9 @@
 # @pauldeng/node-red-contrib-dapr-http
 
-Node-RED nodes for Dapr pub/sub, service invocation, state management, and
-dynamic configuration, talking to a Dapr sidecar over its HTTP API only,
-with optional first-party OpenTelemetry tracing and application-log export.
+Node-RED nodes for Dapr pub/sub, service invocation, state management,
+dynamic configuration, and output bindings, talking to a Dapr sidecar over
+its HTTP API only, with optional first-party OpenTelemetry tracing and
+application-log export.
 
 ## Prerequisites
 
@@ -22,7 +23,7 @@ Or from your Node-RED user directory (typically `~/.node-red`):
 npm install @pauldeng/node-red-contrib-dapr-http
 ```
 
-Then restart Node-RED. Nine of the ten nodes below appear in the palette
+Then restart Node-RED. Ten of the eleven nodes below appear in the palette
 under **network**; `dapr-connection` is a config node, created from another
 node's own dialog rather than dragged from the palette.
 
@@ -38,10 +39,11 @@ node's own dialog rather than dragged from the palette.
 | `dapr-state`            | Get, save, delete, bulk get, or transactionally update state-store values.               |
 | `dapr-config-get`       | Read one or more values from a configuration store.                                      |
 | `dapr-config-subscribe` | Watch configuration keys and emit a message whenever any of them change.                 |
+| `dapr-binding-out`      | Invoke an output binding with a component-specific operation.                            |
 
 ## Scope
 
-Four Dapr building blocks, over HTTP only. Every call to the sidecar is a
+Five Dapr building blocks, over HTTP only. Every call to the sidecar is a
 plain `node:http` request; the only runtime dependencies are the pinned
 official OpenTelemetry packages used by optional tracing and application-log
 export:
@@ -60,8 +62,12 @@ export:
   sidecar health signal every other node already uses. A subscription emits
   the current values once it connects, retires its previous subscription after
   a health recovery, and then resumes change delivery with a fresh subscription.
+- **Output bindings** — invoke a binding component with an explicit,
+  component-specific operation. Input bindings are not covered: daprd probes
+  input-binding app routes at startup, so wiring one up needs a sidecar
+  restart and a lifecycle design of its own.
 
-Deliberately **not** covered: bindings, secrets, actors, workflows,
+Deliberately **not** covered: input bindings, secrets, actors, workflows,
 distributed lock, jobs, the conversation API, and gRPC transport. A flow that
 needs one of those can reach it with a `dapr-invoke` node or a core
 `http request` node against the sidecar's own API in the meantime.
@@ -69,8 +75,9 @@ needs one of those can reach it with a `dapr-invoke` node or a core
 ## OpenTelemetry tracing
 
 Tracing is disabled by default. Enable **Tracing** on any `dapr-connection` to
-export Dapr publish, subscribe, invoke, service, state, and configuration
-boundary spans plus spans for the Node-RED nodes traversed by each message.
+export Dapr publish, subscribe, invoke, service, state, configuration, and
+output-binding boundary spans plus spans for the Node-RED nodes traversed by
+each message.
 The integration propagates
 W3C `traceparent` and `tracestate` automatically and uses standard `OTEL_*`
 environment variables for service identity, the OTLP/HTTP collector endpoint,
@@ -140,7 +147,7 @@ and release it deliberately.
 Import `examples/basic-pubsub.json` (menu → Import → paste or select the
 file) for the smallest complete flow: publish a message, receive it back on
 the same topic. `examples/README.md` has the NATS JetStream + `daprd`
-quickstart. All six example flows are in `examples/`:
+quickstart. All eight example flows are in `examples/`:
 
 - `basic-pubsub.json` — publish and subscribe.
 - `cel-routing.json` — subscribe with CEL routing rules.
@@ -148,6 +155,8 @@ quickstart. All six example flows are in `examples/`:
 - `outbound-invocation.json` — call another app-id's method.
 - `inbound-service.json` — expose a method and reply with `dapr-response`.
 - `state-management.json` — save a value to a state store, then read it back.
+- `dynamic-configuration.json` — read and watch a dynamic configuration value.
+- `output-binding.json` — invoke an output binding and inspect its response.
 
 `examples/nats-jetstream-pubsub-component.yaml` is the beginner pub/sub
 component. `examples/memorydb-pubsub-component.yaml` is for AWS MemoryDB
