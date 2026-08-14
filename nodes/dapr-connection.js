@@ -6,7 +6,18 @@ const { DaprError, ErrorCodes } = require('../lib/errors');
 const { fingerprint, discoveryEntry } = require('../lib/subscriptions');
 const { PendingRegistry } = require('../lib/pending');
 const { sidecarRequest } = require('../lib/sidecar-http');
+const { getMetadata } = require('../lib/metadata-client');
 const telemetry = require('../lib/telemetry');
+
+// Fixed, generic text per error code -- never the sidecar's own response
+// body or a raw Node.js error message, mirroring this package's own "never
+// return stack traces... over HTTP" invariant for the app channel, applied
+// here to the admin side.
+const METADATA_ERROR_MESSAGE = {
+  [ErrorCodes.SIDECAR_UNAVAILABLE]: 'could not reach the Dapr sidecar',
+  [ErrorCodes.METADATA_OPERATION_FAILED]: 'the Dapr sidecar could not provide metadata',
+  [ErrorCodes.RESPONSE_TOO_LARGE]: 'the sidecar response was too large',
+};
 
 const HEALTH_PATH = '/v1.0/healthz/outbound';
 const HEALTHY_INTERVAL_MS = 10000;
@@ -20,10 +31,66 @@ module.exports = function registerDaprConnection(RED) {
   // tracing; a no-op span (nothing has) costs nothing and needs no guard.
   telemetry.registerFlowSpanHooks(RED.hooks);
 
+  // "Test Connection" calls GET /v1.0/metadata against the DEPLOYED
+  // connection (never the
+  // still-open dialog's unsaved fields, which sidesteps re-implementing
+  // credential-masking for a token the editor may only show as a
+  // placeholder). Reuses the connection's own already-resolved
+  // baseUrl/token/timeout/body-limit -- the same options object the health
+  // poll already uses -- rather than inventing a second resolution path.
+  RED.httpAdmin.get(
+    '/dapr-connection/:id/metadata',
+    RED.auth.needsPermission('dapr-connection.read'),
+    async (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      const node = RED.nodes.getNode(req.params.id);
+      if (!node || node.type !== 'dapr-connection') {
+        res.status(404).json({ ok: false, message: 'connection not found — deploy it first' });
+        return;
+      }
+      if (!node.options) {
+        res.status(409).json({ ok: false, message: 'connection configuration is invalid' });
+        return;
+      }
+
+      const controller = new AbortController();
+      node.metadataRequests.add(controller);
+      const abortIfOpen = () => {
+        if (!res.writableEnded) {
+          controller.abort();
+        }
+      };
+      res.on('close', abortIfOpen);
+      try {
+        const result = await getMetadata({
+          baseUrl: node.options.outbound.baseUrl,
+          token: node.options.daprApiToken,
+          timeoutMs: node.options.limits.requestTimeoutMs,
+          signal: controller.signal,
+          maxResponseBytes: node.options.limits.bodyLimitBytes,
+        });
+        if (!res.destroyed) {
+          res.json({ ok: true, ...result.data });
+        }
+      } catch (err) {
+        if (!res.destroyed) {
+          res.status(502).json({
+            ok: false,
+            message: METADATA_ERROR_MESSAGE[err.code] || 'metadata request failed',
+          });
+        }
+      } finally {
+        res.off('close', abortIfOpen);
+        node.metadataRequests.delete(controller);
+      }
+    }
+  );
+
   function DaprConnectionNode(config) {
     RED.nodes.createNode(this, config);
     const node = this;
     node.lease = null;
+    node.metadataRequests = new Set();
     node.tracingHandle = null;
 
     let options;
@@ -378,6 +445,10 @@ module.exports = function registerDaprConnection(RED) {
       if (pollTimer) {
         clearTimeout(pollTimer);
       }
+      for (const controller of node.metadataRequests) {
+        controller.abort();
+      }
+      node.metadataRequests.clear();
       // Resolve in-flight explicit acks as RETRY and pending service requests as
       // 503, letting their handlers write the response (one tick) before the
       // listener is released — so a pending delivery/request completes cleanly

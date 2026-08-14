@@ -89,6 +89,67 @@
       };
       bindInput.on('input change', refresh);
       refresh();
+
+      // "Test Connection" calls GET /v1.0/metadata against the DEPLOYED
+      // connection (this.id is always assigned client-side, but the admin
+      // route only finds a node once a deploy has actually registered it) --
+      // never the still-open dialog's unsaved fields. Only ever renders the
+      // small, fixed set of fields the admin route itself already curated;
+      // this code never sees the raw sidecar response.
+      const that = this;
+      const button = $('#dapr-test-connection');
+      const result = $('#dapr-test-connection-result');
+      button.on('click', function () {
+        button.prop('disabled', true);
+        result.removeClass('dapr-test-connection-error').show().text('Testing…');
+        const request = $.getJSON('dapr-connection/' + encodeURIComponent(that.id) + '/metadata');
+        that._daprMetadataRequest = request;
+        request
+          .done(function (body) {
+            const components = body.components || [];
+            const componentSummary = components
+              .map(function (c) {
+                return c.name + (c.type ? ' (' + c.type + ')' : '');
+              })
+              .join(', ');
+            result.text(
+              'Connected — app id "' +
+                (body.id || '(unknown)') +
+                '", runtime ' +
+                (body.runtimeVersion || '(unknown)') +
+                ', ' +
+                body.componentCount +
+                ' component(s)' +
+                (componentSummary ? ': ' + componentSummary : '') +
+                (body.componentCount > components.length
+                  ? ' (showing first ' + components.length + ')'
+                  : '') +
+                ', ' +
+                body.subscriptionCount +
+                ' subscription(s).'
+            );
+          })
+          .fail(function (xhr) {
+            const message = (xhr.responseJSON && xhr.responseJSON.message) || 'request failed';
+            result.addClass('dapr-test-connection-error').text(message);
+          })
+          .always(function () {
+            if (that._daprMetadataRequest === request) {
+              that._daprMetadataRequest = null;
+            }
+            button.prop('disabled', false);
+          });
+      });
+    },
+    oneditsave: function () {
+      if (this._daprMetadataRequest) {
+        this._daprMetadataRequest.abort();
+      }
+    },
+    oneditcancel: function () {
+      if (this._daprMetadataRequest) {
+        this._daprMetadataRequest.abort();
+      }
     },
   });
 </script>
@@ -164,6 +225,10 @@
       white-space: normal;
       overflow-wrap: anywhere;
     }
+
+    .dapr-config-form .dapr-form-tip.dapr-test-connection-error {
+      color: var(--red-ui-node-status-error-color, #c0392b);
+    }
   </style>
 
   <div class="dapr-config-form">
@@ -171,6 +236,20 @@
       <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
       <input type="text" id="node-config-input-name" placeholder="Name" />
     </div>
+
+    <div class="form-row">
+      <label></label>
+      <button type="button" id="dapr-test-connection" class="red-ui-button">
+        <i class="fa fa-plug"></i> Test Connection
+      </button>
+    </div>
+    <div
+      class="form-tips dapr-form-tip"
+      id="dapr-test-connection-result"
+      role="status"
+      aria-live="polite"
+      style="display: none"
+    ></div>
 
     <h4 style="margin-bottom:0">Outbound (app &rarr; sidecar)</h4>
     <div class="form-tips dapr-form-tip">
@@ -356,6 +435,20 @@
     The node polls <code>/v1.0/healthz/outbound</code> and shows connected (green) or sidecar
     unavailable (red). Subscription changes require restarting the sidecar; a routine flow redeploy
     does not.
+  </p>
+
+  <h3>Test Connection</h3>
+  <p>
+    Calls the sidecar's own <code>GET /v1.0/metadata</code> and shows the app id, runtime version,
+    the first 20 loaded component names/types, and total component and subscription counts. It tests
+    the <strong>deployed</strong> connection, not whatever is currently typed in this still-open
+    dialog &mdash; deploy first, then reopen this dialog to test the running configuration.
+  </p>
+  <p>
+    Only that bounded set is shown. Dapr's component entries do not contain component configuration
+    values; its arbitrary top-level <code>extended</code> metadata and every other unneeded field
+    are excluded. This node never forwards the sidecar's raw response, an API token, or a raw error
+    message to the editor; a failure shows a short, fixed description instead.
   </p>
 
   <h3>Example</h3>

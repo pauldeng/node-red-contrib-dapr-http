@@ -1,6 +1,8 @@
 'use strict';
 
 const { test, expect } = require('./helpers/fixtures');
+const { createFakeDaprStarted } = require('../helpers/fake-dapr');
+const { waitFor } = require('../helpers/wait-for');
 const {
   gotoEditor,
   openNodeDialog,
@@ -86,6 +88,63 @@ test('connection credentials round-trip through a save and reopen', async ({
   await openConnectionDialog(page);
   await expect(page.locator('#node-config-input-daprApiToken')).toHaveValue('secret-dapr-token');
   await expect(page.locator('#node-config-input-appApiToken')).toHaveValue('secret-app-token');
+});
+
+test('Test Connection reports a bounded failure and never renders a token', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  // This fixture's daprPort has nothing listening behind it (no real daprd
+  // in the e2e tier) -- a genuine, unenhanced SIDECAR_UNAVAILABLE failure,
+  // proving the button/AJAX/error-rendering path end to end even though the
+  // success path needs a real sidecar (covered at the runtime tier instead).
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'sub');
+  await openConnectionDialog(page);
+  await page.fill('#node-config-input-daprApiToken', 'secret-dapr-token');
+
+  const result = page.locator('#dapr-test-connection-result');
+  await page.click('#dapr-test-connection');
+  await expect(result).toBeVisible();
+  await expect(result).toHaveClass(/dapr-test-connection-error/);
+  await expect(result).toContainText(/could not reach/i);
+  await expect(result).not.toContainText('secret-dapr-token');
+
+  const bodyText = await page.locator('.red-ui-tray-content').last().innerText();
+  expect(bodyText).not.toContain('secret-dapr-token');
+});
+
+test('closing the connection dialog cancels a pending Test Connection request', async ({
+  page,
+  nr,
+  appPort,
+}) => {
+  const dapr = await createFakeDaprStarted();
+  let metadataClosed = false;
+  dapr.respond('GET', '/v1.0/healthz/outbound', (_req, res) => res.writeHead(204).end());
+  dapr.respond('GET', '/v1.0/metadata', (_req, res) => {
+    res.on('close', () => {
+      metadataClosed = true;
+    });
+  });
+
+  try {
+    await nr.deploy(interactionsFlow({ appPort, daprPort: dapr.port }));
+    await gotoEditor(page, nr);
+    await openNodeDialog(page, 'sub');
+    await openConnectionDialog(page);
+    await page.click('#dapr-test-connection');
+    await waitFor(() => dapr.requests.find((request) => request.path === '/v1.0/metadata'));
+
+    await closeDialog(page, { save: false, config: true });
+    await waitFor(() => metadataClosed || null, { timeoutMs: 2000 });
+  } finally {
+    await dapr.stop();
+  }
 });
 
 test('connection appPort validates from invalid back to valid', async ({

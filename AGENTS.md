@@ -103,12 +103,14 @@ justification, so do not relax one because it looks incidental.
   via `done(error)` and drive status from a bounded-backoff health poll of
   `/v1.0/healthz/outbound` (outbound excludes the app channel — the right probe).
 - **HTTP-only, one outbound path.** Every outbound call — publish, service
-  invocation, state management, and the health poll — goes through
-  `lib/sidecar-http.js`, so there is one place where deadlines, aborts,
-  framing, and response bounds are correct. Publish, invoke, and state calls
-  use Node's process-global keep-alive agent (centrally owned, never a
-  per-node agent); the health poll is the only caller that passes
-  `agent: false`, so a sidecar going down leaves no pooled socket behind. Do not
+  invocation, state management, dynamic configuration, output bindings,
+  scoped secret retrieval, sidecar metadata, and the health poll — goes
+  through `lib/sidecar-http.js`, so there is one place where deadlines,
+  aborts, framing, and response bounds are correct. Publish, invoke, state,
+  configuration, binding, secret, and metadata calls use Node's
+  process-global keep-alive agent (centrally owned, never a per-node agent);
+  the health poll is the only caller that passes `agent: false`, so a
+  sidecar going down leaves no pooled socket behind. Do not
   add a second HTTP client or a runtime dependency to talk to the sidecar — the
   wire format is a handful of documented endpoints, and the previous `@dapr/dapr`
   dependency cost 140 transitive packages plus two workarounds for one call.
@@ -123,10 +125,13 @@ justification, so do not relax one because it looks incidental.
   operator does not control. Over-size fails as `RESPONSE_TOO_LARGE`, never as
   `SIDECAR_UNAVAILABLE`: the sidecar answered.
 - **Sidecar paths are built, never interpolated.** Any app id, method, pubsub
-  name, topic, state store, or state key that reaches a URL is validated and
-  percent-encoded (`buildInvokePath`, `publish`, `buildStatePath`), so a `..`
-  segment can never redirect a token-bearing request to another Dapr
-  control-plane API.
+  name, topic, state store/key, configuration store, binding name, or secret
+  store/key that reaches a URL is validated and percent-encoded
+  (`buildInvokePath`, `publish`, `buildStatePath`, `buildConfigurationPath`,
+  `buildBindingPath`, `buildSecretPath`), so a `..` segment can never
+  redirect a token-bearing request to another Dapr control-plane API.
+  `GET /v1.0/metadata` is the one exception with no dynamic segment at all —
+  nothing to build or interpolate.
 
 ## Security boundaries
 
@@ -158,6 +163,16 @@ justification, so do not relax one because it looks incidental.
   package's nodes.
 - Never return stack traces, tokens, Node-RED configuration, or correlation
   state over HTTP.
+- Editor-support endpoints belong on `RED.httpAdmin`, guarded by the narrowest
+  `RED.auth.needsPermission` permission. Validate that a path id resolves to the
+  expected deployed node type, bound every returned collection/string, and
+  abort outbound work when the browser disconnects or the owning node closes.
+  `dapr-connection`'s "Test Connection" endpoint follows that rule: it never
+  accepts unsaved credentials from the editor and returns only app id, runtime
+  version, bounded component names/types, and counts. Dapr's component metadata
+  entries do not contain component configuration values, while its top-level
+  `extended` map can contain arbitrary operator-written values; exclude that map
+  and every other raw metadata field.
 
 ## Test-driven workflow
 

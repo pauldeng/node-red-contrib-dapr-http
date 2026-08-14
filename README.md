@@ -213,6 +213,14 @@ in Node-RED's own network namespace (Docker's `network_mode: service:<name>`
 or `--network host`) so both processes can reach each other over `127.0.0.1`.
 See `docs/deployment.md` for worked examples.
 
+A **Test Connection** button on the `dapr-connection` dialog calls the
+sidecar's own `GET /v1.0/metadata` and shows the app id, runtime version, the
+first 20 loaded component names/types, and total component and subscription
+counts — it tests the _deployed_ connection, not whatever is currently typed
+in the still-open dialog. Only that bounded set is shown; arbitrary extended
+metadata, the sidecar's raw response, an API token, and raw error text never
+reach the editor.
+
 ## Tokens
 
 Two independent tokens, each set either as a credential on the

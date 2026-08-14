@@ -34,6 +34,7 @@ test('ErrorCodes exposes the codes the package relies on, each equal to its key'
     'BINDING_INVOKE_FAILED',
     'SECRET_OPERATION_FAILED',
     'SECRET_ACCESS_DENIED',
+    'METADATA_OPERATION_FAILED',
   ];
   for (const code of required) {
     assert.ok(code in ErrorCodes, `missing code ${code}`);
