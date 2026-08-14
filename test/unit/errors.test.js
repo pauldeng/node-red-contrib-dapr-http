@@ -30,6 +30,7 @@ test('ErrorCodes exposes the codes the package relies on, each equal to its key'
     'DUPLICATE_PENDING',
     'STATE_OPERATION_FAILED',
     'STATE_ETAG_MISMATCH',
+    'CONFIGURATION_OPERATION_FAILED',
   ];
   for (const code of required) {
     assert.ok(code in ErrorCodes, `missing code ${code}`);

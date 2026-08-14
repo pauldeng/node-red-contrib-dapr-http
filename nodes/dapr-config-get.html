@@ -1,0 +1,129 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-config-get', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      storeName: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          return typeof value === 'string' && value.trim() !== '' && !/[\/?#]/.test(value);
+        },
+      },
+      keys: { value: '' },
+      metadata: {
+        value: '',
+        validate: function (value) {
+          try {
+            const parsed = JSON.parse(value || '{}');
+            return (
+              parsed !== null &&
+              typeof parsed === 'object' &&
+              !Array.isArray(parsed) &&
+              Object.entries(parsed).every(
+                ([key, item]) =>
+                  key.trim() !== '' &&
+                  (typeof item === 'string' ||
+                    typeof item === 'number' ||
+                    typeof item === 'boolean')
+              )
+            );
+          } catch {
+            return false;
+          }
+        },
+      },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-sliders',
+    paletteLabel: 'dapr config get',
+    label: function () {
+      return this.name || 'dapr config get';
+    },
+    oneditprepare: function () {
+      if ($('#node-input-metadata').val() === '{}') {
+        $('#node-input-metadata').val('');
+      }
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-config-get">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-storeName"><i class="fa fa-sliders"></i> Store</label>
+    <input type="text" id="node-input-storeName" placeholder="configstore" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-keys" style="vertical-align:top"
+      ><i class="fa fa-list-ul"></i> Keys</label
+    >
+    <textarea
+      id="node-input-keys"
+      rows="4"
+      placeholder="One key per line, blank for all keys"
+      style="width:70%; resize:vertical"
+    ></textarea>
+  </div>
+  <div class="form-row">
+    <label for="node-input-metadata"><i class="fa fa-list"></i> Metadata</label>
+    <textarea
+      id="node-input-metadata"
+      rows="4"
+      placeholder="{}"
+      style="width:70%; resize:vertical"
+    ></textarea>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-config-get">
+  <p>Reads one or more values from a Dapr configuration store.</p>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt class="optional">dapr.storeName <span class="property-type">string</span></dt>
+    <dd>Overrides the configured configuration store name.</dd>
+    <dt class="optional">dapr.keys <span class="property-type">array</span></dt>
+    <dd>
+      Overrides the configured keys, as an array of key strings. An empty array or unset value reads
+      every key in the store.
+    </dd>
+    <dt class="optional">dapr.metadata <span class="property-type">object</span></dt>
+    <dd>
+      Per-message configuration metadata, merged over the configured metadata (message keys win).
+    </dd>
+  </dl>
+
+  <h3>Outputs</h3>
+  <p>
+    On success, <code>msg.payload</code> is the store's own response &mdash; a plain object keyed by
+    configuration key:
+  </p>
+  <pre>{ "featureFlag": { "value": "true", "version": "3" } }</pre>
+  <p>
+    A key with no value in the store is simply absent from the response, not an error.
+    <code>msg.dapr = { storeName, keys, statusCode }</code>. On failure, the node calls
+    <code>done(error)</code> so a Catch node can handle it; messages are not queued while the
+    sidecar is unavailable.
+  </p>
+  <p>
+    A call still in flight when the flow is redeployed is aborted rather than finished after the
+    node is gone, so it fails (reaching a Catch node if one is wired) instead of completing
+    silently.
+  </p>
+
+  <h3>Example</h3>
+  <pre>
+msg.dapr = { keys: ["featureFlag"] };
+return msg;</pre>
+</script>

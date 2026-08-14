@@ -1,7 +1,7 @@
 {
   "name": "@pauldeng/node-red-contrib-dapr-http",
   "version": "0.1.1",
-  "description": "Node-RED nodes for Dapr pub/sub, service invocation, and state management over HTTP.",
+  "description": "Node-RED nodes for Dapr pub/sub, service invocation, state management, and dynamic configuration over HTTP.",
   "license": "MIT",
   "author": {
     "name": "Paul Deng",
@@ -28,6 +28,7 @@
     "publish-subscribe",
     "service-invocation",
     "state-management",
+    "dynamic-configuration",
     "cloudevents",
     "sidecar",
     "microservices"
@@ -66,7 +67,9 @@
       "dapr-invoke": "nodes/dapr-invoke.js",
       "dapr-service": "nodes/dapr-service.js",
       "dapr-response": "nodes/dapr-response.js",
-      "dapr-state": "nodes/dapr-state.js"
+      "dapr-state": "nodes/dapr-state.js",
+      "dapr-config-get": "nodes/dapr-config-get.js",
+      "dapr-config-subscribe": "nodes/dapr-config-subscribe.js"
     }
   },
   "scripts": {
@@ -78,7 +81,7 @@
     "test:integration": "npm run test:integration:nats && npm run test:integration:dapr && npm run test:integration:redis && node --test --test-concurrency=1 test/integration/telemetry.test.js test/integration/memorydb-pubsub.test.js",
     "test:integration:nats": "node --test --test-concurrency=1 \"test/integration/nats-*.test.js\"",
     "test:integration:dapr": "node --test --test-concurrency=1 test/integration/acl.test.js test/integration/invoke.test.js test/integration/invoke-matrix.test.js test/integration/shutdown.test.js",
-    "test:integration:redis": "node --test --test-concurrency=1 test/integration/pubsub.test.js test/integration/retry.test.js test/integration/dead-letter.test.js test/integration/token.test.js test/integration/state.test.js",
+    "test:integration:redis": "node --test --test-concurrency=1 test/integration/pubsub.test.js test/integration/retry.test.js test/integration/dead-letter.test.js test/integration/token.test.js test/integration/state.test.js test/integration/configuration.test.js",
     "test:integration:memorydb": "node --test test/integration/memorydb-pubsub.test.js",
     "test:e2e": "playwright test",
     "validate": "npx --yes node-red-dev@latest validate",
@@ -94,7 +97,7 @@
     "@nats-io/transport-node": "3.4.0",
     "@playwright/test": "^1.62.1",
     "eslint": "^10.8.1",
-    "globals": "^17.9.0",
+    "globals": "^17.11.0",
     "html-validate": "^11.6.2",
     "node-red": "5.0.4",
     "prettier": "^3.9.6"

@@ -14,7 +14,7 @@
 // NakWithDelay(ackWait) — a fixed delay, confirmed in jetstream.go — not the
 // backOff schedule, which only governs a genuine ack-wait *timeout* (the app
 // never responding at all). Testing that path deliberately is out of scope
-// here per the plan; this suite proves ackWait/maxDeliver in isolation.
+// here; this suite proves ackWait/maxDeliver in isolation.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
