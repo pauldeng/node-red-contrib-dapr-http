@@ -1,0 +1,87 @@
+[
+  {
+    "id": "ex-config-tab",
+    "type": "tab",
+    "label": "Dapr: dynamic configuration",
+    "disabled": false,
+    "info": "Reads a configuration value on demand, and watches it for changes. Set the connection node's Dapr host/port and app port before deploying. This flow uses a configuration store named \"configstore\" -- see examples/README.md for a real backing component with that name. Unlike dapr-subscribe's pub/sub subscriptions, dapr-config-subscribe needs no sidecar restart to take effect: it activates as soon as the flow deploys."
+  },
+  {
+    "id": "ex-config-conn",
+    "type": "dapr-connection",
+    "name": "sidecar",
+    "daprHost": "",
+    "daprPort": "",
+    "bindAddress": "127.0.0.1",
+    "appPort": "3000",
+    "bodyLimitMb": "",
+    "requestTimeoutSec": ""
+  },
+  {
+    "id": "ex-config-inject",
+    "type": "inject",
+    "z": "ex-config-tab",
+    "name": "read feature flag",
+    "props": [{ "p": "payload" }],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 100,
+    "wires": [["ex-config-get"]]
+  },
+  {
+    "id": "ex-config-get",
+    "type": "dapr-config-get",
+    "z": "ex-config-tab",
+    "name": "get feature flag",
+    "connection": "ex-config-conn",
+    "storeName": "configstore",
+    "keys": "featureFlag",
+    "metadata": "{}",
+    "x": 400,
+    "y": 100,
+    "wires": [["ex-config-debug"]]
+  },
+  {
+    "id": "ex-config-debug",
+    "type": "debug",
+    "z": "ex-config-tab",
+    "name": "current value",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 630,
+    "y": 100
+  },
+  {
+    "id": "ex-config-sub",
+    "type": "dapr-config-subscribe",
+    "z": "ex-config-tab",
+    "name": "watch feature flag",
+    "connection": "ex-config-conn",
+    "storeName": "configstore",
+    "keys": "featureFlag",
+    "metadata": "{}",
+    "x": 190,
+    "y": 200,
+    "wires": [["ex-config-changed"]]
+  },
+  {
+    "id": "ex-config-changed",
+    "type": "debug",
+    "z": "ex-config-tab",
+    "name": "flag changed",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 420,
+    "y": 200
+  }
+]

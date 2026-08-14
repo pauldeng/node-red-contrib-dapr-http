@@ -126,6 +126,7 @@ module.exports = function registerDaprConnection(RED) {
     // coordinate here. ----
     const subscriptions = new Map(); // nodeId -> { definition, handler }
     const services = new Map(); // nodeId -> { definition, handler }
+    const internalRoutes = new Map(); // nodeId -> { definition, handler }
     const pendingAcks = new PendingRegistry({ max: options.limits.maxPending });
     const pendingResponses = new PendingRegistry({ max: options.limits.maxPending });
     let desiredFingerprint = fingerprint([]);
@@ -198,9 +199,15 @@ module.exports = function registerDaprConnection(RED) {
         kind: 'service',
         handler,
       }));
+      const dynamicInternalRoutes = [...internalRoutes.values()].map(({ definition, handler }) => ({
+        method: definition.verb,
+        path: definition.path,
+        kind: 'internal',
+        handler,
+      }));
       node.lease.activate({
         subscriptions: defs.map(discoveryEntry),
-        routes: [...deliveryRoutes, ...serviceRoutes],
+        routes: [...deliveryRoutes, ...serviceRoutes, ...dynamicInternalRoutes],
         fingerprint: desiredFingerprint,
         onDiscovery: refreshStatus,
       });
@@ -243,8 +250,8 @@ module.exports = function registerDaprConnection(RED) {
     node.addPendingAck = (ackId, ackOptions) => pendingAcks.add(ackId, ackOptions);
     node.settleAck = (ackId, status) => pendingAcks.settle(ackId, status);
 
-    node.registerService = (definition, handler) => {
-      for (const { definition: existing } of services.values()) {
+    const registerRoute = (registry, definition, handler, label) => {
+      for (const { definition: existing } of [...services.values(), ...internalRoutes.values()]) {
         if (
           existing.nodeId !== definition.nodeId &&
           existing.verb === definition.verb &&
@@ -252,17 +259,21 @@ module.exports = function registerDaprConnection(RED) {
         ) {
           throw new DaprError(
             ErrorCodes.INVALID_OPTIONS,
-            `duplicate service method ${definition.verb} ${definition.path}`
+            `duplicate ${label} ${definition.verb} ${definition.path}`
           );
         }
       }
-      services.set(definition.nodeId, { definition, handler });
+      registry.set(definition.nodeId, { definition, handler });
       scheduleActivation();
       return () => {
-        services.delete(definition.nodeId);
+        registry.delete(definition.nodeId);
         scheduleActivation();
       };
     };
+    node.registerService = (definition, handler) =>
+      registerRoute(services, definition, handler, 'service method');
+    node.registerInternalRoute = (definition, handler) =>
+      registerRoute(internalRoutes, definition, handler, 'internal route');
     node.addPendingResponse = (id, responseOptions) => pendingResponses.add(id, responseOptions);
     node.settleResponse = (id, response) => pendingResponses.settle(id, response);
 

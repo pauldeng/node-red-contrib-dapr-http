@@ -1,8 +1,8 @@
 # @pauldeng/node-red-contrib-dapr-http
 
-Node-RED nodes for Dapr pub/sub, service invocation, and state management,
-talking to a Dapr sidecar over its HTTP API only, with optional first-party
-OpenTelemetry tracing and application-log export.
+Node-RED nodes for Dapr pub/sub, service invocation, state management, and
+dynamic configuration, talking to a Dapr sidecar over its HTTP API only,
+with optional first-party OpenTelemetry tracing and application-log export.
 
 ## Prerequisites
 
@@ -22,24 +22,26 @@ Or from your Node-RED user directory (typically `~/.node-red`):
 npm install @pauldeng/node-red-contrib-dapr-http
 ```
 
-Then restart Node-RED. Seven of the eight nodes below appear in the palette
+Then restart Node-RED. Nine of the ten nodes below appear in the palette
 under **network**; `dapr-connection` is a config node, created from another
 node's own dialog rather than dragged from the palette.
 
-| Node              | Purpose                                                                                  |
-| ----------------- | ---------------------------------------------------------------------------------------- |
-| `dapr-connection` | Shared config node: one sidecar connection.                                              |
-| `dapr-publish`    | Publish a message to a pub/sub topic.                                                    |
-| `dapr-subscribe`  | Receive messages for a pub/sub topic, with CEL routing rules and optional bulk delivery. |
-| `dapr-ack`        | Explicitly acknowledge a subscribed message (SUCCESS/RETRY/DROP).                        |
-| `dapr-invoke`     | Call a method on another Dapr app-id.                                                    |
-| `dapr-service`    | Expose a method other Dapr apps can invoke.                                              |
-| `dapr-response`   | Reply to a `dapr-service` invocation.                                                    |
-| `dapr-state`      | Get, save, delete, bulk get, or transactionally update state-store values.               |
+| Node                    | Purpose                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------- |
+| `dapr-connection`       | Shared config node: one sidecar connection.                                              |
+| `dapr-publish`          | Publish a message to a pub/sub topic.                                                    |
+| `dapr-subscribe`        | Receive messages for a pub/sub topic, with CEL routing rules and optional bulk delivery. |
+| `dapr-ack`              | Explicitly acknowledge a subscribed message (SUCCESS/RETRY/DROP).                        |
+| `dapr-invoke`           | Call a method on another Dapr app-id.                                                    |
+| `dapr-service`          | Expose a method other Dapr apps can invoke.                                              |
+| `dapr-response`         | Reply to a `dapr-service` invocation.                                                    |
+| `dapr-state`            | Get, save, delete, bulk get, or transactionally update state-store values.               |
+| `dapr-config-get`       | Read one or more values from a configuration store.                                      |
+| `dapr-config-subscribe` | Watch configuration keys and emit a message whenever any of them change.                 |
 
 ## Scope
 
-Three Dapr building blocks, over HTTP only. Every call to the sidecar is a
+Four Dapr building blocks, over HTTP only. Every call to the sidecar is a
 plain `node:http` request; the only runtime dependencies are the pinned
 official OpenTelemetry packages used by optional tracing and application-log
 export:
@@ -53,17 +55,23 @@ export:
   ETag-based optimistic concurrency. Dapr's state query API is not
   supported: it remains alpha and depends on store-specific query
   capabilities.
+- **Dynamic configuration** — a one-shot get, and a long-lived subscribe with
+  its own connecting/subscribed/retrying/failed state, driven by the same
+  sidecar health signal every other node already uses. A subscription emits
+  the current values once it connects, retires its previous subscription after
+  a health recovery, and then resumes change delivery with a fresh subscription.
 
-Deliberately **not** covered: bindings, secrets, configuration, actors,
-workflows, distributed lock, jobs, the conversation API, and gRPC transport. A
-flow that needs one of those can reach it with a `dapr-invoke` node or a core
+Deliberately **not** covered: bindings, secrets, actors, workflows,
+distributed lock, jobs, the conversation API, and gRPC transport. A flow that
+needs one of those can reach it with a `dapr-invoke` node or a core
 `http request` node against the sidecar's own API in the meantime.
 
 ## OpenTelemetry tracing
 
 Tracing is disabled by default. Enable **Tracing** on any `dapr-connection` to
-export Dapr publish, subscribe, invoke, service, and state boundary spans plus
-spans for the Node-RED nodes traversed by each message. The integration propagates
+export Dapr publish, subscribe, invoke, service, state, and configuration
+boundary spans plus spans for the Node-RED nodes traversed by each message.
+The integration propagates
 W3C `traceparent` and `tracestate` automatically and uses standard `OTEL_*`
 environment variables for service identity, the OTLP/HTTP collector endpoint,
 authentication, and sampling. If Node-RED already owns a global OpenTelemetry

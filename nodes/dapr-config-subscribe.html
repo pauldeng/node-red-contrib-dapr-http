@@ -1,0 +1,170 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-config-subscribe', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      storeName: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          return typeof value === 'string' && value.trim() !== '' && !/[\/?#]/.test(value);
+        },
+      },
+      keys: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          const keys = String(value || '')
+            .split('\n')
+            .map((key) => key.trim())
+            .filter(Boolean);
+          return (
+            keys.length > 0 &&
+            keys.every(
+              (key) =>
+                !/[?#]/.test(key) &&
+                key.split('/').every((segment) => segment && segment !== '.' && segment !== '..')
+            )
+          );
+        },
+      },
+      metadata: {
+        value: '',
+        validate: function (value) {
+          try {
+            const parsed = JSON.parse(value || '{}');
+            return (
+              parsed !== null &&
+              typeof parsed === 'object' &&
+              !Array.isArray(parsed) &&
+              Object.entries(parsed).every(
+                ([key, item]) =>
+                  key.trim() !== '' &&
+                  (typeof item === 'string' ||
+                    typeof item === 'number' ||
+                    typeof item === 'boolean')
+              )
+            );
+          } catch {
+            return false;
+          }
+        },
+      },
+    },
+    inputs: 0,
+    outputs: 1,
+    icon: 'font-awesome/fa-sliders',
+    paletteLabel: 'dapr config subscribe',
+    label: function () {
+      return this.name || 'dapr config subscribe';
+    },
+    oneditprepare: function () {
+      if ($('#node-input-metadata').val() === '{}') {
+        $('#node-input-metadata').val('');
+      }
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-config-subscribe">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-storeName"><i class="fa fa-sliders"></i> Store</label>
+    <input type="text" id="node-input-storeName" placeholder="configstore" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-keys" style="vertical-align:top"
+      ><i class="fa fa-list-ul"></i> Keys</label
+    >
+    <textarea
+      id="node-input-keys"
+      rows="4"
+      placeholder="One key per line"
+      style="width:70%; resize:vertical"
+    ></textarea>
+  </div>
+  <div class="form-row">
+    <label for="node-input-metadata"><i class="fa fa-list"></i> Metadata</label>
+    <textarea
+      id="node-input-metadata"
+      rows="4"
+      placeholder="{}"
+      style="width:70%; resize:vertical"
+    ></textarea>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-config-subscribe">
+  <p>
+    Watches one or more keys in a Dapr configuration store and emits a message whenever any of them
+    change.
+  </p>
+
+  <h3>Details</h3>
+  <p>
+    Unlike <code>dapr-subscribe</code>'s pub/sub subscriptions, a configuration subscription needs
+    no sidecar restart to take effect: this node calls Dapr's own subscribe API directly at deploy
+    time, and again automatically whenever the connection's own health signal recovers from an
+    outage -- there is no discovery step for daprd to re-fetch. At least one key is required:
+    watching "everything" has no bounded set of callback routes to register ahead of time.
+  </p>
+  <p>
+    The node's status reflects its own connection state, independently of the shared
+    <b>Connection</b> node's own status: <code>connecting</code> (no subscribe attempt has resolved
+    yet), <code>subscribed</code> (watching for changes), <code>retrying</code> (the sidecar is
+    unreachable, or a transient failure occurred; a resubscribe attempt is scheduled on a bounded
+    backoff), and <code>failed</code> (the sidecar answered, but rejected the configured store name
+    -- still retried on the same schedule, since fixing the store name does not require redeploying
+    this flow).
+  </p>
+  <p>
+    <b
+      >Verified against real daprd 1.18.1 with the Redis configuration component
+      (<code>configuration.redis</code>):</b
+    >
+    after a full sidecar <em>restart</em>, this node retires the previous subscription id,
+    establishes a new subscription, emits the current values, and resumes Redis
+    keyspace-notification delivery. A transient health flap follows the same retire-then-replace
+    sequence, preventing duplicate component subscriptions.
+  </p>
+
+  <h3>Outputs</h3>
+  <p>
+    On initial connection, and then on each change, <code>msg.payload</code> is the store's own
+    per-key value:
+  </p>
+  <pre>{ "featureFlag": { "value": "true", "version": "4" } }</pre>
+  <p>
+    A single underlying change can touch more than one watched key at once; real Dapr delivers one
+    message per changed key in that case, each carrying the full set of items that changed together
+    -- this node does not deduplicate or merge them, since that is the sidecar's own real behavior,
+    not an artifact worth hiding.
+    <code>msg.dapr = { storeName, keys, subscriptionId }</code>.
+  </p>
+  <p>
+    Keys may contain spaces, colons, Unicode characters, and ordinary path segments. Because daprd
+    places each key in a callback URL, keys containing <code>?</code>, <code>#</code>, an empty path
+    segment, <code>.</code>, or <code>..</code> cannot identify one stable callback route and are
+    rejected at deploy time.
+  </p>
+  <p>
+    While the connection is <code>retrying</code> or <code>failed</code>, no message is sent and the
+    last-known values are simply not updated -- nothing is cleared or replaced with a placeholder.
+  </p>
+  <p>
+    On redeploy or delete, this node calls Dapr's unsubscribe API so the sidecar stops calling back,
+    bounded by a short timeout so a slow or unreachable sidecar never delays the redeploy itself.
+  </p>
+
+  <h3>Example</h3>
+  <p>Store: <code>configstore</code>, Keys: <code>featureFlag</code></p>
+</script>

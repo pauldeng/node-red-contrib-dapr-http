@@ -87,6 +87,31 @@ metadata, dead-letter topic, raw-payload mode, CEL rules, or bulk settings.
   `redis-statestore-component.yaml` (or another Dapr state-store component
   named `statestore`), started the same way as this quickstart's Redis
   pub/sub option: `docker run -d -p 6379:6379 redis:7.4-alpine`.
+- `dynamic-configuration.json` reads and watches `featureFlag` in a Redis
+  configuration store named `configstore`. Redis keyspace notifications must
+  be enabled for change delivery:
+
+  ```bash
+  docker run -d -p 6379:6379 redis:7.4-alpine \
+    redis-server --notify-keyspace-events KEA
+  ```
+
+  Save this component as `components/configstore.yaml` before starting daprd:
+
+  ```yaml
+  apiVersion: dapr.io/v1alpha1
+  kind: Component
+  metadata:
+    name: configstore
+  spec:
+    type: configuration.redis
+    version: v1
+    metadata:
+      - name: redisHost
+        value: 127.0.0.1:6379
+      - name: redisPassword
+        value: ''
+  ```
 
 For `cel-routing.json` or `bulk-acknowledgement.json`, create the NATS stream
 with the `orders` subject too:

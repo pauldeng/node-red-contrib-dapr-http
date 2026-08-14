@@ -39,11 +39,10 @@ authorization is a separate mechanism (see below).
 The sidecar attaches a `dapr-caller-app-id` header identifying who's calling.
 This package treats it differently depending on the route:
 
-- **Rejected** on `/dapr/subscribe` and internal pub/sub delivery routes
-  (`/node-red-dapr/subscriptions/...`). These are daprd-to-app internal
-  plumbing, not something a mesh caller should be able to address directly —
-  a request claiming a caller app-id here is refused outright rather than
-  silently accepted.
+- **Rejected** on `/dapr/subscribe`, internal pub/sub delivery routes
+  (`/node-red-dapr/subscriptions/...`), and dynamic-configuration callback
+  routes (`/configuration/<store>/<key>`). These are daprd-to-app internal
+  plumbing, not service methods a mesh caller may address directly.
 - **Preserved** on registered `dapr-service` method routes and handed to the
   flow as `msg.dapr.callerAppId`, so a flow can make its own authorization
   decision (e.g. only honor specific app-ids for a sensitive method).

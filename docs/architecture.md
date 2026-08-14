@@ -10,7 +10,8 @@ A `dapr-connection` node manages two things that never share a listener:
 
 - **Outbound** — this app calling the sidecar's own HTTP API
   (`lib/dapr-client.js` for pub/sub, `lib/invoke-client.js` for service
-  invocation, `lib/state-client.js` for state management). Plain outgoing
+  invocation, `lib/state-client.js` for state management,
+  `lib/configuration-client.js` for dynamic configuration). Plain outgoing
   HTTP requests; no server or Node-RED HTTP infrastructure is involved on
   this side.
 - **Inbound app channel** (`lib/app-channel.js`) — a dedicated `node:http`
@@ -20,6 +21,9 @@ A `dapr-connection` node manages two things that never share a listener:
   - `GET /dapr/subscribe` — the current programmatic subscription list.
   - `/node-red-dapr/subscriptions/<stable-id>` — pub/sub delivery routes.
   - Registered `dapr-service` method paths.
+  - Internal `dapr-config-subscribe` callback routes
+    (`POST /configuration/<store>/<key>`, one per watched key). These use
+    `kind: 'internal'`, so a mesh service caller cannot address them.
   - Everything else: 404. A registered path called with the wrong verb: 405
     with an `Allow` header.
 
@@ -67,13 +71,17 @@ nodes/dapr-invoke.js       outbound invocation wrapper
 nodes/dapr-service.js      inbound service wrapper
 nodes/dapr-response.js     invocation response wrapper
 nodes/dapr-state.js        state management wrapper (get/save/delete/bulk get/transaction)
+nodes/dapr-config-get.js   configuration get wrapper (message-triggered)
+nodes/dapr-config-subscribe.js  configuration subscribe wrapper (deploy-time, long-lived)
 lib/options.js             config/env precedence and validation
 lib/messages.js            content-type inference and CloudEvent conversion
 lib/state-messages.js      per-message state request validation and shaping
+lib/configuration-messages.js  configuration get/subscribe request validation and shaping
 lib/sidecar-http.js        the one outbound HTTP request path to the sidecar
 lib/dapr-client.js         pub/sub publish client (paths, metadata, serialization)
 lib/invoke-client.js       outbound service-invocation client
 lib/state-client.js        state management client (get/save/delete/bulk get/transaction)
+lib/configuration-client.js  configuration client (get/subscribe/unsubscribe)
 lib/http-headers.js        header allow-listing/normalization shared by both directions
 lib/app-channel.js         listener registry, router, auth, limits, sockets
 lib/subscriptions.js       subscription definitions, canonical fingerprints, generations
@@ -93,14 +101,16 @@ modules with no Node-RED import, so they're directly unit-testable. See
 Everything this package sends to the sidecar is a handful of documented HTTP
 endpoints: `POST /v1.0/publish/<pubsub>/<topic>`,
 `POST /v1.0/publish/bulk/<pubsub>/<topic>`,
-`/v1.0/invoke/<app-id>/method/<method>`, `/v1.0/state/<store>/...`, and
-`GET /v1.0/healthz/outbound`. All go through `lib/sidecar-http.js`, so there
-is exactly one place where deadlines, aborts, Content-Length framing,
-response bounds, and error mapping are implemented.
+`/v1.0/invoke/<app-id>/method/<method>`, `/v1.0/state/<store>/...`,
+`/v1.0/configuration/<store>/...`, and `GET /v1.0/healthz/outbound`. All go
+through `lib/sidecar-http.js`, so there is exactly one place where
+deadlines, aborts, Content-Length framing, response bounds, and error
+mapping are implemented.
 
-Publish, invoke, and state calls ride Node's process-global keep-alive
-agent, so keep-alive is owned centrally rather than per node instance. The
-health poll is the single caller that opts out (`agent: false`): it runs
+Publish, invoke, state, and configuration calls ride Node's process-global
+keep-alive agent, so keep-alive is owned centrally rather than per node
+instance. The health poll is the single caller that opts out
+(`agent: false`): it runs
 every 10 s against a sidecar that may be on its way down, and a pooled
 socket to a dead sidecar is only something the next poll would have to
 discover is dead.
@@ -145,11 +155,13 @@ the host; the checkbox only manages the package-owned fallback provider.
 Three layers, each independently useful:
 
 - **Boundary spans.** A producer span on `dapr-publish`, client spans on
-  `dapr-invoke` and `dapr-state`, a consumer span on `dapr-subscribe` (single and bulk,
-  extracting the W3C trace context from the delivery's headers or, for a bulk
-  entry, its CloudEvent with metadata as a fallback — bulk has no per-message
-  HTTP headers), and a
-  server span on `dapr-service`. Each injects or extracts `traceparent` /
+  `dapr-invoke`, `dapr-state`, and `dapr-config-get`, consumer spans on
+  `dapr-subscribe` (single and bulk, extracting the W3C trace context from
+  the delivery's headers or, for a bulk entry, its CloudEvent with metadata
+  as a fallback — bulk has no per-message HTTP headers) and
+  `dapr-config-subscribe` (extracting from the callback POST's own
+  headers, though real daprd is unlikely to set one today), and a server
+  span on `dapr-service`. Each injects or extracts `traceparent` /
   `tracestate` through the connection's own header path, so a manually
   forwarded `msg.dapr.headers.traceparent` (the pre-tracing way to keep one
   trace across a subscribe → publish hop) still works unchanged when tracing

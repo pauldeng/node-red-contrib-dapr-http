@@ -30,7 +30,7 @@ npm run test:e2e         # Playwright tests against the real Node-RED editor
 
 npm run test:integration:nats      # NATS JetStream-backed tests only (test/integration/nats-*.test.js)
 npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown)
-npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish, state management
+npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish, state management, dynamic configuration
 npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
 
@@ -58,6 +58,20 @@ package already has pinned and Docker-tested. It proves `dapr-state`'s five
 operations against a real `state.redis` component: a save/get round trip's
 real ETag, genuine 409s on stale-etag save/delete, the generic 500 daprd 1.18.1
 returns for a transactional ETag conflict, bulk get, and an atomic transaction.
+
+`test/integration/configuration.test.js` lives in the same bucket for the
+same reason — dynamic configuration has no primary/secondary broker split
+either, and needs Redis's own keyspace notifications enabled
+(`startRedis({ notifyKeyspaceEvents: 'KEA' })`) for `configuration.redis`'s
+push-based Subscribe to fire at all. It proves a real save-then-get round
+trip against Redis, a real push driven by Redis's own keyspace
+notifications (not an artifact of this package's own code), and the
+initial snapshot for values that existed before daprd started. It waits until
+Node-RED actually observes a sidecar outage before restarting daprd, then proves
+that a fresh subscription id receives both the current snapshot and later
+updates. Finally, it exercises `v1.0` and `v1.0-alpha1` unsubscribe against two
+independently live subscriptions and mutates Redis afterward, proving both
+prefixes stop delivery rather than merely returning HTTP 200.
 
 ## The optional MemoryDB tier
 

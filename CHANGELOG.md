@@ -86,6 +86,33 @@ the same change that ships behavior.
   `application/octet-stream`). Dapr's state query API remains unsupported —
   it is alpha and depends on store-specific query capabilities.
 
+- **Two new nodes for Dapr's Configuration API: `dapr-config-get` and
+  `dapr-config-subscribe`.** `dapr-config-get` is a one-shot, message-triggered
+  read: `msg.payload` resolves to the store's own per-key response
+  (`{key: {value, version, metadata}}`); a key absent from the store is
+  simply absent from the response, not an error. `dapr-config-subscribe` is
+  a deploy-time, long-lived watch over one or more keys. It emits the current
+  values immediately after subscribing, then emits later changes. Unlike
+  `dapr-subscribe`'s pub/sub subscriptions, it needs no sidecar restart to
+  take effect, since Dapr's configuration subscribe call has no discovery
+  step: the node calls it directly at deploy time and again automatically
+  whenever the sidecar recovers from an outage, driven by the same health
+  signal `dapr-connection` already exposes. Its status reflects
+  `connecting`/`subscribed`/`retrying`/`failed`; while retrying or failed,
+  no message is sent and nothing is cleared — the last-known values are
+  simply left alone. A single underlying change can touch more than one
+  watched key at once; real Dapr delivers one message per changed key in
+  that case (each carrying every item that changed together), which this
+  node passes through rather than deduplicating. On redeploy or delete, the
+  node calls Dapr's unsubscribe API, bounded by a short timeout so a slow
+  or unreachable sidecar never delays the redeploy itself. Verified against
+  real daprd 1.18.1 with a Redis configuration store
+  (`configuration.redis`): a full sidecar restart makes the resubscribe
+  attempt retire the prior subscription and establish a new one; subsequent
+  Redis keyspace notifications resume on the new subscription. Configuration
+  callbacks are registered as internal app-channel routes, so mesh service
+  callers carrying `dapr-caller-app-id` cannot forge configuration updates.
+
 ### Changed
 
 - **Runtime dependencies are no longer zero.** The official OpenTelemetry

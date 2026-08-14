@@ -111,13 +111,45 @@ spec:
 `;
 }
 
+// A real Dapr Redis configuration-store component, for the dynamic-
+// configuration integration tier. Distinct from stateComponentYaml's
+// `state.redis` -- same backing Redis, a different Dapr component type.
+// Subscribe relies on Redis keyspace notifications (components-contrib's
+// configuration/redis package subscribes to Redis's own key-change pub/sub
+// channels, not polling) -- the backing container must be started with
+// startRedis({ notifyKeyspaceEvents: 'KEA' }) or Subscribe silently never
+// fires, since keyspace notifications are off by default.
+function configurationComponentYaml(redisPort, { name = 'configstore' } = {}) {
+  return `apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: ${name}
+spec:
+  type: configuration.redis
+  version: v1
+  metadata:
+    - name: redisHost
+      value: 127.0.0.1:${redisPort}
+    - name: redisPassword
+      value: ''
+`;
+}
+
 // Starts a fresh, isolated Redis container on a dynamically allocated host
 // port. Waits for it to accept connections before resolving.
-async function startRedis() {
+// `notifyKeyspaceEvents`, when set, is passed as redis-server's own
+// --notify-keyspace-events flag (e.g. "KEA") -- needed only by the
+// configuration.redis component's push-based Subscribe; every existing
+// caller that omits it gets the exact same container as before.
+async function startRedis({ notifyKeyspaceEvents } = {}) {
   await ensureImage(REDIS_IMAGE);
   const port = await freePort();
   const name = `nrdapr-it-redis-${runId()}`;
-  await dockerRun(['--name', name, '-p', `${port}:6379`, REDIS_IMAGE]);
+  const args = ['--name', name, '-p', `${port}:6379`, REDIS_IMAGE];
+  if (notifyKeyspaceEvents) {
+    args.push('redis-server', '--notify-keyspace-events', notifyKeyspaceEvents);
+  }
+  await dockerRun(args);
   const deadline = Date.now() + 15000;
   let ready = false;
   while (Date.now() < deadline && !ready) {
@@ -310,6 +342,7 @@ module.exports = {
   startDaprd,
   waitForHttp,
   stateComponentYaml,
+  configurationComponentYaml,
   DAPRD_IMAGE,
   REDIS_IMAGE,
   FIXTURES_DIR,
