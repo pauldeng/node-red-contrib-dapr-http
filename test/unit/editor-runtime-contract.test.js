@@ -305,6 +305,35 @@ test('pub/sub metadata: both editors match their runtime normalizer', () => {
   });
 });
 
+// Node-RED editor scripts cannot require() a shared module, and the documented
+// alternatives (a cross-file global, a plugin-served script) trade this
+// duplication for load-order coupling between node files. So the seven copies
+// stay — but they may never silently drift apart. Each is already pinned
+// against the runtime by assertContract above; this pins them to each other,
+// so editing one and forgetting the rest fails here rather than in a dialog.
+test('the metadata validator is identical in every node that has one', () => {
+  const extract = (file) => {
+    const source = readNode(file).match(/ {6}metadata: \{[\s\S]*?\n {6}\},/);
+    assert.ok(source, `could not find the metadata validator in nodes/${file}`);
+    return source[0];
+  };
+  const files = fs
+    .readdirSync(path.resolve(__dirname, '../../nodes'))
+    .filter((name) => name.endsWith('.html'))
+    .filter((name) => readNode(name).includes('      metadata: {'));
+
+  assert.ok(files.length >= 7, `expected every metadata-bearing node, found ${files.length}`);
+  const [reference, ...rest] = files;
+  for (const file of rest) {
+    assert.equal(
+      extract(file),
+      extract(reference),
+      `nodes/${file}'s metadata validator has drifted from nodes/${reference}'s — ` +
+        `update every copy together, or none`
+    );
+  }
+});
+
 test('dapr-secret-get property: the editor never accepts a path the runtime rejects', () => {
   // 'no-looser', not 'exact': the runtime defaults a blank value to "payload"
   // (defensive handling for hand-authored/legacy flow JSON), while the

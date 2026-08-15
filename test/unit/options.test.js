@@ -10,19 +10,16 @@ const MiB = 1024 * 1024;
 
 test('outbound: env mode when neither host nor port is configured', () => {
   const opts = resolveOptions({ config: {}, credentials: {}, env: {} });
-  assert.equal(opts.outbound.mode, 'env');
   assert.equal(opts.outbound.baseUrl, 'http://127.0.0.1:3500'); // Dapr HTTP default
 });
 
 test('outbound: env mode adopts DAPR_HTTP_ENDPOINT as the base URL', () => {
   const opts = resolveOptions({ env: { DAPR_HTTP_ENDPOINT: 'http://sidecar:3510/' } });
-  assert.equal(opts.outbound.mode, 'env');
   assert.equal(opts.outbound.baseUrl, 'http://sidecar:3510'); // trailing slash normalized
 });
 
 test('outbound: explicit mode fills defaults and derives a base URL', () => {
   const onlyPort = resolveOptions({ config: { daprPort: '3600' } });
-  assert.equal(onlyPort.outbound.mode, 'explicit');
   assert.equal(onlyPort.outbound.host, '127.0.0.1');
   assert.equal(onlyPort.outbound.port, 3600);
   assert.equal(onlyPort.outbound.baseUrl, 'http://127.0.0.1:3600');
@@ -63,8 +60,16 @@ test('validation: non-http or non-origin endpoints are rejected (scope is http o
 });
 
 test('outbound: blank values do not trigger explicit mode (env discovery preserved)', () => {
-  const opts = resolveOptions({ config: { daprHost: '  ', daprPort: '' } });
-  assert.equal(opts.outbound.mode, 'env');
+  // Blank is "not configured", so DAPR_HTTP_ENDPOINT still wins. Asserted on
+  // the observable result — the base URL, and the absence of the host/port
+  // pair that only explicit mode sets — rather than on an internal marker.
+  const opts = resolveOptions({
+    config: { daprHost: '  ', daprPort: '' },
+    env: { DAPR_HTTP_ENDPOINT: 'http://discovered:3510' },
+  });
+  assert.equal(opts.outbound.baseUrl, 'http://discovered:3510');
+  assert.equal(opts.outbound.host, undefined);
+  assert.equal(opts.outbound.port, undefined);
 });
 
 test('dapr API token precedence: credential, then env, then undefined', () => {
