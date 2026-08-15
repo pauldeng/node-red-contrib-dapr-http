@@ -79,7 +79,7 @@ the same change that ships behavior.
   request is sent, and an enforced stale ETag on save/delete fails with a
   distinct `STATE_ETAG_MISMATCH` (HTTP 409) rather than the generic
   `STATE_OPERATION_FAILED`, so a Catch node can reload and retry specifically.
-  Dapr 1.18.1 surfaces a Redis transactional ETag conflict as a generic 500,
+  Dapr 1.18.2 surfaces a Redis transactional ETag conflict as a generic 500,
   so transaction retains `STATE_OPERATION_FAILED` rather than guessing from
   store-specific error text. `save` and transactional upsert do not accept a
   Buffer value (Dapr's state API is JSON-native, with no raw-bytes path the way pub/sub has
@@ -106,7 +106,7 @@ the same change that ships behavior.
   node passes through rather than deduplicating. On redeploy or delete, the
   node calls Dapr's unsubscribe API, bounded by a short timeout so a slow
   or unreachable sidecar never delays the redeploy itself. Verified against
-  real daprd 1.18.1 with a Redis configuration store
+  real daprd 1.18.2 with a Redis configuration store
   (`configuration.redis`): a full sidecar restart makes the resubscribe
   attempt retire the prior subscription and establish a new one; subsequent
   Redis keyspace notifications resume on the new subscription. Configuration
@@ -122,7 +122,7 @@ the same change that ships behavior.
   where `metadata` is the component's response metadata (Dapr carries it as
   `metadata.<key>` response headers; Node's own HTTP client lower-cases every
   header name, so a component-set `statusCode` key arrives as `statuscode`).
-  Verified against real daprd 1.18.1 and the `bindings.http` component source:
+  Verified against real daprd 1.18.2 and the `bindings.http` component source:
   every failure mode this endpoint can report — an unconfigured binding name,
   an operation the binding does not support, or the component's own operation
   failing — collapses to the same `500`/`ERR_INVOKE_OUTPUT_BINDING`, with no
@@ -147,11 +147,11 @@ the same change that ships behavior.
   value to its status text, generated errors, or secret boundary span** — it
   deliberately never forwards daprd's response text. Generic flow telemetry
   still includes the user-authored node name, so that name must not contain a
-  secret or sensitive key name. Real daprd 1.18.1 embeds the requested
+  secret or sensitive key name. Real daprd 1.18.2 embeds the requested
   secret's key directly in its own error messages. daprd itself sees the key in
   the request path and its own logs and traces can contain it; that
   sidecar-owned telemetry is outside this package's control. Verified end to
-  end against a real daprd 1.18.1 + `secretstores.local.file` component and
+  end against a real daprd 1.18.2 + `secretstores.local.file` component and
   real Dapr secret-scoping (`spec.secrets.scopes`): a store-scoping denial
   (`403`/`SECRET_ACCESS_DENIED`) happens before the component is ever
   called, so it never overlaps with "key not found in an otherwise-valid
@@ -170,6 +170,15 @@ the same change that ships behavior.
   connection redeploys, and is not a new palette node.
 
 ### Changed
+
+- **The pinned Dapr runtime moved from 1.18.1 to 1.18.2**
+  (`daprio/daprd:1.18.2`, re-pinned by digest). The full integration gate was
+  re-run against the new runtime, so every version-specific behaviour this
+  package documents still holds on 1.18.2: a missing secret answering `500`
+  rather than `204`, a missing secret store answering `401`, output bindings
+  collapsing every failure mode into one `500`/`ERR_INVOKE_OUTPUT_BINDING`,
+  configuration resubscribe-after-restart resuming delivery, and both the
+  `v1.0` and `v1.0-alpha1` unsubscribe prefixes stopping delivery.
 
 - **Runtime dependencies are no longer zero.** The official OpenTelemetry
   packages (`@opentelemetry/api`, `api-logs`, `sdk-trace-node`, `sdk-logs`,

@@ -215,7 +215,7 @@ return msg;</pre>
     <code>metadata</code>. <code>msg</code> is otherwise sent on unchanged.
   </p>
   <p>
-    Dapr 1.18.1 returns a Redis transactional ETag conflict as a generic HTTP 500, so that case is
+    Dapr 1.18.2 returns a Redis transactional ETag conflict as a generic HTTP 500, so that case is
     <code>STATE_OPERATION_FAILED</code>; the node does not guess from store-specific error text.
   </p>
 

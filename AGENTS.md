@@ -14,7 +14,12 @@ verbatim (`@AGENTS.md`) — do not duplicate guidance elsewhere.
 
 ## Stack (pinned)
 
-Node.js >= 22.9 · Node-RED 5.0.4 (`>=5.0.1 <6`) · Dapr runtime 1.18.1. Runtime
+Node.js >= 22.9 · Node-RED 5.0.4 (`>=5.0.1 <6`) · Dapr runtime 1.18.2. A few
+comments cite `dapr/dapr` **source** at tag v1.18.1 — that is deliberate and
+accurate: it names the tag actually read. The behaviour each one describes is
+re-proved against whatever runtime is pinned here by the integration tier, so
+bump the pin and re-run `npm run test:integration` rather than editing those
+citations to match. Runtime
 dependencies are pinned and deliberately minimal, not zero: every call **to
 the sidecar** still goes over `node:http` (`lib/sidecar-http.js`) with no
 second HTTP client for that path, but the official OpenTelemetry JavaScript
@@ -75,7 +80,7 @@ Keep this list in step with `package.json`.
 
 ## Architecture invariants (do not violate)
 
-These are load-bearing. Each was verified against real daprd 1.18.1 rather than
+These are load-bearing. Each was verified against real daprd 1.18.2 rather than
 assumed, and each states the failure it prevents — that reasoning is the
 justification, so do not relax one because it looks incidental.
 
@@ -151,7 +156,7 @@ justification, so do not relax one because it looks incidental.
   between sidecars.** Without mTLS, daprd cannot read a caller's identity from
   a client cert, evaluates every caller as `id: ""`, and every policy
   collapses to its `defaultAction` regardless of the caller's real app-id
-  (confirmed against real daprd 1.18.1 in `test/integration/acl.test.js`).
+  (confirmed against real daprd 1.18.2 in `test/integration/acl.test.js`).
   This package does not currently stand up mTLS/Sentry anywhere, so
   **`accessControl` is not a usable caller-authorization mechanism for
   service invocation as currently deployed** — document this gap to operators

@@ -1,6 +1,6 @@
 'use strict';
 
-// Real daprd 1.18.1 + a real bindings.http output-binding component -- output
+// Real daprd 1.18.2 + a real bindings.http output-binding component -- output
 // bindings need no broker or store at all (mirrors acl/invoke/shutdown's own
 // broker-agnostic setup), so this belongs in the test:integration:dapr bucket,
 // not test:integration:redis. `url` points directly at this test's own

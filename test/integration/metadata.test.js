@@ -24,7 +24,7 @@ function flow({ appPort, daprHttpPort }) {
 }
 
 test(
-  'Test Connection returns only curated metadata from real daprd 1.18.1',
+  'Test Connection returns only curated metadata from real daprd 1.18.2',
   { timeout: 60000 },
   async (t) => {
     const appPort = await freePort();
@@ -56,7 +56,7 @@ test(
     assert.deepEqual(JSON.parse(response.text), {
       ok: true,
       id: 'it-metadata-app',
-      runtimeVersion: '1.18.1',
+      runtimeVersion: '1.18.2',
       components: [{ name: 'secretstore', type: 'secretstores.local.file' }],
       componentCount: 1,
       subscriptionCount: 0,

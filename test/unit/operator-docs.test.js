@@ -4,8 +4,30 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { DAPRD_IMAGE: PINNED_DAPRD_IMAGE } = require('../helpers/integration');
 
 const read = (name) => fs.readFileSync(path.resolve(__dirname, '../..', name), 'utf8');
+
+// Derived from the pinned image, never hard-coded: a version literal in an
+// assertion is a snapshot that goes stale the moment the pin moves, and then
+// the "docs name the pinned runtime" guarantee quietly stops being checked.
+// Bump test/helpers/integration.js and this follows automatically — while a
+// doc that forgot to follow now fails.
+const PINNED_DAPR_VERSION = PINNED_DAPRD_IMAGE.match(/:(\d+\.\d+\.\d+)@/)?.[1];
+
+test('the pinned daprd version is discoverable from the integration helper', () => {
+  assert.ok(
+    PINNED_DAPR_VERSION,
+    'could not read the pinned daprd version from test/helpers/integration.js — ' +
+      'if DAPRD_IMAGE was reshaped, update this extraction rather than deleting the check'
+  );
+});
+
+test('deployment examples use the exact pinned daprd image', () => {
+  for (const file of ['docker-compose.yml', 'docs/deployment.md']) {
+    assert.ok(read(file).includes(PINNED_DAPRD_IMAGE), `${file} has a stale daprd tag or digest`);
+  }
+});
 
 test('operator docs warn that JetStream dead-letter topics stall on pinned Dapr', () => {
   const subscribeHelp = read('nodes/dapr-subscribe.html').split(
@@ -25,7 +47,7 @@ test('operator docs warn that JetStream dead-letter topics stall on pinned Dapr'
     // phrases can land either side of a line break (which is exactly why the
     // Dapr-version pattern below was already written this way).
     assert.match(text, /NATS\s+JetStream/);
-    assert.match(text, /Dapr\s+1\.18\.1/);
+    assert.match(text, new RegExp(`Dapr\\s+${PINNED_DAPR_VERSION.replace(/\./g, '\\.')}`));
     assert.match(text, /deadLetterTopic/);
     assert.match(text, /do\s+not\s+use/i);
   }

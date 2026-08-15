@@ -11,7 +11,7 @@ No Mocha/Jest/Vitest/Sinon/Supertest and no `node-red-node-test-helper`.
 | ----------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
 | Unit        | `test/unit/`                               | `lib/` module contracts in isolation.                                                                                                | Node only.                                   |
 | Runtime     | `test/runtime/`                            | Real Node-RED loads, registers, wires, and runs the nodes; a fake Dapr HTTP sidecar stands in for daprd.                             | Node + `node-red` CLI.                       |
-| Integration | `test/integration/`                        | Behavior against real daprd 1.18.1, with NATS JetStream as the primary pub/sub broker and Redis as a secondary compatibility target. | Docker.                                      |
+| Integration | `test/integration/`                        | Behavior against real daprd 1.18.2, with NATS JetStream as the primary pub/sub broker and Redis as a secondary compatibility target. | Docker.                                      |
 | E2E         | `test/e2e/`                                | Editor dialogs, validation, and a full publish/subscribe + invoke/service flow.                                                      | Playwright + Node-RED.                       |
 | MemoryDB    | `test/integration/memorydb-pubsub.test.js` | The same chain against a real AWS MemoryDB cluster: TLS, Redis ACL auth, cluster mode.                                               | **Optional** — a live cluster + VPC routing. |
 
@@ -56,7 +56,7 @@ primary/secondary broker split the way pub/sub does (NATS JetStream vs.
 Redis) — it needs exactly one backing store, and Redis is the one this
 package already has pinned and Docker-tested. It proves `dapr-state`'s five
 operations against a real `state.redis` component: a save/get round trip's
-real ETag, genuine 409s on stale-etag save/delete, the generic 500 daprd 1.18.1
+real ETag, genuine 409s on stale-etag save/delete, the generic 500 daprd 1.18.2
 returns for a transactional ETag conflict, bulk get, and an atomic transaction.
 
 `test/integration/configuration.test.js` lives in the same bucket for the
@@ -83,7 +83,7 @@ reaches that target as a genuine POST (asserted from the capture server's
 own independently-observed received body, not this package's code) and that
 the component's real response round-trips back through `msg.payload`/
 `msg.dapr`, plus that an unconfigured binding name produces a real
-`500`/`ERR_INVOKE_OUTPUT_BINDING` from real daprd 1.18.1 — confirming the
+`500`/`ERR_INVOKE_OUTPUT_BINDING` from real daprd 1.18.2 — confirming the
 source-level finding that daprd gives no dedicated not-found status for
 this endpoint (see `nodes/dapr-binding-out.html`).
 
@@ -93,7 +93,7 @@ secrets need no store or broker at all beyond a real
 (`test/integration/fixtures/secrets.json`), plus a real Dapr Configuration
 resource (`test/integration/fixtures/secret-scopes.yaml`) exercising real
 secret-scoping (`spec.secrets.scopes`). It proves the three real, distinct
-outcomes daprd 1.18.1 actually produces -- allowed-and-present (`200`),
+outcomes daprd 1.18.2 actually produces -- allowed-and-present (`200`),
 allowed-but-absent (`500`/`SECRET_OPERATION_FAILED`), and denied-by-scope
 (`403`/`SECRET_ACCESS_DENIED`, which happens before the component is ever
 called and so never overlaps with "absent") -- and asserts that daprd's own
@@ -105,7 +105,7 @@ proves the sanitization holds against the actual wire text, not an assumed
 shape.
 
 `test/integration/metadata.test.js` also needs no broker. It starts real daprd
-1.18.1 with the existing local-file secret component and verifies that Test
+1.18.2 with the existing local-file secret component and verifies that Test
 Connection reports the real app id, runtime version, component name/type, and
 counts while exposing none of daprd's other metadata fields.
 
@@ -182,7 +182,7 @@ HTTP. A fake Dapr HTTP sidecar (`test/helpers/fake-dapr.js`) stands in for daprd
 
 The integration harness spins up a fresh, isolated set of pinned containers
 per test file via raw `docker run` (not docker-compose, so files stay
-parallel-safe on dynamically allocated ports): `daprio/daprd:1.18.1`,
+parallel-safe on dynamically allocated ports): `daprio/daprd:1.18.2`,
 `redis:7.4-alpine` (`test/helpers/integration.js`), `nats:2.14.3-alpine`
 (`test/helpers/nats.js` — JetStream only, started with `-js`; `pubsub.natsstreaming`
 is deprecated and out of scope), Node-RED itself, as the pinned
@@ -284,7 +284,7 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
   caller's identity from a client cert and evaluates every caller as `id: ""` —
   every access-control policy collapses to its `defaultAction`, regardless of
   the caller's real app-id. This is a genuine Dapr constraint, confirmed
-  against real daprd 1.18.1 debug logs, not a harness bug. See `AGENTS.md`'s
+  against real daprd 1.18.2 debug logs, not a harness bug. See `AGENTS.md`'s
   security section for the operator-facing consequence; standing up
   Sentry/mTLS to test a real allow/deny split is future work.
 - **`rawPayload` is two independent flags, confirmed against real daprd
@@ -325,7 +325,7 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
   client itself only talks to daprd's own HTTP API, never the broker
   directly, so which broker backs daprd is not a variable this client-level
   suite needs to hold constant (see "NATS-primary rebalance" below).
-- **`deadLetterTopic` stalls with `pubsub.jetstream` in Dapr 1.18.1
+- **`deadLetterTopic` stalls with `pubsub.jetstream` in Dapr 1.18.2
   (integration, Milestone 9):** confirmed twice via real daprd debug logs —
   the runtime logs the original delivery's failure, then logs "Publishing to
   topic \<dlq\>", and logs nothing further within the bounded window each

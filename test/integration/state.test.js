@@ -1,6 +1,6 @@
 'use strict';
 
-// Real daprd 1.18.1 + a real Redis state.redis component -- state management
+// Real daprd 1.18.2 + a real Redis state.redis component -- state management
 // never touches pub/sub broker semantics, so this needs no NATS/JetStream
 // and no pubsub component (test/helpers/integration.js's stateComponentYaml
 // is passed through startDaprd's broker-agnostic `components` array, not its
@@ -181,7 +181,7 @@ test(
     assert.deepEqual(byKey.get('bulk-b').data, { n: 2 });
     assert.equal(byKey.get('bulk-missing').data, undefined);
 
-    // daprd 1.18.1 returns a generic 500 for a transactional Redis ETag
+    // daprd 1.18.2 returns a generic 500 for a transactional Redis ETag
     // conflict, so the client must not promise the save/delete 409 contract.
     const staleTransaction = await call({ operation: 'transaction' }, [
       {
