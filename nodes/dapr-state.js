@@ -19,42 +19,20 @@ const {
   prepareStateTransaction,
 } = require('../lib/state-messages');
 const { getTracer, endSpan } = require('../lib/telemetry');
+const { requireConnection, openSidecarSession } = require('../lib/sidecar-session');
 
 module.exports = function registerDaprState(RED) {
   function DaprStateNode(config) {
     RED.nodes.createNode(this, config);
     const node = this;
     const connection = RED.nodes.getNode(config.connection);
-
-    if (
-      !connection?.options ||
-      typeof connection.isSidecarHealthy !== 'function' ||
-      typeof connection.whenHealthKnown !== 'function' ||
-      typeof connection.onSidecarHealth !== 'function'
-    ) {
-      node.status({ fill: 'red', shape: 'ring', text: 'missing connection' });
-      node.on('input', (_msg, _send, done) => {
-        done(new DaprError(ErrorCodes.INVALID_OPTIONS, 'Dapr connection is unavailable'));
-      });
+    if (!requireConnection(node, connection)) {
       return;
     }
-
-    const removeHealthListener = connection.onSidecarHealth((healthy) =>
-      node.status(
-        healthy
-          ? { fill: 'green', shape: 'dot', text: 'ready' }
-          : { fill: 'red', shape: 'ring', text: 'sidecar unavailable' }
-      )
-    );
-
-    const inflight = new Set(); // AbortControllers for state calls in flight
+    const session = openSidecarSession(node, connection);
 
     node.on('input', async (msg, send, done) => {
-      // Wait for the connection's first health probe to land before judging the
-      // sidecar down, so a message sent immediately after deploy is not failed
-      // against a sidecar that is actually up.
-      await connection.whenHealthKnown();
-      if (!connection.isSidecarHealthy()) {
+      if (!(await session.isReady())) {
         done(new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'Dapr sidecar is unavailable'));
         return;
       }
@@ -106,70 +84,63 @@ module.exports = function registerDaprState(RED) {
         context.active()
       );
 
-      const controller = new AbortController();
-      inflight.add(controller);
-      const transportOptions = {
-        baseUrl: connection.options.outbound.baseUrl,
-        token: connection.options.daprApiToken,
-        timeoutMs: connection.options.limits.requestTimeoutMs,
-        signal: controller.signal,
-        maxResponseBytes: connection.options.limits.bodyLimitBytes,
-      };
+      let result;
       try {
-        let result;
-        switch (operation) {
-          case 'get':
-            result = await stateGet(transportOptions, request);
-            msg.payload = result.value;
-            msg.dapr = {
-              ...dapr,
-              operation,
-              storeName: request.storeName,
-              key: request.key,
-              statusCode: result.status,
-              etag: result.etag,
-            };
-            break;
-          case 'save':
-            result = await stateSave(transportOptions, request);
-            msg.dapr = {
-              ...dapr,
-              operation,
-              storeName: request.storeName,
-              key: request.item.key,
-              statusCode: result.status,
-            };
-            break;
-          case 'delete':
-            result = await stateDelete(transportOptions, request);
-            msg.dapr = {
-              ...dapr,
-              operation,
-              storeName: request.storeName,
-              key: request.key,
-              statusCode: result.status,
-            };
-            break;
-          case 'bulkGet':
-            result = await stateBulkGet(transportOptions, request);
-            msg.payload = result.items;
-            msg.dapr = {
-              ...dapr,
-              operation,
-              storeName: request.storeName,
-              statusCode: result.status,
-            };
-            break;
-          case 'transaction':
-            result = await stateTransaction(transportOptions, request);
-            msg.dapr = {
-              ...dapr,
-              operation,
-              storeName: request.storeName,
-              statusCode: result.status,
-            };
-            break;
-        }
+        await session.call(async (transportOptions) => {
+          switch (operation) {
+            case 'get':
+              result = await stateGet(transportOptions, request);
+              msg.payload = result.value;
+              msg.dapr = {
+                ...dapr,
+                operation,
+                storeName: request.storeName,
+                key: request.key,
+                statusCode: result.status,
+                etag: result.etag,
+              };
+              break;
+            case 'save':
+              result = await stateSave(transportOptions, request);
+              msg.dapr = {
+                ...dapr,
+                operation,
+                storeName: request.storeName,
+                key: request.item.key,
+                statusCode: result.status,
+              };
+              break;
+            case 'delete':
+              result = await stateDelete(transportOptions, request);
+              msg.dapr = {
+                ...dapr,
+                operation,
+                storeName: request.storeName,
+                key: request.key,
+                statusCode: result.status,
+              };
+              break;
+            case 'bulkGet':
+              result = await stateBulkGet(transportOptions, request);
+              msg.payload = result.items;
+              msg.dapr = {
+                ...dapr,
+                operation,
+                storeName: request.storeName,
+                statusCode: result.status,
+              };
+              break;
+            case 'transaction':
+              result = await stateTransaction(transportOptions, request);
+              msg.dapr = {
+                ...dapr,
+                operation,
+                storeName: request.storeName,
+                statusCode: result.status,
+              };
+              break;
+          }
+        });
         endSpan(span);
         node.status({ fill: 'green', shape: 'dot', text: `${operation} ${result.status}` });
         send(msg);
@@ -186,19 +157,7 @@ module.exports = function registerDaprState(RED) {
           }[err.code] || 'state operation failed';
         node.status({ fill: 'red', shape: 'ring', text });
         done(err);
-      } finally {
-        inflight.delete(controller);
       }
-    });
-
-    node.on('close', (_removed, done) => {
-      removeHealthListener();
-      // Abort any state call still in flight so it cannot outlive the node.
-      for (const controller of inflight) {
-        controller.abort();
-      }
-      inflight.clear();
-      done();
     });
   }
 
