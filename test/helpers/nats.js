@@ -18,6 +18,7 @@ const { jetstreamManager } = require('@nats-io/jetstream');
 
 const { execFileP, ensureImage } = require('./docker');
 const { freePort } = require('./node-red');
+const { setTimeout: delay } = require('node:timers/promises');
 
 // Pinned by digest — see test/helpers/integration.js for the re-pin procedure.
 const NATS_IMAGE =
@@ -56,7 +57,7 @@ async function startNats() {
       ready = true;
     } catch (err) {
       lastErr = err;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await delay(200);
     }
   }
   if (!ready) {

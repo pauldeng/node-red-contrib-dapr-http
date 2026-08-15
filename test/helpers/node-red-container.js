@@ -36,6 +36,7 @@ const { spawn } = require('node:child_process');
 const { httpRequest } = require('./http');
 const { freePort } = require('./node-red');
 const { execFileP, ensureImage } = require('./docker');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const WORKSPACE = path.resolve(__dirname, '..', '..');
 const PKG = require(path.join(WORKSPACE, 'package.json'));
@@ -62,8 +63,6 @@ function settingsSource(uiPort, { loggingExtra = '' } = {}) {
 };
 `;
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 class ContainerNodeRed {
   constructor() {
@@ -171,7 +170,7 @@ class ContainerNodeRed {
       } catch {
         // not listening yet
       }
-      await sleep(200);
+      await delay(200);
     }
     throw new Error(
       `Node-RED container did not become ready within ${timeoutMs}ms.\n--- logs ---\n${this.logText()}`
@@ -227,7 +226,7 @@ class ContainerNodeRed {
       } catch (err) {
         last = err;
       }
-      await sleep(intervalMs);
+      await delay(intervalMs);
     }
     const detail = last instanceof Error ? last.message : `last status ${last && last.status}`;
     throw new Error(

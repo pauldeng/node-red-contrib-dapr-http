@@ -26,6 +26,7 @@ const { startDaprd } = require('../helpers/integration');
 const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpers/nats');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
+const { setTimeout: delay } = require('node:timers/promises');
 
 test(
   'this component redelivers per its own ackWait/maxDeliver metadata, with no Dapr Resiliency policy configured',
@@ -137,7 +138,7 @@ return [report, msg];`,
     await waitFor(() => capture.received.some((r) => r && r.attempt === 3) || null, {
       timeoutMs: 20000,
     });
-    await new Promise((resolve) => setTimeout(resolve, 1500)); // past another ackWait cycle
+    await delay(1500); // past another ackWait cycle
     const attempts = capture.received.map((r) => r && r.attempt).filter(Boolean);
     assert.deepEqual(
       attempts,

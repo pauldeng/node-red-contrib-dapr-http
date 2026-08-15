@@ -2,55 +2,16 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const http = require('node:http');
 
 const { NodeRed, freePort } = require('../helpers/node-red');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
+const { startCapture } = require('../helpers/capture');
 const { httpRequest } = require('../helpers/http');
+const { waitForFast: waitFor } = require('../helpers/wait-for');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const healthPath = '/v1.0/healthz/outbound';
 const deliveryPath = '/node-red-dapr/subscriptions/sub1';
-
-async function waitFor(fn, { timeoutMs = 10000, intervalMs = 50 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  let last;
-  while (Date.now() < deadline) {
-    try {
-      const value = await fn();
-      if (value) {
-        return value;
-      }
-      last = value;
-    } catch (err) {
-      last = err;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error(`waitFor timed out (${last instanceof Error ? last.message : last})`);
-}
-
-// A server that records the messages the subscribe node forwards into the flow.
-async function startCapture() {
-  const received = [];
-  const server = http.createServer((req, res) => {
-    const chunks = [];
-    req.on('data', (c) => chunks.push(c));
-    req.on('end', () => {
-      try {
-        received.push(JSON.parse(Buffer.concat(chunks).toString()));
-      } catch {
-        received.push(null);
-      }
-      res.writeHead(200).end('ok');
-    });
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return {
-    received,
-    url: `http://127.0.0.1:${server.address().port}/capture`,
-    stop: () => new Promise((resolve) => server.close(resolve)),
-  };
-}
 
 // subscribe -> function(build capture body, keep msg.dapr) -> http request(capture)
 // -> [manual only] dapr-ack.
@@ -167,7 +128,7 @@ test(
     assert.equal(res.status, 200);
     assert.deepEqual(JSON.parse(res.text), { status: 'SUCCESS' });
 
-    const captured = await waitFor(() => capture.received[0] || null);
+    const captured = await capture.waitForMessage(() => true);
     assert.deepEqual(captured, { payload: { orderId: 7 }, hasCloudEvent: true, topic: 'orders' });
   }
 );
@@ -324,7 +285,7 @@ test(
       1,
       `exactly one subscription advertised: ${res.text}`
     );
-    await waitFor(() => (/duplicate subscription/i.test(nr.logText()) ? true : null));
+    await nr.waitForLog(/duplicate subscription/i);
   }
 );
 
@@ -384,7 +345,7 @@ test(
       return r.status === 503 ? r : null;
     });
     assert.equal(res.status, 503, 'a stale route must be retryable, never a 404');
-    await waitFor(() => (/restart the Dapr sidecar/i.test(nr.logText()) ? true : null));
+    await nr.waitForLog(/restart the Dapr sidecar/i);
     const warnings = nr.logText().match(/restart the Dapr sidecar/gi) || [];
     assert.equal(warnings.length, 1, 'the restart warning must be rate-limited to one');
   }
@@ -415,7 +376,7 @@ test('a delivery pending at redeploy completes as RETRY', { timeout: 60000 }, as
   });
 
   const deliveryPromise = deliver(appPort); // manual + no ack → stays pending
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await delay(300);
   await nr.deploy(flow); // redeploy while the delivery is pending
   const res = await deliveryPromise;
   // On a full redeploy, both the subscribe node's own close-time settle (fix
@@ -468,7 +429,7 @@ test(
 
     const t0 = Date.now();
     const deliveryPromise = deliver(appPort); // manual + no ack → stays pending
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await delay(300);
     // "nodes" redeploy: a changed field marks the subscribe node "modified" so
     // only it restarts; the connection (unchanged) stays up and does NOT
     // drain, so the subscribe node itself must settle its own pending ack.
@@ -547,7 +508,7 @@ test('a second acknowledgement of the same delivery is rejected', { timeout: 600
     { status: 'SUCCESS' },
     'the first ack completes the delivery'
   );
-  const err = await waitFor(() => capture.received.find((r) => r && r.error) || null);
+  const err = await capture.waitForMessage((r) => r && r.error);
   assert.match(err.error, /no pending delivery/i);
 });
 
@@ -644,7 +605,7 @@ return msg;`,
     });
     assert.deepEqual(JSON.parse(res.text), { status: 'SUCCESS' });
 
-    const captured = await waitFor(() => (capture.received[0] ? capture.received[0] : null));
+    const captured = await capture.waitForMessage(() => true);
     assert.equal(captured.isBuffer, true, 'raw payload is delivered as a Buffer');
     assert.equal(captured.payloadBase64, bytes.toString('base64'), 'raw bytes decoded correctly');
     assert.equal(captured.cloudEventId, 'raw-evt-1', 'envelope preserved');

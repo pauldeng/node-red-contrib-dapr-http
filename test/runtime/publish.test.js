@@ -6,22 +6,12 @@ const assert = require('node:assert/strict');
 const { NodeRed, freePort } = require('../helpers/node-red');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
+const { waitForFast: waitFor } = require('../helpers/wait-for');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const healthPath = '/v1.0/healthz/outbound';
 const publishPath = '/v1.0/publish/pubsub/orders';
 const bulkPublishPath = '/v1.0/publish/bulk/pubsub/orders';
-
-async function waitFor(fn, { timeoutMs = 10000, intervalMs = 50 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = await fn();
-    if (value) {
-      return value;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error('waitFor timed out');
-}
 
 function publishFlow({ appPort, daprPort, bulkEnabled = true }) {
   return [
@@ -188,8 +178,8 @@ test(
     const appPort = await freePort();
 
     await nr.deploy(publishFlow({ appPort, daprPort: dapr.port }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await dapr.waitForRequest(healthPath);
+    await delay(50);
 
     const payloads = [{ orderId: 42 }, 0, false, null, ''];
     for (const payload of payloads) {
@@ -285,7 +275,7 @@ test(
       () =>
         dapr.requests.filter((request) => request.path === healthPath).length > previousHealthCount
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await delay(50);
     assert.equal((await post(nr, { after: 'redeploy' })).status, 200);
   }
 );
@@ -304,7 +294,7 @@ test(
     t.after(() => nr.stop());
     const appPort = await freePort();
     await nr.deploy(publishFlow({ appPort, daprPort: dapr.port }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
+    await dapr.waitForRequest(healthPath);
 
     const started = Date.now();
     const unavailable = await post(nr, { orderId: 1 });
@@ -327,7 +317,7 @@ test(
         dapr.requests.filter((request) => request.path === healthPath).length > previousHealthCount,
       { timeoutMs: 5000 }
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await delay(50);
 
     dapr.respond('POST', publishPath, (_req, res) => res.writeHead(500).end('publish rejected'));
     const rejected = await post(nr, { orderId: 2 });
@@ -375,8 +365,8 @@ test('many publish nodes can share one connection without listener warnings', as
   }
 
   await nr.deploy(flow);
-  await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await dapr.waitForRequest(healthPath);
+  await delay(100);
   assert.doesNotMatch(nr.logText(), /MaxListenersExceededWarning/);
 });
 
@@ -394,8 +384,8 @@ test(
     t.after(() => nr.stop());
     const appPort = await freePort();
     await nr.deploy(publishFlow({ appPort, daprPort: dapr.port }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await dapr.waitForRequest(healthPath);
+    await delay(50);
 
     const response = await postBulk(nr, [
       { entryId: 'e1', payload: { orderId: 1 } },
@@ -442,8 +432,8 @@ test(
     t.after(() => nr.stop());
     const appPort = await freePort();
     await nr.deploy(publishFlow({ appPort, daprPort: dapr.port }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await dapr.waitForRequest(healthPath);
+    await delay(50);
 
     const response = await postBulk(nr, [
       { entryId: 'e1', payload: 1 },
@@ -476,8 +466,8 @@ test(
     t.after(() => nr.stop());
     const appPort = await freePort();
     await nr.deploy(publishFlow({ appPort, daprPort: dapr.port }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await dapr.waitForRequest(healthPath);
+    await delay(50);
 
     const response = await postBulk(nr, [
       { entryId: 'dup', payload: 1 },
@@ -507,7 +497,7 @@ test(
     t.after(() => nr.stop());
     const appPort = await freePort();
     await nr.deploy(publishFlow({ appPort, daprPort: dapr.port }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
+    await dapr.waitForRequest(healthPath);
 
     const response = await postBulk(nr, [{ entryId: 'e1', payload: 1 }], 'false');
     assert.equal(response.status, 503);
@@ -536,7 +526,7 @@ test(
     const appPort = await freePort();
 
     await nr.deploy(publishFlow({ appPort, daprPort: dapr.port, bulkEnabled: true }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
+    await dapr.waitForRequest(healthPath);
     assert.equal((await postBulk(nr, [{ entryId: 'single', payload: 1 }], false)).status, 200);
     assert.equal(dapr.requests.filter((request) => request.path === publishPath).length, 1);
     assert.equal(dapr.requests.filter((request) => request.path === bulkPublishPath).length, 0);

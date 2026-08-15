@@ -6,6 +6,8 @@ const assert = require('node:assert/strict');
 const { NodeRed, freePort } = require('../helpers/node-red');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
+const { waitForFast: waitFor } = require('../helpers/wait-for');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const healthPath = '/v1.0/healthz/outbound';
 const publishPath = '/v1.0/publish/pubsub/orders';
@@ -16,24 +18,6 @@ const TRACEPARENT_RE = /^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
 
 // Retries through a rejection, not just a falsy result: an HTTP poll right
 // after nr.deploy() can hit the app-channel listener before it has finished
-// binding (ECONNREFUSED), which is an expected startup race, not a failure.
-async function waitFor(fn, { timeoutMs = 10000, intervalMs = 50 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  let last;
-  while (Date.now() < deadline) {
-    try {
-      const value = await fn();
-      if (value) {
-        return value;
-      }
-      last = value;
-    } catch (err) {
-      last = err;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error(`waitFor timed out (${last instanceof Error ? last.message : last})`);
-}
 
 function publishFlow({ appPort, daprPort, tracingEnabled }) {
   return [
@@ -91,8 +75,8 @@ test(
     const appPort = await freePort();
 
     await nr.deploy(publishFlow({ appPort, daprPort: dapr.port, tracingEnabled: true }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await dapr.waitForRequest(healthPath);
+    await delay(50);
 
     const response = await post(nr);
     assert.equal(response.status, 200);
@@ -122,8 +106,8 @@ test(
     const appPort = await freePort();
 
     await nr.deploy(publishFlow({ appPort, daprPort: dapr.port, tracingEnabled: false }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await dapr.waitForRequest(healthPath);
+    await delay(50);
 
     assert.equal((await post(nr)).status, 200);
     const publish = dapr.requests.filter((request) => request.path === publishPath).at(-1);
@@ -170,8 +154,8 @@ test(
       },
       { id: 'res', type: 'http response', z: 'tab' },
     ]);
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await dapr.waitForRequest(healthPath);
+    await delay(50);
 
     const response = await httpRequest(nr.nodeUrl('/call'), {
       method: 'POST',

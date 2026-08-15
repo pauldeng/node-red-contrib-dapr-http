@@ -19,6 +19,7 @@ const { startDaprd } = require('../helpers/integration');
 const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpers/nats');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
+const { setTimeout: delay } = require('node:timers/promises');
 
 test(
   'an explicit DROP is never redelivered, and an unacknowledged delivery times out and IS redelivered, by real daprd backed by NATS JetStream',
@@ -167,7 +168,7 @@ return msg;`,
     // DROP: delivered exactly once, never redelivered.
     await publish('drop-topic', JSON.stringify({ n: 1 }));
     await waitFor(() => capture.received.some((r) => r && r.topic === 'drop-topic') || null);
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await delay(3000);
     assert.equal(
       capture.received.filter((r) => r && r.topic === 'drop-topic').length,
       1,

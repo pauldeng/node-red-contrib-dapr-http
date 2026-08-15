@@ -15,6 +15,7 @@ const { startDaprd } = require('../helpers/integration');
 const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpers/nats');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
+const { setTimeout: delay } = require('node:timers/promises');
 
 function flow({ daprHttpPort, appPort, topic, captureUrl }) {
   return [
@@ -118,7 +119,7 @@ test(
     // policy or dead-letter topic on this flow, so a delivery that lands in
     // that handover gap is lost forever, not just delayed — wait out the
     // grace window itself before publishing, not just one successful probe.
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await delay(3000);
 
     await publish(2);
     await waitFor(() => capture.received.some((r) => r && r.payload && r.payload.n === 2) || null);
@@ -198,7 +199,7 @@ test(
     // so publishing to it must NOT reach the app. A bounded wait for
     // *absence* is the best a black-box test can do here.
     await publishTo('orders-v2', 2);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await delay(2000);
     assert.equal(
       capture.received.some((r) => r && r.topic === 'orders-v2'),
       false,

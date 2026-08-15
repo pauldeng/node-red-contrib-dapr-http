@@ -5,6 +5,23 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 
 const { startCapture } = require('../helpers/capture');
+const { NodeRed } = require('../helpers/node-red');
+const { setTimeout: delay } = require('node:timers/promises');
+
+test('Node-RED log collection does not rebuild the full log without a waiter', () => {
+  const nr = new NodeRed();
+  let reads = 0;
+  const logText = nr.logText.bind(nr);
+  nr.logText = () => {
+    reads += 1;
+    return logText();
+  };
+
+  nr._appendLog('one');
+  nr._appendLog('two');
+
+  assert.equal(reads, 0);
+});
 
 test('test HTTP servers stop promptly with an active request', async () => {
   const capture = await startCapture();
@@ -16,7 +33,7 @@ test('test HTTP servers stop promptly with an active request', async () => {
   req.flushHeaders();
   req.write('{');
   await connected;
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await delay(50);
 
   const stopped = capture.stop().then(() => true);
   const stoppedPromptly = await Promise.race([

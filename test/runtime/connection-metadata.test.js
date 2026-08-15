@@ -7,6 +7,7 @@ const { NodeRed, freePort } = require('../helpers/node-red');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
 const { waitFor } = require('../helpers/wait-for');
+const { createSignal } = require('../helpers/signal');
 
 // RED.auth.needsPermission('dapr-connection.read') guards the admin route
 // (nodes/dapr-connection.js) but every request below succeeds with no auth
@@ -56,7 +57,7 @@ async function startFlow(t, respondents = []) {
   t.after(() => nr.stop());
   const appPort = await freePort();
   await nr.deploy(connectionFlow({ appPort, daprPort: dapr.port }));
-  await waitFor(() => dapr.requests.find((request) => request.path === HEALTH_PATH));
+  await dapr.waitForRequest(HEALTH_PATH);
   return { appPort, dapr, nr };
 }
 
@@ -69,13 +70,13 @@ test('a deployed connection returns the curated metadata shape', async (t) => {
         res.writeHead(200, { 'content-type': 'application/json' }).end(
           JSON.stringify({
             id: 'my-app',
-            runtimeVersion: '1.18.1',
+            runtimeVersion: '1.18.2',
             components: [
               { name: 'pubsub', type: 'pubsub.redis', version: 'v1', capabilities: [] },
               { name: 'statestore', type: 'state.redis', version: 'v1' },
             ],
             subscriptions: [{ pubsubname: 'pubsub', topic: 'orders' }],
-            extended: { daprRuntimeVersion: '1.18.1' },
+            extended: { daprRuntimeVersion: '1.18.2' },
             enabledFeatures: ['SomeFeature'],
           })
         ),
@@ -89,7 +90,7 @@ test('a deployed connection returns the curated metadata shape', async (t) => {
   assert.deepEqual(body, {
     ok: true,
     id: 'my-app',
-    runtimeVersion: '1.18.1',
+    runtimeVersion: '1.18.2',
     components: [
       { name: 'pubsub', type: 'pubsub.redis' },
       { name: 'statestore', type: 'state.redis' },
@@ -110,7 +111,7 @@ test('an invalid deployed connection is distinct from an unknown id', async (t) 
   t.after(() => nr.stop());
   const appPort = await freePort();
   await nr.deploy(connectionFlow({ appPort, daprPort: 3500, overrides: { daprPort: '0' } }));
-  await waitFor(() => (nr.logText().includes('daprPort must be an integer') ? true : null));
+  await nr.waitForLog('daprPort must be an integer');
 
   const response = await adminMetadata(nr);
   assert.equal(response.status, 409);
@@ -168,24 +169,28 @@ test('an unreachable sidecar is reported as a bounded 502', async (t) => {
   assert.match(body.message, /could not reach/);
 });
 
-test('redeploy aborts an in-flight metadata request owned by the old connection', async (t) => {
-  let metadataClosed = false;
-  const { appPort, dapr, nr } = await startFlow(t, [
-    [
-      'GET',
-      METADATA_PATH,
-      (_req, res) => {
-        res.on('close', () => {
-          metadataClosed = true;
-        });
-      },
-    ],
-  ]);
+test(
+  'redeploy aborts an in-flight metadata request owned by the old connection',
+  { timeout: 10000 },
+  async (t) => {
+    const metadataClosed = createSignal();
+    const { appPort, dapr, nr } = await startFlow(t, [
+      [
+        'GET',
+        METADATA_PATH,
+        (_req, res) => {
+          res.on('close', () => {
+            metadataClosed.fire();
+          });
+        },
+      ],
+    ]);
 
-  const pending = adminMetadata(nr).catch(() => null);
-  await waitFor(() => dapr.requests.find((request) => request.path === METADATA_PATH));
-  await nr.deploy(connectionFlow({ appPort, daprPort: dapr.port }));
+    const pending = adminMetadata(nr).catch(() => null);
+    await dapr.waitForRequest(METADATA_PATH);
+    await nr.deploy(connectionFlow({ appPort, daprPort: dapr.port }));
 
-  await waitFor(() => metadataClosed || null, { timeoutMs: 2000 });
-  await pending;
-});
+    await metadataClosed.fired;
+    await pending;
+  }
+);

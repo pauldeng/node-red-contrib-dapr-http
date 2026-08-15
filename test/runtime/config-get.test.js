@@ -6,22 +6,11 @@ const assert = require('node:assert/strict');
 const { NodeRed, freePort } = require('../helpers/node-red');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const healthPath = '/v1.0/healthz/outbound';
 const STORE = 'configstore';
 const getPath = () => `/v1.0/configuration/${STORE}`;
-
-async function waitFor(fn, { timeoutMs = 10000, intervalMs = 50 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = await fn();
-    if (value) {
-      return value;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error('waitFor timed out');
-}
 
 function configGetFlow({ appPort, daprPort }) {
   return [
@@ -104,8 +93,8 @@ async function startFlow(t, respondents = []) {
   t.after(() => nr.stop());
   const appPort = await freePort();
   await nr.deploy(configGetFlow({ appPort, daprPort: dapr.port }));
-  await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await dapr.waitForRequest(healthPath);
+  await delay(50);
   return { dapr, nr };
 }
 
@@ -178,7 +167,7 @@ test('configuration get calls fail fast while the sidecar is unhealthy, with no 
   t.after(() => nr.stop());
   const appPort = await freePort();
   await nr.deploy(configGetFlow({ appPort, daprPort: dapr.port }));
-  await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
+  await dapr.waitForRequest(healthPath);
 
   const started = Date.now();
   const response = await post(nr, {});

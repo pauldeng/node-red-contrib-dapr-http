@@ -29,6 +29,7 @@ const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpe
 const { startOtelCollector } = require('../helpers/otel-collector');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const OTEL_LOGGING_HANDLER = `, otel: { level: 'debug', metrics: false, audit: false, handler: require('@pauldeng/node-red-contrib-dapr-http/logging') }`;
 
@@ -200,7 +201,7 @@ return msg;`,
     let spans = [];
     let logRecords = [];
     for (let attempt = 0; attempt < 20 && (!spans.length || !logRecords.length); attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await delay(500);
       spans = await collector.readSpans();
       logRecords = await collector.readLogRecords();
     }
@@ -304,7 +305,7 @@ return msg;`,
       !recoveredLogRecords.some((r) => r.body?.stringValue === 'processing subscribed order 3');
       attempt += 1
     ) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await delay(500);
       recoveredLogRecords = await collector.readLogRecords();
     }
     assert.ok(

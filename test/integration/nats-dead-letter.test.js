@@ -1,7 +1,7 @@
 'use strict';
 
 // Confirmed limitation: deadLetterTopic stalls with the pubsub.jetstream
-// component in Dapr 1.18.1. This is NOT the Milestone 8/Redis-tier behavior
+// component in Dapr 1.18.2. This is NOT the Milestone 8/Redis-tier behavior
 // (immediate DLT publish on Resiliency exhaustion, proven working in
 // dead-letter.test.js) — it was the ORIGINAL intent here too, until real
 // daprd debug logs showed otherwise.
@@ -37,6 +37,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const { freePort } = require('../helpers/node-red');
 const { ContainerNodeRed } = require('../helpers/node-red-container');
@@ -47,7 +48,7 @@ const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
 
 test(
-  'deadLetterTopic stalls with real NATS JetStream in Dapr 1.18.1: bounded wait sees one delivery attempt and no dead-letter message',
+  'deadLetterTopic stalls with real NATS JetStream in Dapr 1.18.2: bounded wait sees one delivery attempt and no dead-letter message',
   { timeout: 60000 },
   async (t) => {
     const appId = 'it-nats-dlt';
@@ -193,7 +194,7 @@ return msg;`,
     // window, neither a redelivery (this component's own ackWait/maxDeliver
     // never gets a chance to run while the handler is stalled) nor a
     // dead-letter message arrives.
-    await new Promise((resolve) => setTimeout(resolve, 8000));
+    await delay(8000);
     const deliveryAttempts = capture.received.filter((r) => r && r.kind === 'delivery-attempt');
     const dlqMessages = capture.received.filter((r) => r && r.kind === 'dlq');
     assert.equal(

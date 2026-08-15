@@ -15,6 +15,7 @@ const { execFile } = require('node:child_process');
 const { httpRequest } = require('./http');
 const { freePort } = require('./node-red');
 const { execFileP, ensureImage } = require('./docker');
+const { setTimeout: delay } = require('node:timers/promises');
 
 // Pinned by digest — see test/helpers/integration.js for the re-pin procedure.
 const OTEL_COLLECTOR_IMAGE =
@@ -131,7 +132,7 @@ async function startOtelCollector({ port: fixedPort } = {}) {
       const res = await httpRequest(`http://127.0.0.1:${port}/v1/traces`, { timeoutMs: 1000 });
       ready = res.status === 405 || res.status === 400;
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await delay(200);
     }
   }
   if (!ready) {
