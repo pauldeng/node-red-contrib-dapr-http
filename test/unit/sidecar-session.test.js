@@ -126,6 +126,27 @@ test('isReady() waits for the first probe, then reports current health', async (
   );
 });
 
+test('isReady() reports not-ready rather than rejecting, whatever the connection does', async () => {
+  // isReady() is the first await in every input handler, ahead of that
+  // handler's try/catch: a rejection here would strand the message with no
+  // done() and no Catch node able to see it.
+  const rejecting = {
+    ...fakeConnection(),
+    whenHealthKnown: async () => {
+      throw new Error('probe exploded');
+    },
+  };
+  assert.equal(await openSidecarSession(fakeNode(), rejecting).isReady(), false);
+
+  const throwing = {
+    ...fakeConnection(),
+    isSidecarHealthy: () => {
+      throw new Error('health check exploded');
+    },
+  };
+  assert.equal(await openSidecarSession(fakeNode(), throwing).isReady(), false);
+});
+
 test('call() hands the client the connection-derived transport options', async () => {
   const session = openSidecarSession(fakeNode(), fakeConnection());
   const transport = await session.call(async (t) => t);

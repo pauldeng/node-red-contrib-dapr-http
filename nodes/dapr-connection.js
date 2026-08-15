@@ -2,8 +2,9 @@
 
 const { resolveOptions } = require('../lib/options');
 const { acquireListener } = require('../lib/app-channel');
-const { DaprError, ErrorCodes } = require('../lib/errors');
-const { fingerprint, discoveryEntry } = require('../lib/subscriptions');
+const { ErrorCodes } = require('../lib/errors');
+const { createConnectionRegistry } = require('../lib/connection-registry');
+const { connectionStatus } = require('../lib/connection-status');
 const { PendingRegistry } = require('../lib/pending');
 const { sidecarRequest } = require('../lib/sidecar-http');
 const { getMetadata } = require('../lib/metadata-client');
@@ -190,53 +191,35 @@ module.exports = function registerDaprConnection(RED) {
     };
 
     // ---- Subscription + service hub: subscribe/ack/service/response nodes
-    // coordinate here. ----
-    const subscriptions = new Map(); // nodeId -> { definition, handler }
-    const services = new Map(); // nodeId -> { definition, handler }
-    const internalRoutes = new Map(); // nodeId -> { definition, handler }
+    // coordinate here. The aggregation itself lives in lib/, so this file
+    // only wires it to Node-RED's own lifecycle. ----
+    const registry = createConnectionRegistry();
     const pendingAcks = new PendingRegistry({ max: options.limits.maxPending });
     const pendingResponses = new PendingRegistry({ max: options.limits.maxPending });
-    let desiredFingerprint = fingerprint([]);
+    let desiredFingerprint = registry.activation().fingerprint;
     let activateScheduled = false;
     let warnedFingerprint = null; // rate-limits the restart warning to once per change
 
     const refreshStatus = () => {
-      if (!node.lease) {
-        node.status({ fill: 'grey', shape: 'ring', text: 'connecting' });
-        return;
-      }
-      if (!healthy) {
-        node.status({ fill: 'red', shape: 'ring', text: 'sidecar unavailable' });
-        return;
-      }
-      const served = node.lease.servedFingerprint();
-      // A restart is required whenever the set last SERVED from /dapr/subscribe
-      // differs from the current one — including removing the last subscription
-      // (empty set). "Served", not "fetched by daprd": the app channel cannot
-      // attribute a fetch to a caller, so a non-daprd fetch (an operator's curl,
-      // a probe) clears this warning too, while daprd stays stale. That is a
-      // documented operator footgun, not something this status can detect — see
-      // lib/app-channel.js and docs/subscriptions.md.
-      if (served !== null && served !== desiredFingerprint) {
+      const { status, restartRequired } = connectionStatus({
+        hasLease: Boolean(node.lease),
+        healthy,
+        servedFingerprint: node.lease ? node.lease.servedFingerprint() : null,
+        desiredFingerprint,
+        subscriptionCount: registry.subscriptionCount,
+      });
+      // Warn once per change, not once per status refresh.
+      if (restartRequired) {
         if (warnedFingerprint !== desiredFingerprint) {
           warnedFingerprint = desiredFingerprint;
           node.warn(
             'subscription definitions changed; restart the Dapr sidecar so it re-reads /dapr/subscribe'
           );
         }
-        node.status({
-          fill: 'yellow',
-          shape: 'ring',
-          text: 'restart sidecar: subscriptions changed',
-        });
-        return;
+      } else {
+        warnedFingerprint = null;
       }
-      warnedFingerprint = null;
-      if (served === null && subscriptions.size > 0) {
-        node.status({ fill: 'yellow', shape: 'ring', text: 'waiting for sidecar discovery' });
-        return;
-      }
-      node.status({ fill: 'green', shape: 'dot', text: 'connected' });
+      node.status(status);
     };
 
     // Atomically re-activate the app channel with the aggregated subscription
@@ -245,39 +228,9 @@ module.exports = function registerDaprConnection(RED) {
       if (!node.lease) {
         return;
       }
-      const defs = [...subscriptions.values()].map((entry) => entry.definition);
-      desiredFingerprint = fingerprint(defs);
-      // One app-channel route per subscription route (each CEL rule plus the
-      // default/fallback), all sharing the subscription's single handler — the
-      // handler distinguishes which route matched from ctx.path.
-      const deliveryRoutes = [...subscriptions.values()].flatMap(({ definition, handler }) =>
-        definition.routes.map((route) => ({
-          method: 'POST',
-          path: route.path,
-          kind: 'internal',
-          handler,
-        }))
-      );
-      // Service methods are app-channel routes but not part of the Dapr
-      // subscription set, so they are neither advertised nor fingerprinted.
-      const serviceRoutes = [...services.values()].map(({ definition, handler }) => ({
-        method: definition.verb,
-        path: definition.path,
-        kind: 'service',
-        handler,
-      }));
-      const dynamicInternalRoutes = [...internalRoutes.values()].map(({ definition, handler }) => ({
-        method: definition.verb,
-        path: definition.path,
-        kind: 'internal',
-        handler,
-      }));
-      node.lease.activate({
-        subscriptions: defs.map(discoveryEntry),
-        routes: [...deliveryRoutes, ...serviceRoutes, ...dynamicInternalRoutes],
-        fingerprint: desiredFingerprint,
-        onDiscovery: refreshStatus,
-      });
+      const activation = registry.activation();
+      desiredFingerprint = activation.fingerprint;
+      node.lease.activate({ ...activation, onDiscovery: refreshStatus });
       refreshStatus();
     };
 
@@ -294,53 +247,30 @@ module.exports = function registerDaprConnection(RED) {
       });
     };
 
-    node.registerSubscription = (definition, handler) => {
-      for (const { definition: existing } of subscriptions.values()) {
-        if (
-          existing.nodeId !== definition.nodeId &&
-          existing.pubsubName === definition.pubsubName &&
-          existing.topic === definition.topic
-        ) {
-          throw new DaprError(
-            ErrorCodes.INVALID_OPTIONS,
-            `duplicate subscription for ${definition.pubsubName}/${definition.topic}`
-          );
-        }
-      }
-      subscriptions.set(definition.nodeId, { definition, handler });
+    // Each register* returns the registry's own remove function wrapped so a
+    // registration or removal re-activates the app channel.
+    const reactivateOn = (remove) => () => {
+      remove();
       scheduleActivation();
-      return () => {
-        subscriptions.delete(definition.nodeId);
-        scheduleActivation();
-      };
+    };
+
+    node.registerSubscription = (definition, handler) => {
+      const remove = registry.addSubscription(definition, handler);
+      scheduleActivation();
+      return reactivateOn(remove);
+    };
+    node.registerService = (definition, handler) => {
+      const remove = registry.addRoute('service', definition, handler);
+      scheduleActivation();
+      return reactivateOn(remove);
+    };
+    node.registerInternalRoute = (definition, handler) => {
+      const remove = registry.addRoute('internal', definition, handler);
+      scheduleActivation();
+      return reactivateOn(remove);
     };
     node.addPendingAck = (ackId, ackOptions) => pendingAcks.add(ackId, ackOptions);
     node.settleAck = (ackId, status) => pendingAcks.settle(ackId, status);
-
-    const registerRoute = (registry, definition, handler, label) => {
-      for (const { definition: existing } of [...services.values(), ...internalRoutes.values()]) {
-        if (
-          existing.nodeId !== definition.nodeId &&
-          existing.verb === definition.verb &&
-          existing.path === definition.path
-        ) {
-          throw new DaprError(
-            ErrorCodes.INVALID_OPTIONS,
-            `duplicate ${label} ${definition.verb} ${definition.path}`
-          );
-        }
-      }
-      registry.set(definition.nodeId, { definition, handler });
-      scheduleActivation();
-      return () => {
-        registry.delete(definition.nodeId);
-        scheduleActivation();
-      };
-    };
-    node.registerService = (definition, handler) =>
-      registerRoute(services, definition, handler, 'service method');
-    node.registerInternalRoute = (definition, handler) =>
-      registerRoute(internalRoutes, definition, handler, 'internal route');
     node.addPendingResponse = (id, responseOptions) => pendingResponses.add(id, responseOptions);
     node.settleResponse = (id, response) => pendingResponses.settle(id, response);
 
