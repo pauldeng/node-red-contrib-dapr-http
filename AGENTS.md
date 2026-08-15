@@ -29,14 +29,13 @@ those citations.
 
 ## Commands
 
-`npm test` (unit) · `npm run test:coverage` · `npm run test:runtime` (real
-Node-RED child process) · `npm run test:integration` (real daprd + NATS/Redis,
-serialized) · `npm run test:e2e` (Playwright) · `npm run lint` ·
-`npm run format`.
+Test tiers, cheapest first: `npm test` (unit) · `npm run test:coverage` ·
+`npm run test:runtime` · `npm run test:integration` · `npm run test:e2e`; plus
+`npm run lint` and `npm run format`. Full table in `docs/development.md`, what
+each tier proves in `docs/testing.md`.
 
-`npm run test:integration:memorydb` is optional and self-skips unless
-`MEMORYDB_*` are set; never commit those credentials. Keep this list in step
-with `package.json`; see `docs/testing.md` for what each tier proves.
+`npm run test:integration:memorydb` self-skips unless `MEMORYDB_*` are set —
+never commit those credentials.
 
 ## Layout
 
@@ -44,9 +43,9 @@ with `package.json`; see `docs/testing.md` for what each tier proves.
 import. `nodes/*.js` + `*.html` are thin wrappers over it. Coverage is scoped to
 `lib/`, so logic left in a wrapper is logic no coverage gate can see.
 
-Create a file when something first needs it. There is deliberately **no
-versioned design or plan document** — anything durable belongs here or in
-`docs/`. Never cite a file a fresh clone does not contain.
+There is deliberately **no versioned design or plan document** — anything
+durable belongs here or in `docs/`. Never cite a file a fresh clone does not
+contain.
 
 ## Invariants — do not violate
 
@@ -74,6 +73,9 @@ there is the justification, so do not relax one because it looks incidental.
   without that qualification.
 - Reject `dapr-caller-app-id` on internal routes; preserve it for service
   methods.
+- The token authenticates daprd to the app; it does not authorize a caller.
+  Dapr `accessControl` needs mTLS, which this package does not stand up —
+  never document it as a working caller-authorization control.
 - Never return stack traces, tokens, Node-RED configuration, or correlation
   state over HTTP.
 - Editor-support endpoints live on `RED.httpAdmin` behind the narrowest
@@ -83,8 +85,8 @@ there is the justification, so do not relax one because it looks incidental.
 
 Red → green → refactor: write a focused failing test, run it and record the
 expected failure, implement the smallest passing change, run focused then
-affected tests, format and lint. Target >= 90% line/function and >= 85% branch
-coverage on `lib/`.
+affected tests, format and lint. `npm run test:coverage` enforces the `lib/`
+coverage bar and fails on its own if you miss it.
 
 Conventional commit subjects (`feat:`, `test:`, `docs:`, `chore:`), one
 coherent purpose each. Before any commit: `git diff --check`, lint, format

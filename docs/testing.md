@@ -284,8 +284,8 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
   caller's identity from a client cert and evaluates every caller as `id: ""` —
   every access-control policy collapses to its `defaultAction`, regardless of
   the caller's real app-id. This is a genuine Dapr constraint, confirmed
-  against real daprd 1.18.2 debug logs, not a harness bug. See `AGENTS.md`'s
-  security section for the operator-facing consequence; standing up
+  against real daprd 1.18.2 debug logs, not a harness bug. See `docs/security.md`
+  for the operator-facing consequence; standing up
   Sentry/mTLS to test a real allow/deny split is future work.
 - **`rawPayload` is two independent flags, confirmed against real daprd
   (integration):** a raw _subscription_ alone does not strip the CloudEvent
