@@ -5,6 +5,7 @@ const { context, SpanKind } = require('@opentelemetry/api');
 const { getConfiguration } = require('../lib/configuration-client');
 const { DaprError, ErrorCodes } = require('../lib/errors');
 const { prepareConfigurationGet } = require('../lib/configuration-messages');
+const { requireConnection, openSidecarSession } = require('../lib/sidecar-session');
 const { getTracer, endSpan } = require('../lib/telemetry');
 
 module.exports = function registerDaprConfigGet(RED) {
@@ -12,36 +13,13 @@ module.exports = function registerDaprConfigGet(RED) {
     RED.nodes.createNode(this, config);
     const node = this;
     const connection = RED.nodes.getNode(config.connection);
-
-    if (
-      !connection?.options ||
-      typeof connection.isSidecarHealthy !== 'function' ||
-      typeof connection.whenHealthKnown !== 'function' ||
-      typeof connection.onSidecarHealth !== 'function'
-    ) {
-      node.status({ fill: 'red', shape: 'ring', text: 'missing connection' });
-      node.on('input', (_msg, _send, done) => {
-        done(new DaprError(ErrorCodes.INVALID_OPTIONS, 'Dapr connection is unavailable'));
-      });
+    if (!requireConnection(node, connection)) {
       return;
     }
-
-    const removeHealthListener = connection.onSidecarHealth((healthy) =>
-      node.status(
-        healthy
-          ? { fill: 'green', shape: 'dot', text: 'ready' }
-          : { fill: 'red', shape: 'ring', text: 'sidecar unavailable' }
-      )
-    );
-
-    const inflight = new Set(); // AbortControllers for get calls in flight
+    const session = openSidecarSession(node, connection);
 
     node.on('input', async (msg, send, done) => {
-      // Wait for the connection's first health probe to land before judging the
-      // sidecar down, so a message sent immediately after deploy is not failed
-      // against a sidecar that is actually up.
-      await connection.whenHealthKnown();
-      if (!connection.isSidecarHealthy()) {
+      if (!(await session.isReady())) {
         done(new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'Dapr sidecar is unavailable'));
         return;
       }
@@ -73,19 +51,8 @@ module.exports = function registerDaprConfigGet(RED) {
         context.active()
       );
 
-      const controller = new AbortController();
-      inflight.add(controller);
       try {
-        const result = await getConfiguration(
-          {
-            baseUrl: connection.options.outbound.baseUrl,
-            token: connection.options.daprApiToken,
-            timeoutMs: connection.options.limits.requestTimeoutMs,
-            signal: controller.signal,
-            maxResponseBytes: connection.options.limits.bodyLimitBytes,
-          },
-          request
-        );
+        const result = await session.call((transport) => getConfiguration(transport, request));
         msg.payload = result.items;
         msg.dapr = {
           ...dapr,
@@ -105,19 +72,7 @@ module.exports = function registerDaprConfigGet(RED) {
             : 'sidecar unavailable';
         node.status({ fill: 'red', shape: 'ring', text });
         done(err);
-      } finally {
-        inflight.delete(controller);
       }
-    });
-
-    node.on('close', (_removed, done) => {
-      removeHealthListener();
-      // Abort any get call still in flight so it cannot outlive the node.
-      for (const controller of inflight) {
-        controller.abort();
-      }
-      inflight.clear();
-      done();
     });
   }
 

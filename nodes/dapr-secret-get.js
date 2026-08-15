@@ -6,6 +6,7 @@ const { getSecret } = require('../lib/secret-client');
 const { DaprError, ErrorCodes } = require('../lib/errors');
 const { prepareSecretGet, resolveSecretProperty } = require('../lib/secret-messages');
 const { getTracer, endSpan } = require('../lib/telemetry');
+const { requireConnection, openSidecarSession } = require('../lib/sidecar-session');
 
 const STATUS_TEXT_BY_CODE = {
   [ErrorCodes.INVALID_MESSAGE]: 'invalid message',
@@ -20,36 +21,13 @@ module.exports = function registerDaprSecretGet(RED) {
     RED.nodes.createNode(this, config);
     const node = this;
     const connection = RED.nodes.getNode(config.connection);
-
-    if (
-      !connection?.options ||
-      typeof connection.isSidecarHealthy !== 'function' ||
-      typeof connection.whenHealthKnown !== 'function' ||
-      typeof connection.onSidecarHealth !== 'function'
-    ) {
-      node.status({ fill: 'red', shape: 'ring', text: 'missing connection' });
-      node.on('input', (_msg, _send, done) => {
-        done(new DaprError(ErrorCodes.INVALID_OPTIONS, 'Dapr connection is unavailable'));
-      });
+    if (!requireConnection(node, connection)) {
       return;
     }
-
-    const removeHealthListener = connection.onSidecarHealth((healthy) =>
-      node.status(
-        healthy
-          ? { fill: 'green', shape: 'dot', text: 'ready' }
-          : { fill: 'red', shape: 'ring', text: 'sidecar unavailable' }
-      )
-    );
-
-    const inflight = new Set(); // AbortControllers for get calls in flight
+    const session = openSidecarSession(node, connection);
 
     node.on('input', async (msg, send, done) => {
-      // Wait for the connection's first health probe to land before judging the
-      // sidecar down, so a message sent immediately after deploy is not failed
-      // against a sidecar that is actually up.
-      await connection.whenHealthKnown();
-      if (!connection.isSidecarHealthy()) {
+      if (!(await session.isReady())) {
         done(new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'Dapr sidecar is unavailable'));
         return;
       }
@@ -79,19 +57,8 @@ module.exports = function registerDaprSecretGet(RED) {
         context.active()
       );
 
-      const controller = new AbortController();
-      inflight.add(controller);
       try {
-        const result = await getSecret(
-          {
-            baseUrl: connection.options.outbound.baseUrl,
-            token: connection.options.daprApiToken,
-            timeoutMs: connection.options.limits.requestTimeoutMs,
-            signal: controller.signal,
-            maxResponseBytes: connection.options.limits.bodyLimitBytes,
-          },
-          request
-        );
+        const result = await session.call((transport) => getSecret(transport, request));
         if (!RED.util.setMessageProperty(msg, property, result.data, true)) {
           throw new DaprError(ErrorCodes.INVALID_MESSAGE, 'secret output property cannot be set');
         }
@@ -113,19 +80,7 @@ module.exports = function registerDaprSecretGet(RED) {
           text: STATUS_TEXT_BY_CODE[err.code] || 'secret get failed',
         });
         done(err);
-      } finally {
-        inflight.delete(controller);
       }
-    });
-
-    node.on('close', (_removed, done) => {
-      removeHealthListener();
-      // Abort any get call still in flight so it cannot outlive the node.
-      for (const controller of inflight) {
-        controller.abort();
-      }
-      inflight.clear();
-      done();
     });
   }
 
