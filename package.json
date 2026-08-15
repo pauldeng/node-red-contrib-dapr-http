@@ -1,6 +1,6 @@
 {
   "name": "@pauldeng/node-red-contrib-dapr-http",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Node-RED nodes for Dapr pub/sub, service invocation, state management, dynamic configuration, output bindings, and secrets over HTTP.",
   "license": "MIT",
   "author": {
