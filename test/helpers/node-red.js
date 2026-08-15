@@ -13,18 +13,63 @@ const PKG = require(path.join(WORKSPACE, 'package.json'));
 const { setTimeout: delay } = require('node:timers/promises');
 const NODE_RED_BIN = path.join(WORKSPACE, 'node_modules', 'node-red', 'red.js');
 
-// Ask the OS for a currently-free loopback port. A small TOCTOU window exists
-// between close and Node-RED binding it; acceptable for local test runs, and a
-// failed bind surfaces as an early process exit that start() reports.
-function freePort() {
-  return new Promise((resolve, reject) => {
+// A free loopback port for the child Node-RED's admin API, and for each flow's
+// Dapr app channel.
+//
+// Deliberately NOT listen(0). That returns a port from the OS ephemeral range —
+// the same range the OS hands out spontaneously to outbound sockets — so in the
+// window between this probe closing and the real listener binding, a busy CI
+// runner loses the port to something else. The resulting EADDRINUSE does not
+// stop Node-RED, because the app channel binds inside a deployed flow: the
+// connection node logs the error, no health poll ever runs, and the test hangs
+// until some unrelated waiter times out with a message that never names the
+// port. Reproduced by squatting the port — the failure is byte-identical to the
+// CI one ("waitForRequest timed out ... (saw: no requests)"), which is what
+// makes it worth removing rather than waiting longer for.
+//
+// Picking below the ephemeral floor closes that race: nothing is assigned there
+// spontaneously, so the only possible claimant is another caller here — covered
+// by the handed-out set and the retry.
+const PORT_FLOOR = 20000;
+const HANDED_OUT = new Set();
+
+async function ephemeralFloor() {
+  try {
+    const range = await fsp.readFile('/proc/sys/net/ipv4/ip_local_port_range', 'utf8');
+    const low = Number(range.trim().split(/\s+/)[0]);
+    if (Number.isInteger(low) && low > PORT_FLOOR) {
+      return low;
+    }
+  } catch {
+    // Not Linux, or the knob is unreadable: fall back to the usual default.
+  }
+  return 32768;
+}
+
+function bindable(port) {
+  return new Promise((resolve) => {
     const srv = net.createServer();
-    srv.on('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
+    srv.once('error', () => resolve(false));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(true)));
   });
+}
+
+async function freePort(attempts = 50) {
+  const ceiling = Math.min(await ephemeralFloor(), 32768);
+  for (let i = 0; i < attempts; i += 1) {
+    const port = PORT_FLOOR + Math.floor(Math.random() * (ceiling - PORT_FLOOR));
+    if (HANDED_OUT.has(port)) {
+      continue;
+    }
+    // Serial by design: each probe must settle before the next candidate.
+    if (await bindable(port)) {
+      HANDED_OUT.add(port);
+      return port;
+    }
+  }
+  throw new Error(
+    `freePort: no free loopback port in [${PORT_FLOOR}, ${ceiling}) in ${attempts} tries`
+  );
 }
 
 function settingsSource(uiPort, { loggingExtra = '' } = {}) {
