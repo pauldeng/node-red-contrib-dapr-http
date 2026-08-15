@@ -10,7 +10,7 @@ if the component is still named `pubsub`, matching the node defaults in the
 flow.
 
 One caveat about this quickstart's broker, worth knowing before you build on it:
-with the pinned Dapr 1.18.1 runtime, do not use `deadLetterTopic` with NATS
+with the pinned Dapr 1.18.2 runtime, do not use `deadLetterTopic` with NATS
 JetStream. Delivery stalls before the dead-letter message arrives — a real
 integration test observes exactly that. None of the example flows set a
 dead-letter topic, so the quickstart is unaffected; if you add one later, use

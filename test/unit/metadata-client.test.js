@@ -34,7 +34,7 @@ test('getMetadata issues GET /v1.0/metadata', async (t) => {
     200,
     JSON.stringify({
       id: 'my-app',
-      runtimeVersion: '1.18.1',
+      runtimeVersion: '1.18.2',
       components: [
         { name: 'pubsub', type: 'pubsub.redis', version: 'v1', capabilities: ['BULK_PUBLISH'] },
       ],
@@ -52,7 +52,7 @@ test('getMetadata issues GET /v1.0/metadata', async (t) => {
   assert.equal(received.headers['dapr-api-token'], 'realtoken');
   assert.deepEqual(result.data, {
     id: 'my-app',
-    runtimeVersion: '1.18.1',
+    runtimeVersion: '1.18.2',
     components: [{ name: 'pubsub', type: 'pubsub.redis' }],
     componentCount: 1,
     subscriptionCount: 1,

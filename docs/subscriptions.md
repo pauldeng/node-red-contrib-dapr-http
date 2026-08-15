@@ -8,7 +8,7 @@ own.
 
 Dapr fetches programmatic subscriptions from `GET /dapr/subscribe` exactly
 once, at `daprd` startup, and caches them for the sidecar's lifetime. Dapr
-1.18.1 has no endpoint to make it re-fetch. If a flow changes what it would
+1.18.2 has no endpoint to make it re-fetch. If a flow changes what it would
 now report at `/dapr/subscribe`, daprd keeps acting on the stale definition
 until it's restarted — there is no way to push the update to a running
 sidecar.
@@ -24,7 +24,7 @@ what decides whether a restart is needed.
 
 ## NATS JetStream limitation
 
-With the pinned Dapr 1.18.1 runtime, do not use `deadLetterTopic` with NATS
+With the pinned Dapr 1.18.2 runtime, do not use `deadLetterTopic` with NATS
 JetStream. The real integration test observes one delivery and then a stall
 before the dead-letter message arrives. Use Redis or broker-side dead-letter
 handling instead. The JetStream stream must also exist before the component

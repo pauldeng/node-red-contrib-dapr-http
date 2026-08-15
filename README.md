@@ -184,7 +184,7 @@ matching name/type unchanged. See `docs/deployment.md`.
 
 The JetStream stream must exist before the component is used; see
 `docs/deployment.md` for the repository's provisioning command. With the
-pinned Dapr 1.18.1 runtime, do not use `deadLetterTopic` with NATS JetStream:
+pinned Dapr 1.18.2 runtime, do not use `deadLetterTopic` with NATS JetStream:
 the real integration test observes delivery stall before the dead-letter
 message arrives. Use Redis or broker-side dead-letter handling instead;
 details are in `docs/subscriptions.md`.

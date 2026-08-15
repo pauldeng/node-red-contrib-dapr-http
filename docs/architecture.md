@@ -50,7 +50,7 @@ outbound request.
 ## Listener lifecycle across redeploy
 
 Dapr fetches programmatic subscriptions once at `daprd` startup and caches
-them; there is no refresh endpoint in Dapr 1.18.1. A `dapr-connection` node
+them; there is no refresh endpoint in Dapr 1.18.2. A `dapr-connection` node
 is a transient Node-RED object recreated on every deploy, so the listener
 itself is owned by a module-scoped registry (`lib/app-channel.js`)
 independent of any one node instance:

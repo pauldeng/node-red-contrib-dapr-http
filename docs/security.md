@@ -60,7 +60,7 @@ authorize _which app-id_ may invoke a `dapr-service` method. It only works
 when mTLS is enabled between sidecars: without it, daprd cannot read a
 caller's identity from a client certificate, evaluates every caller as
 `id: ""`, and every policy collapses to its `defaultAction` regardless of the
-caller's real app-id. This was confirmed against real daprd 1.18.1 in
+caller's real app-id. This was confirmed against real daprd 1.18.2 in
 `test/integration/acl.test.js`.
 
 This package does not stand up mTLS or a Sentry service anywhere, so

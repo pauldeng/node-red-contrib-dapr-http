@@ -1,6 +1,6 @@
 'use strict';
 
-// Real daprd 1.18.1 + a real secretstores.local.file component -- secrets
+// Real daprd 1.18.2 + a real secretstores.local.file component -- secrets
 // need no broker or store at all (mirrors acl/invoke/shutdown/binding-out's
 // own broker-agnostic setup), so this belongs in the test:integration:dapr
 // bucket, not test:integration:redis.
