@@ -13,6 +13,10 @@ const { preparePublish } = require('../../lib/messages');
 const { prepareStateSave } = require('../../lib/state-messages');
 const { prepareBindingRequest } = require('../../lib/binding-messages');
 const { prepareSecretGet, resolveSecretProperty } = require('../../lib/secret-messages');
+const {
+  prepareConfigurationGet,
+  prepareConfigurationSubscribe,
+} = require('../../lib/configuration-messages');
 const { normalisePropertyExpression } = require('@node-red/util').util;
 const { buildSubscription } = require('../../lib/subscriptions');
 const { parseRequestHeaders } = require('../../lib/http-headers');
@@ -282,6 +286,20 @@ test('pub/sub metadata: both editors match their runtime normalizer', () => {
     label: 'dapr-secret-get metadata',
     editor: loadEditorValidator('dapr-secret-get.html', 'metadata'),
     runtime: (metadata) => prepareSecretGet({ storeName: 's', key: 'k', metadata }, {}),
+    cases: METADATA,
+    mode: 'exact',
+  });
+  assertContract({
+    label: 'dapr-config-get metadata',
+    editor: loadEditorValidator('dapr-config-get.html', 'metadata'),
+    runtime: (metadata) => prepareConfigurationGet({ storeName: 's', keys: '', metadata }, {}),
+    cases: METADATA,
+    mode: 'exact',
+  });
+  assertContract({
+    label: 'dapr-config-subscribe metadata',
+    editor: loadEditorValidator('dapr-config-subscribe.html', 'metadata'),
+    runtime: (metadata) => prepareConfigurationSubscribe({ storeName: 's', keys: 'k', metadata }),
     cases: METADATA,
     mode: 'exact',
   });
