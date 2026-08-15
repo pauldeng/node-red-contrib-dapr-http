@@ -34,7 +34,7 @@ async function startStubApp() {
 // the per-appId allow rule for "allowed-caller" in config-acl.yaml is never
 // even consulted, and every caller gets the same defaultAction (deny) no
 // matter what app-id it claims. This suite proves that current, documented
-// gap (see AGENTS.md's security section) rather than a working allow/deny
+// gap (see docs/invariants.md's security section) rather than a working allow/deny
 // split, which would require standing up Sentry + mTLS — out of scope for
 // now. Confirmed via daprd debug logs: "Error while reading spiffe id from
 // client cert. applying default global policy action".

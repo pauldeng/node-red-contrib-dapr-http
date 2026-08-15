@@ -261,6 +261,7 @@ See `docs/security.md` for the full picture.
 
 ## More documentation
 
+- `docs/invariants.md` — the rules this package will not break, and why.
 - `docs/architecture.md` — how the pieces fit together.
 - `docs/security.md` — tokens, ACLs, and the mTLS gap in detail.
 - `docs/deployment.md` — container/sidecar topology recipes.

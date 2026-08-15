@@ -190,7 +190,7 @@ test('the package ships only runtime files, and declares itself a Node-RED packa
   // Node-RED's own packaging guidance requires this keyword.
   assert.ok(pkg.keywords.includes('node-red'));
   // Runtime dependencies are pinned and deliberately minimal, not zero (see
-  // AGENTS.md's "Stack (pinned)"): only the official OpenTelemetry packages
+  // AGENTS.md's "Stack"): only the official OpenTelemetry packages
   // this package's own optional tracing integration needs. Every call to the
   // sidecar itself still goes through lib/sidecar-http.js with no HTTP
   // client of its own. Asserting the exact set, not just "some dependencies

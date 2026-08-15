@@ -356,7 +356,7 @@ Two-part policy:
 - **Package gate:** `npm audit --omit=dev` must report zero vulnerabilities. It
   covers everything the package ships: the official OpenTelemetry packages
   (`@opentelemetry/api`, `sdk-trace-node`, `exporter-trace-otlp-http`,
-  `resources` — see `AGENTS.md`'s "Stack (pinned)" for why runtime
+  `resources` — see `AGENTS.md`'s "Stack" for why runtime
   dependencies are pinned and deliberately minimal here, not zero) and
   nothing else. Zero vulnerabilities in that tree as of this milestone;
   re-verify whenever those versions move, the same as any other pinned

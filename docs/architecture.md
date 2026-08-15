@@ -159,7 +159,7 @@ sidecar) and by the integration tier (the same publishes against real
 
 This package's own runtime dependencies are the official OpenTelemetry
 packages (see "Telemetry" below) — pinned and deliberately minimal, not zero:
-see `AGENTS.md`'s "Stack (pinned)" for the policy. Talking to the sidecar
+see `AGENTS.md`'s "Stack" for the policy. Talking to the sidecar
 itself is unaffected: every publish, invoke, state, and health-poll call still goes
 through `lib/sidecar-http.js` alone, with no HTTP client of its own.
 

@@ -1,217 +1,119 @@
-# @pauldeng/node-red-contrib-dapr-http — Engineering Guide
+# @pauldeng/node-red-contrib-dapr-http
 
-Node-RED nodes that publish and receive Dapr pub/sub messages, invoke and
-expose Dapr services, and manage state through a Dapr sidecar. HTTP over TCP
-only. **Published publicly** to npm as `@pauldeng/node-red-contrib-dapr-http`
-under the MIT license, and listed in the Node-RED library — so the README,
-node help, and examples are consumer-facing documentation, not internal
-notes, and a breaking change to a node's config fields or `msg.dapr` contract
-is a breaking change for strangers.
+Node-RED nodes that reach a Dapr sidecar over its HTTP API only: pub/sub,
+service invocation, state, configuration, output bindings, and secrets.
 
-This file is the single, provider-neutral source of durable instructions for
-any engineer or coding agent working in this repository. `CLAUDE.md` imports it
-verbatim (`@AGENTS.md`) — do not duplicate guidance elsewhere.
+**Published publicly** to npm and listed in the Node-RED library. The README,
+node help, and examples are consumer-facing documentation, and a change to a
+node's config fields or the `msg.dapr` contract breaks strangers' flows.
 
-## Stack (pinned)
+This file is the durable instruction source for any engineer or coding agent
+here; `CLAUDE.md` imports it verbatim (`@AGENTS.md`). Keep it short — every
+token loads on every request. Detail belongs in `docs/`, linked below.
 
-Node.js >= 22.9 · Node-RED 5.0.4 (`>=5.0.1 <6`) · Dapr runtime 1.18.2. A few
-comments cite `dapr/dapr` **source** at tag v1.18.1 — that is deliberate and
-accurate: it names the tag actually read. The behaviour each one describes is
-re-proved against whatever runtime is pinned here by the integration tier, so
-bump the pin and re-run `npm run test:integration` rather than editing those
-citations to match. Runtime
-dependencies are pinned and deliberately minimal, not zero: every call **to
-the sidecar** still goes over `node:http` (`lib/sidecar-http.js`) with no
-second HTTP client for that path, but the official OpenTelemetry JavaScript
-SDK (`@opentelemetry/*`) is accepted as this package's own optional tracing
-and application-log integration — hand-rolling a W3C context propagator and
-OTLP exporter would be exactly the kind of one-off reinvention the "why
-HTTP-only, no SDK" reasoning below exists to avoid repeating. **Any other new
-runtime dependency requires the maintainer's explicit approval before it is
-added** — propose it and wait, never add one speculatively. Tests use the
-native `node:test` runner (no Mocha/Jest/Vitest/Sinon/Supertest and no
-`node-red-node-test-helper`).
+## Stack
 
-## Layout
+Node.js >= 22.9 · Node-RED 5.0.4 (`>=5.0.1 <6`) · Dapr runtime 1.18.2.
+Tests use the native `node:test` runner — no Mocha/Jest/Vitest/Sinon/Supertest,
+no `node-red-node-test-helper`.
 
-- `nodes/*.js` + `nodes/*.html` — thin Node-RED wrappers (runtime + editor/help).
-- `lib/*.js` — all behavior, as directly-testable modules with no Node-RED import.
-- `test/unit/` — module contract tests. `test/runtime/` — real Node-RED
-  child-process black-box tests. `test/integration/` — real daprd + Redis or
-  NATS JetStream.
-  `test/e2e/` — Playwright editor tests. `test/helpers/`, `test/fixtures/`.
-- `docs/*.md` — architecture, development, testing, security, deployment,
-  subscription runbook.
+Runtime dependencies are pinned and deliberately minimal, not zero: the
+official OpenTelemetry packages back optional tracing and log export. **Any
+other new runtime dependency needs the maintainer's explicit approval — propose
+it and wait.**
 
-Create a file only when something first needs it. The layout is a target, not
-permission to scaffold empty files.
-
-There is deliberately **no versioned design or plan document**. The original
-implementation plan and its review notes are local working notes, gitignored and
-never shipped (see `.gitignore`). They record how the package was built, which is
-history, not a contract. **This file is the contract** — anything durable belongs
-here or in `docs/`. Do not add a plan/design document to the repository, and do
-not cite one: a reference to a file a fresh clone does not contain is worse than
-no reference.
+Some comments cite `dapr/dapr` **source** at an older tag than the pinned
+runtime. That is deliberate: it names the tag actually read. Bump the pin and
+re-run `npm run test:integration` to re-prove the behaviour rather than editing
+those citations.
 
 ## Commands
 
-- `npm install` — install dependencies.
-- `npm test` — native unit tests (`node --test "test/unit/**/*.test.js"`).
-- `npm run test:coverage` — unit tests with native coverage thresholds on `lib/`.
-- `npm run test:runtime` — real Node-RED child-process harness tests.
-- `npm run test:runtime:parallel` — same runtime tests without serialized
-  test-file execution, for local iteration when the host has enough headroom.
-- `npm run test:integration` — the complete serialized gate: real daprd with
-  NATS JetStream (the primary broker) first, then real daprd with no broker
-  at all, then Redis (a secondary compatibility target). Chains
-  `test:integration:nats`, `test:integration:dapr`, and `test:integration:redis`
-  — each also runnable standalone for focused local iteration.
-- `npm run test:integration:memorydb` — **optional** tier against a real AWS
-  MemoryDB cluster (TLS, Redis ACL auth, cluster mode). Skips itself unless
-  `MEMORYDB_ENDPOINT`/`MEMORYDB_USERNAME`/`MEMORYDB_PASSWORD` are set, because it
-  needs a live cluster and VPC routing this repository cannot create. Never commit
-  those credentials: pass them through the environment, never a fixture.
-- `npm run test:e2e` — Playwright tests against the real Node-RED editor.
-- `npm run lint` / `npm run lint:fix` — ESLint 10 (correctness + security rules).
-- `npm run format` / `npm run format:check` — Prettier.
+`npm test` (unit) · `npm run test:coverage` · `npm run test:runtime` (real
+Node-RED child process) · `npm run test:integration` (real daprd + NATS/Redis,
+serialized) · `npm run test:e2e` (Playwright) · `npm run lint` ·
+`npm run format`.
 
-Keep this list in step with `package.json`.
+`npm run test:integration:memorydb` is optional and self-skips unless
+`MEMORYDB_*` are set; never commit those credentials. Keep this list in step
+with `package.json`; see `docs/testing.md` for what each tier proves.
 
-## Architecture invariants (do not violate)
+## Layout
 
-These are load-bearing. Each was verified against real daprd 1.18.2 rather than
-assumed, and each states the failure it prevents — that reasoning is the
-justification, so do not relax one because it looks incidental.
+`lib/*.js` holds all behavior as directly-testable modules with no Node-RED
+import. `nodes/*.js` + `*.html` are thin wrappers over it. Coverage is scoped to
+`lib/`, so logic left in a wrapper is logic no coverage gate can see.
 
-- **Dedicated app-channel listener.** Each `dapr-connection` owns a small
-  `node:http` server for inbound Dapr traffic (subscription discovery, pub/sub
-  delivery, service methods). Never attach Dapr routes to `RED.httpAdmin`,
-  `RED.httpNode`, or the editor port — doing so would expose the Node-RED Admin
-  API to the Dapr mesh (remote flow read/deploy) and let admin routes shadow
-  service methods.
-- **Loopback by default.** The listener binds `127.0.0.1`. A non-loopback bind is
-  allowed only by explicit configuration, requires an app API token
-  (`lib/options.js` fails closed without one), and must warn in the editor and
-  docs.
-- **One listener per connection.** Reject duplicate bind address/port with a
-  clear node status, never a crash.
-- **Stable delivery paths.** Derive delivery routes from persisted node/rule
-  IDs, never from array position or deployment generation, so an unchanged-flow
-  redeploy keeps working without restarting daprd.
-- **Subscription changes need a sidecar restart.** Dapr fetches programmatic
-  subscriptions once at startup and cannot refresh them in place. Fingerprint
-  the subscription definition; when it changes, surface a `restart sidecar`
-  status — never claim daprd is current without observing a `/dapr/subscribe`
-  fetch.
-- **Fail fast when the sidecar is down.** Do not queue; fail the current message
-  via `done(error)` and drive status from a bounded-backoff health poll of
-  `/v1.0/healthz/outbound` (outbound excludes the app channel — the right probe).
-- **HTTP-only, one outbound path.** Every outbound call — publish, service
-  invocation, state management, dynamic configuration, output bindings,
-  scoped secret retrieval, sidecar metadata, and the health poll — goes
-  through `lib/sidecar-http.js`, so there is one place where deadlines,
-  aborts, framing, and response bounds are correct. Publish, invoke, state,
-  configuration, binding, secret, and metadata calls use Node's
-  process-global keep-alive agent (centrally owned, never a per-node agent);
-  the health poll is the only caller that passes `agent: false`, so a
-  sidecar going down leaves no pooled socket behind. Do not
-  add a second HTTP client or a runtime dependency to talk to the sidecar — the
-  wire format is a handful of documented endpoints, and the previous `@dapr/dapr`
-  dependency cost 140 transitive packages plus two workarounds for one call.
-  OTLP span and application-log export (when enabled) use separate,
-  telemetry-only egress paths to a collector, not to the sidecar, so they do
-  not run through `lib/sidecar-http.js` — but they must still fail open: an
-  exporter or collector failure never fails, delays, or retries a Node-RED
-  message.
-- **Bodies are bounded in both directions.** The connection's configured body
-  limit caps what the app channel buffers from an inbound request _and_ what an
-  outbound call accepts back — an invoked app's response is the one body an
-  operator does not control. Over-size fails as `RESPONSE_TOO_LARGE`, never as
-  `SIDECAR_UNAVAILABLE`: the sidecar answered.
-- **Sidecar paths are built, never interpolated.** Any app id, method, pubsub
-  name, topic, state store/key, configuration store, binding name, or secret
-  store/key that reaches a URL is validated and percent-encoded
-  (`buildInvokePath`, `publish`, `buildStatePath`, `buildConfigurationPath`,
-  `buildBindingPath`, `buildSecretPath`), so a `..` segment can never
-  redirect a token-bearing request to another Dapr control-plane API.
-  `GET /v1.0/metadata` is the one exception with no dynamic segment at all —
-  nothing to build or interpolate.
+Create a file when something first needs it. There is deliberately **no
+versioned design or plan document** — anything durable belongs here or in
+`docs/`. Never cite a file a fresh clone does not contain.
 
-## Security boundaries
+## Invariants — do not violate
 
-- Enforce the app API token (configured credential, else `APP_API_TOKEN`) on
-  discovery, delivery, and service routes; compare in constant time. `/healthz`
-  stays unauthenticated for app health probes. **With no token configured the app
-  channel authenticates nobody** — that is allowed only on a loopback bind, and
-  the connection node warns every deploy. A non-loopback bind without a token is
-  rejected outright. Say this plainly in docs and help; never write that the token
-  is "required" without that qualification.
-- Reject `dapr-caller-app-id` on `/dapr/subscribe` and internal delivery routes
-  (a mesh caller must not treat internal endpoints as service methods). Preserve
-  it for registered service methods so flows can authorize.
-- The app API token authenticates daprd to the app; it does not authorize a
-  caller. Caller authorization for **service invocation** requires Dapr's
-  `spec.accessControl` policy — **and that policy requires mTLS to be enabled
-  between sidecars.** Without mTLS, daprd cannot read a caller's identity from
-  a client cert, evaluates every caller as `id: ""`, and every policy
-  collapses to its `defaultAction` regardless of the caller's real app-id
-  (confirmed against real daprd 1.18.2 in `test/integration/acl.test.js`).
-  This package does not currently stand up mTLS/Sentry anywhere, so
-  **`accessControl` is not a usable caller-authorization mechanism for
-  service invocation as currently deployed** — document this gap to operators
-  rather than presenting it as a working control. Wiring up mTLS (a pinned
-  `daprio/sentry` service plus trust-bundle config) is future work, not yet
-  implemented. Pub/sub topic authorization is a separate, mTLS-independent
-  mechanism (a pubsub component's own `subscriptionScopes`/
-  `publishingScopes`/`protectedTopics` metadata) — not configured by this
-  package's nodes.
+Each is load-bearing and states a failure it prevents. **Read
+`docs/invariants.md` before changing anything these touch**; the reasoning
+there is the justification, so do not relax one because it looks incidental.
+
+- Each connection owns a dedicated app-channel listener. Never attach Dapr
+  routes to `RED.httpAdmin`, `RED.httpNode`, or the editor port.
+- The listener binds loopback by default. Non-loopback requires an app API
+  token and a warning.
+- One listener per bind address/port; reject duplicates with a status, never a
+  crash.
+- Delivery paths derive from persisted node/rule IDs, never array position.
+- Subscription changes need a sidecar restart; fingerprint them and surface a
+  `restart sidecar` status.
+- When the sidecar is down, fail the message via `done(error)`. Never queue.
+- Every outbound sidecar call goes through `lib/sidecar-http.js`. No second HTTP
+  client. Telemetry export is separate and must fail open.
+- Bodies are bounded in both directions; over-size is `RESPONSE_TOO_LARGE`, not
+  `SIDECAR_UNAVAILABLE`.
+- Sidecar paths are built and percent-encoded, never interpolated.
+- Enforce the app API token in constant time; `/healthz` stays open. With no
+  token the channel authenticates nobody — never write that it is "required"
+  without that qualification.
+- Reject `dapr-caller-app-id` on internal routes; preserve it for service
+  methods.
 - Never return stack traces, tokens, Node-RED configuration, or correlation
   state over HTTP.
-- Editor-support endpoints belong on `RED.httpAdmin`, guarded by the narrowest
-  `RED.auth.needsPermission` permission. Validate that a path id resolves to the
-  expected deployed node type, bound every returned collection/string, and
-  abort outbound work when the browser disconnects or the owning node closes.
-  `dapr-connection`'s "Test Connection" endpoint follows that rule: it never
-  accepts unsaved credentials from the editor and returns only app id, runtime
-  version, bounded component names/types, and counts. Dapr's component metadata
-  entries do not contain component configuration values, while its top-level
-  `extended` map can contain arbitrary operator-written values; exclude that map
-  and every other raw metadata field.
+- Editor-support endpoints live on `RED.httpAdmin` behind the narrowest
+  `RED.auth.needsPermission`, and return only bounded, curated fields.
 
-## Test-driven workflow
+## Workflow
 
-Red → green → refactor, every change: write a focused failing test, run it and
-record the expected failure, implement the smallest passing change, run focused
-then affected tests, format and lint. Put behavior in `lib/` modules and test
-them directly; keep node wrappers thin and cover them with real Node-RED
-runtime tests. Target >= 90% line/function and >= 85% branch coverage on `lib/`.
+Red → green → refactor: write a focused failing test, run it and record the
+expected failure, implement the smallest passing change, run focused then
+affected tests, format and lint. Target >= 90% line/function and >= 85% branch
+coverage on `lib/`.
 
-## Commits and the milestone gate
+Conventional commit subjects (`feat:`, `test:`, `docs:`, `chore:`), one
+coherent purpose each. Before any commit: `git diff --check`, lint, format
+check, and the relevant tests pass; inspect the staged diff.
 
-- Conventional commit subjects (`feat:`, `test:`, `docs:`, `chore:`). One
-  coherent purpose per commit; never mix unrelated cleanup into a feature commit.
-- **Releases publish only from CI, authenticated by GitHub OIDC** (npm trusted
-  publishing, `.github/workflows/release.yml`). Never `npm login`, `npm publish`,
-  or otherwise publish from a developer machine, and never add an `NPM_TOKEN` /
-  `NODE_AUTH_TOKEN` secret — the release identity is the workflow's own
-  short-lived OIDC token. Every user-visible change gets a `CHANGELOG.md` entry,
-  and the tag must match `package.json`'s version.
-- **Reaching a milestone is a hard stop.** Do not make the milestone's closing
-  commit and do not start the next milestone. Present results (tests run and
-  outcomes, coverage, staged diff) and wait for explicit human approval. Apply
-  requested changes within the same milestone and pass the gate again.
-- Before any commit: `git diff --check`, lint, format check, and the relevant
-  tests must pass. Inspect the staged diff.
+**Reaching a milestone is a hard stop.** Do not make the closing commit and do
+not start the next milestone. Present results and wait for explicit approval.
 
-## Completion criteria
+**Releases publish only from CI via GitHub OIDC** (`.github/workflows/release.yml`).
+Never `npm login`/`npm publish` locally, never add an `NPM_TOKEN` or
+`NODE_AUTH_TOKEN` secret. Every user-visible change gets a `CHANGELOG.md`
+entry, and the tag must match `package.json`'s version.
 
-Before calling a change complete: unit+coverage, real Node-RED black-box, real
-Dapr/Redis and NATS JetStream integration (including unchanged-flow redeploy
-without restarting daprd), Playwright e2e with visual inspection of the captured
-screenshots, lint + format + `git diff --check` + `npm pack --dry-run`, and
-confirmation that `AGENTS.md` is the only durable AI instruction source and
-`CLAUDE.md` is exactly `@AGENTS.md`. Audit policy: `npm audit
---omit=dev` must be clean; the full `npm audit` is reviewed and only the specific
-advisories explicitly listed in `docs/testing.md` are permitted — any other or
-newly-disclosed advisory fails until individually assessed.
+## Done means
+
+Unit+coverage, real Node-RED black-box, real daprd integration (including
+unchanged-flow redeploy without restarting daprd), Playwright e2e with the
+screenshots actually looked at, lint + format + `git diff --check` +
+`npm pack --dry-run`, and `CLAUDE.md` still exactly `@AGENTS.md`.
+
+`npm audit --omit=dev` must be clean. The full `npm audit` is reviewed, and
+only the advisories listed in `docs/testing.md` are permitted — any other or
+newly-disclosed one fails until individually assessed.
+
+## Where the detail lives
+
+- `docs/invariants.md` — every invariant above, and the failure it prevents.
+- `docs/architecture.md` — trust boundaries, listener lifecycle, telemetry.
+- `docs/testing.md` — the five test tiers, what each proves, audit policy.
+- `docs/security.md` — operator-facing security model.
+- `docs/development.md` — setup and commit workflow.
+- `docs/deployment.md` · `docs/subscriptions.md` — topology and the restart runbook.
