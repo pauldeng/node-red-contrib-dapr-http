@@ -6,6 +6,8 @@ const http = require('node:http');
 
 const { NodeRed, freePort } = require('../helpers/node-red');
 const { httpRequest } = require('../helpers/http');
+const { waitForFast: waitFor } = require('../helpers/wait-for');
+const { setTimeout: delay } = require('node:timers/promises');
 
 // A minimal real node:http server standing in for an OTLP/HTTP receiver: this
 // Decode the export body too: Node-RED emits startup logs, so counting HTTP
@@ -57,18 +59,6 @@ function triggerFlow() {
   ];
 }
 
-async function waitFor(fn, { timeoutMs = 10000, intervalMs = 100 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = fn();
-    if (value) {
-      return value;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error('waitFor timed out');
-}
-
 test(
   'a node.warn() call reaches a real OTLP/HTTP endpoint once settings.js installs the bridge',
   { timeout: 60000 },
@@ -117,7 +107,7 @@ test(
     // Node-RED's own request/response cycle above already proves nothing
     // blocked or crashed; give the batch processor a moment to actually try
     // (and fail) its export before confirming the process is still healthy.
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await delay(1500);
     const stillUp = await httpRequest(nr.adminUrl('/settings'), { timeoutMs: 5000 });
     assert.equal(stillUp.status, 200);
   }

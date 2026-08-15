@@ -6,25 +6,8 @@ const assert = require('node:assert/strict');
 const { NodeRed, freePort } = require('../helpers/node-red');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
-
-// Poll an arbitrary predicate until it returns truthy or the deadline passes.
-async function waitFor(fn, { timeoutMs = 15000, intervalMs = 150 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  let last;
-  while (Date.now() < deadline) {
-    try {
-      const value = await fn();
-      if (value) {
-        return value;
-      }
-      last = value;
-    } catch (err) {
-      last = err;
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  throw new Error(`waitFor timed out (${last instanceof Error ? last.message : last})`);
-}
+const { waitForFast: waitFor } = require('../helpers/wait-for');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const healthzOk = (port) => async () => {
   const r = await httpRequest(`http://127.0.0.1:${port}/healthz`, { timeoutMs: 1000 });
@@ -65,7 +48,7 @@ test(
     const health = await waitFor(healthzOk(appPort));
     assert.equal(health.status, 204);
 
-    await waitFor(() => dapr.requests.some((r) => r.path === '/v1.0/healthz/outbound') || null);
+    await dapr.waitForRequest('/v1.0/healthz/outbound');
   }
 );
 
@@ -99,7 +82,7 @@ test(
     assert.equal((await httpRequest(nr.adminUrl('/settings'), { timeoutMs: 2000 })).status, 200);
     await waitFor(healthzOk(appPort));
     // The second node reports the conflict rather than crashing.
-    await waitFor(() => (/in use/i.test(nr.logText()) ? true : null));
+    await nr.waitForLog(/in use/i);
   }
 );
 
@@ -149,9 +132,9 @@ test(
     ]);
 
     // Give any (mishandled) async health poll a chance to crash the process.
-    await new Promise((r) => setTimeout(r, 800));
+    await delay(800);
     assert.equal((await httpRequest(nr.adminUrl('/settings'), { timeoutMs: 2000 })).status, 200);
-    await waitFor(() => (/valid URL/i.test(nr.logText()) ? true : null));
+    await nr.waitForLog(/valid URL/i);
   }
 );
 
@@ -199,12 +182,12 @@ test(
     await waitFor(healthzOk(appPort));
 
     // An untokenized app channel is allowed on loopback, but never silent.
-    await waitFor(() => (/no app API token configured/i.test(nr.logText()) ? true : null));
-    await waitFor(() => (/sidecar is unavailable/i.test(nr.logText()) ? true : null));
+    await nr.waitForLog(/no app API token configured/i);
+    await nr.waitForLog(/sidecar is unavailable/i);
 
     // ...and recovery is logged as well, so an operator can see the transition.
     dapr.respond('GET', '/v1.0/healthz/outbound', (_req, res) => res.writeHead(204).end());
-    await waitFor(() => (/sidecar is available/i.test(nr.logText()) ? true : null));
+    await nr.waitForLog(/sidecar is available/i);
   }
 );
 
@@ -227,7 +210,7 @@ test(
       },
     ]);
 
-    await waitFor(() => (/app API token is required/i.test(nr.logText()) ? true : null));
+    await nr.waitForLog(/app API token is required/i);
     // Fail closed: nothing is listening at all, on any interface.
     await assert.rejects(httpRequest(`http://127.0.0.1:${appPort}/healthz`, { timeoutMs: 1000 }));
     assert.equal((await httpRequest(nr.adminUrl('/settings'), { timeoutMs: 2000 })).status, 200);

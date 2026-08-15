@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 
 const { ContainerNodeRed } = require('../helpers/node-red-container');
 const { startOtelCollector } = require('../helpers/otel-collector');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const OTEL_LOGGING_HANDLER = `, otel: { level: 'debug', metrics: false, audit: false, handler: require('@pauldeng/node-red-contrib-dapr-http/logging') }`;
 
@@ -65,7 +66,7 @@ test(
     let spans = [];
     let logRecords = [];
     for (let attempt = 0; attempt < 20 && (!spans.length || !logRecords.length); attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await delay(500);
       spans = await collector.readSpans();
       logRecords = await collector.readLogRecords();
     }

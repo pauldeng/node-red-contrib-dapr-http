@@ -9,6 +9,7 @@ const { httpRequest } = require('../helpers/http');
 const { startRedis, startDaprd } = require('../helpers/integration');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
+const { setTimeout: delay } = require('node:timers/promises');
 
 test(
   'a fastRetry Resiliency policy makes daprd redeliver a RETRY-acknowledged message',
@@ -107,7 +108,7 @@ return msg;`,
     // Wait for the third (successful) attempt to be reported, then confirm no
     // further redelivery happens once SUCCESS is returned.
     await waitFor(() => capture.received.some((r) => r && r.attempt === 3) || null);
-    await new Promise((resolve) => setTimeout(resolve, 1500)); // past fastRetry's window
+    await delay(1500); // past fastRetry's window
     const attempts = capture.received.map((r) => r && r.attempt).filter(Boolean);
     assert.deepEqual(
       attempts,

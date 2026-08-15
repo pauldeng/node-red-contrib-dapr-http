@@ -6,26 +6,11 @@ const assert = require('node:assert/strict');
 const { NodeRed, freePort } = require('../helpers/node-red');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
+const { waitForFast: waitFor } = require('../helpers/wait-for');
+const { createSignal } = require('../helpers/signal');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const healthPath = '/v1.0/healthz/outbound';
-
-async function waitFor(fn, { timeoutMs = 12000, intervalMs = 50 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  let last;
-  while (Date.now() < deadline) {
-    try {
-      const value = await fn();
-      if (value) {
-        return value;
-      }
-      last = value;
-    } catch (err) {
-      last = err;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error(`waitFor timed out (${last instanceof Error ? last.message : last})`);
-}
 
 const connectionNode = (appPort, daprPort, extra = {}) => ({
   id: 'c1',
@@ -123,7 +108,7 @@ test('invoke: fails fast while the sidecar is unhealthy', { timeout: 60000 }, as
     },
   ]);
 
-  await waitFor(() => dapr.requests.some((request) => request.path === healthPath));
+  await dapr.waitForRequest(healthPath);
   const started = Date.now();
   const response = await httpRequest(nr.nodeUrl('/call'), { timeoutMs: 4000 });
 
@@ -375,14 +360,14 @@ test(
     const dapr = await createFakeDaprStarted();
     t.after(() => dapr.stop());
     dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
-    let aborted = false;
+    const aborted = createSignal();
     dapr.respond('POST', '/v1.0/invoke/hang/method/wait', (_req, res) => {
       // Never respond; res 'close' with an unfinished body means the caller (the
       // invoke node) dropped the connection. (req 'close' fires as soon as the
       // request stream is read, so it is not a disconnect signal.)
       res.on('close', () => {
         if (!res.writableEnded) {
-          aborted = true;
+          aborted.fire();
         }
       });
     });
@@ -413,14 +398,14 @@ test(
     // because the sidecar never replies.
     await waitFor(async () => {
       httpRequest(nr.nodeUrl('/go'), { timeoutMs: 6000 }).catch(() => {});
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await delay(100);
       return dapr.requests.some((r) => r.path === '/v1.0/invoke/hang/method/wait') ? true : null;
     });
-    assert.equal(aborted, false); // still in flight
+    assert.equal(aborted.hasFired, false); // still in flight
 
     await nr.deploy(flow); // redeploy closes the invoke node → aborts the call
-    await waitFor(async () => (aborted ? true : null));
-    assert.equal(aborted, true);
+    await aborted.fired;
+    assert.equal(aborted.hasFired, true);
   }
 );
 
@@ -680,7 +665,7 @@ test('service: a request pending at redeploy completes as 503', { timeout: 60000
     body: '',
     timeoutMs: 8000,
   });
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await delay(300);
   await nr.deploy(flow);
   const res = await pending;
   assert.equal(res.status, 503);
@@ -731,7 +716,7 @@ test(
       body: '',
       timeoutMs: 8000,
     });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await delay(300);
     // "nodes" redeploy: only the modified service node restarts; the connection
     // (unchanged) stays up and does NOT drain, so the service node itself must 503.
     await nr.deploy(svc('v2'), { deploymentType: 'nodes' });
@@ -876,7 +861,7 @@ test(
       timeoutMs: 120,
     }).catch(() => {});
 
-    await waitFor(async () => (nr.logText().includes('no pending request') ? true : null), {
+    await nr.waitForLog('no pending request', {
       timeoutMs: 5000,
     });
   }

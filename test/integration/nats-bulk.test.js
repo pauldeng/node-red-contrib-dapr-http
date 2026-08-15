@@ -32,6 +32,7 @@ const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpe
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
 const { publishBulk } = require('../../lib/dapr-client');
+const { setTimeout: delay } = require('node:timers/promises');
 
 test(
   'real NATS JetStream delivers one bulk-publish request as one identifiable bulk subscription batch, and a mixed SUCCESS/DROP/no-ack outcome resolves each entry independently',
@@ -190,7 +191,7 @@ return msg;`,
     await waitFor(() => capture.received.filter((r) => r.n === 3).length >= 2 || null, {
       timeoutMs: 30000,
     });
-    await new Promise((resolve) => setTimeout(resolve, 1500)); // past fastRetry's window
+    await delay(1500); // past fastRetry's window
     assert.equal(
       capture.received.filter((r) => r.n === 1).length,
       1,

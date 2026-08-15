@@ -1,6 +1,6 @@
 'use strict';
 
-// Real daprd 1.18.1 + a real Redis configuration.redis component -- dynamic
+// Real daprd 1.18.2 + a real Redis configuration.redis component -- dynamic
 // configuration never touches pub/sub broker semantics, so this needs no
 // NATS/JetStream and no pubsub component (mirrors state.test.js's own
 // broker-agnostic setup). Proves: get returns a real value after a change
@@ -25,6 +25,7 @@ const { startRedis, startDaprd, configurationComponentYaml } = require('../helpe
 const { execFileP } = require('../helpers/docker');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const STORE = 'configstore';
 const KEY = 'feature:flag';
@@ -266,7 +267,7 @@ test(
         pubsubChannels().then((channels) => (channels.includes(`:${key}`) ? null : true))
       );
       await redisSet(key, value);
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await delay(1000);
       assert.equal(captured(key, value), undefined, `${prefix} must stop subsequent delivery`);
     }
   }

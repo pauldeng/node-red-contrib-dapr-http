@@ -7,6 +7,8 @@ const { NodeRed, freePort } = require('../helpers/node-red');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
 const { startCapture } = require('../helpers/capture');
+const { waitForFast: waitFor } = require('../helpers/wait-for');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const healthPath = '/v1.0/healthz/outbound';
 const STORE = 'configstore';
@@ -14,18 +16,6 @@ const KEY = 'featureFlag';
 const getPath = `/v1.0/configuration/${STORE}`;
 const subscribePath = `/v1.0/configuration/${STORE}/subscribe`;
 const unsubscribePath = (id) => `/v1.0/configuration/${STORE}/${id}/unsubscribe`;
-
-async function waitFor(fn, { timeoutMs = 10000, intervalMs = 50 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = await fn();
-    if (value) {
-      return value;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error('waitFor timed out');
-}
 
 function configSubscribeFlow({ appPort, daprPort, captureUrl, key = KEY }) {
   return [
@@ -68,20 +58,23 @@ return msg;`,
 // Simulates daprd's own async push into the app's registered callback route
 // -- a real HTTP call from the (fake-sidecar) test process back into the real
 // Node-RED child process under test, exactly the way real daprd would.
-function pushConfigChange(appPort, body, { delayMs = 30, headers = {}, key = KEY } = {}) {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      httpRequest(
-        new URL(`/configuration/${STORE}/${key}`, `http://127.0.0.1:${appPort}`).toString(),
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', ...headers },
-          body: JSON.stringify(body),
-          timeoutMs: 4000,
-        }
-      ).then(resolve, resolve);
-    }, delayMs);
-  });
+async function pushConfigChange(appPort, body, { delayMs = 30, headers = {}, key = KEY } = {}) {
+  await delay(delayMs);
+  try {
+    return await httpRequest(
+      new URL(`/configuration/${STORE}/${key}`, `http://127.0.0.1:${appPort}`).toString(),
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify(body),
+        timeoutMs: 4000,
+      }
+    );
+  } catch (err) {
+    // Fire-and-forget from daprd's perspective: a failed push is an outcome
+    // this helper reports back, never a thrown test failure.
+    return err;
+  }
 }
 
 function respondEmptyGet(dapr) {
@@ -119,7 +112,7 @@ test(
       configSubscribeFlow({ appPort, daprPort: dapr.port, captureUrl: capture.url, key: routeKey })
     );
 
-    const initial = await waitFor(() => capture.received[0] || null);
+    const initial = await capture.waitForMessage(() => true);
     assert.deepEqual(initial.payload, { [routeKey]: { value: 'initial', version: '1' } });
 
     const malformed = await pushConfigChange(
@@ -135,7 +128,7 @@ test(
       { delayMs: 0, headers: { 'dapr-caller-app-id': 'evil-app' }, key: routeKey }
     );
     assert.equal(meshCaller.status, 403);
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await delay(100);
     assert.equal(capture.received.length, 1);
   }
 );
@@ -170,11 +163,10 @@ test(
     });
 
     await nr.deploy(configSubscribeFlow({ appPort, daprPort: dapr.port, captureUrl: capture.url }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
+    await dapr.waitForRequest(healthPath);
 
-    const received = await waitFor(
-      () =>
-        capture.received.find((message) => message?.payload?.featureFlag?.value === 'true') || null
+    const received = await capture.waitForMessage(
+      (message) => message?.payload?.featureFlag?.value === 'true'
     );
     assert.equal(appPortSeen, appPort);
     assert.deepEqual(received.payload, { featureFlag: { value: 'true', version: '2' } });
@@ -209,9 +201,9 @@ test(
     await nr.start();
     t.after(() => nr.stop());
     await nr.deploy(configSubscribeFlow({ appPort, daprPort: dapr.port, captureUrl: capture.url }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-    await waitFor(() => dapr.requests.find((request) => request.path === subscribePath));
-    await new Promise((resolve) => setTimeout(resolve, 100)); // let subscriptionId land
+    await dapr.waitForRequest(healthPath);
+    await dapr.waitForRequest(subscribePath);
+    await delay(100); // let subscriptionId land
 
     // A push carrying an id from a different (superseded) subscription --
     // daprd already got a 2xx for it, so this must never reach the flow.
@@ -221,7 +213,7 @@ test(
       { delayMs: 0 }
     );
     assert.equal(stale.status, 200);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await delay(200);
     assert.equal(capture.received.length, 1, 'a stale-id callback must never reach the flow');
 
     // The real subscription id delivers normally.
@@ -230,9 +222,8 @@ test(
       { id: 'sub-real', items: { featureFlag: { value: 'true', version: '2' } } },
       { delayMs: 0 }
     );
-    const received = await waitFor(
-      () =>
-        capture.received.find((message) => message?.payload?.featureFlag?.value === 'true') || null
+    const received = await capture.waitForMessage(
+      (message) => message?.payload?.featureFlag?.value === 'true'
     );
     assert.deepEqual(received.payload, { featureFlag: { value: 'true', version: '2' } });
   }
@@ -260,8 +251,8 @@ test(
     await nr.start();
     t.after(() => nr.stop());
     await nr.deploy(configSubscribeFlow({ appPort, daprPort: dapr.port, captureUrl: capture.url }));
-    await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await dapr.waitForRequest(healthPath);
+    await delay(300);
     assert.equal(
       dapr.requests.some((r) => r.path === subscribePath),
       false,
@@ -269,15 +260,14 @@ test(
     );
 
     dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
-    await waitFor(() => dapr.requests.find((request) => request.path === subscribePath));
+    await dapr.waitForRequest(subscribePath);
 
     await pushConfigChange(appPort, {
       id: 'sub-1',
       items: { featureFlag: { value: 'true', version: '2' } },
     });
-    const received = await waitFor(
-      () =>
-        capture.received.find((message) => message?.payload?.featureFlag?.value === 'true') || null
+    const received = await capture.waitForMessage(
+      (message) => message?.payload?.featureFlag?.value === 'true'
     );
     assert.deepEqual(received.payload, { featureFlag: { value: 'true', version: '2' } });
   }
@@ -318,7 +308,7 @@ test(
     await waitFor(() => subscribeCount === 1);
 
     healthy = false;
-    await waitFor(() => (/Dapr sidecar is unavailable/.test(nr.logText()) ? true : null), {
+    await nr.waitForLog(/Dapr sidecar is unavailable/, {
       timeoutMs: 15000,
     });
     healthy = true;
@@ -357,8 +347,8 @@ test(
     await nr.start();
     t.after(() => nr.stop());
     await nr.deploy(configSubscribeFlow({ appPort, daprPort: dapr.port, captureUrl: capture.url }));
-    await waitFor(() => dapr.requests.find((request) => request.path === subscribePath));
-    await new Promise((resolve) => setTimeout(resolve, 100)); // let subscriptionId land
+    await dapr.waitForRequest(subscribePath);
+    await delay(100); // let subscriptionId land
 
     const started = Date.now();
     // A "nodes"-only redeploy that drops the subscribe node but keeps the
@@ -378,7 +368,7 @@ test(
       ],
       { deploymentType: 'nodes' }
     );
-    await waitFor(() => dapr.requests.find((request) => request.path === unsubscribePath('sub-1')));
+    await dapr.waitForRequest(unsubscribePath('sub-1'));
     assert.ok(
       Date.now() - started < 10000,
       'the redeploy must complete promptly even though the sidecar never answers unsubscribe'

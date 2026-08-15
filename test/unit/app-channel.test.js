@@ -8,6 +8,7 @@ const { acquireListener } = require('../../lib/app-channel');
 const { httpRequest } = require('../helpers/http');
 const { freePort } = require('../helpers/node-red');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const BIND = '127.0.0.1';
 const url = (port, path) => `http://127.0.0.1:${port}${path}`;
@@ -215,7 +216,7 @@ test('a stale lease cannot close a reacquired listener', async (t) => {
   const l2 = await acquire(t, { port, limits: limits({ leaseGraceMs: 1000 }) });
 
   l1.release({ graceMs: 0 }); // stale generation — must be a no-op
-  await new Promise((r) => setTimeout(r, 50));
+  await delay(50);
   assert.equal(l2.isClosed(), false);
   assert.equal((await httpRequest(url(port, '/healthz'))).status, 204);
 });
@@ -302,7 +303,7 @@ test('releasing a generation drains in-flight requests as 503 and aborts handler
 
   const started = Date.now();
   const reqP = httpRequest(url(port, '/slow'), { timeoutMs: 5000 });
-  await new Promise((r) => setTimeout(r, 100)); // let it become in-flight
+  await delay(100); // let it become in-flight
   lease.release({ graceMs: 300 });
   const res = await reqP;
   await lease.whenClosed();
@@ -418,7 +419,7 @@ test('a handler resolving after the deadline does not double-respond', async (t)
     ],
   });
   assert.equal((await httpRequest(url(port, '/slow'), { timeoutMs: 5000 })).status, 503);
-  await new Promise((r) => setTimeout(r, 400)); // let the late resolve happen
+  await delay(400); // let the late resolve happen
   assert.equal((await httpRequest(url(port, '/healthz'))).status, 204); // server unharmed
 });
 
@@ -442,7 +443,7 @@ test('concurrent requests beyond the pending cap get 503 before buffering', asyn
   });
 
   const first = httpRequest(url(port, '/slot'), { timeoutMs: 5000 });
-  await new Promise((r) => setTimeout(r, 100)); // let the first occupy the only slot
+  await delay(100); // let the first occupy the only slot
   const second = await httpRequest(url(port, '/slot'), { timeoutMs: 5000 });
   assert.equal(second.status, 503);
 

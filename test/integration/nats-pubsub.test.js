@@ -25,6 +25,7 @@ const { startDaprd } = require('../helpers/integration');
 const { startNats, provisionStream, jetstreamComponentYaml } = require('../helpers/nats');
 const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
+const { setTimeout: delay } = require('node:timers/promises');
 
 function forwardingSub(id, topic, extra = {}) {
   return {
@@ -233,7 +234,7 @@ test(
     });
     assert.equal(malformedRes.status, 200);
     assert.deepEqual(JSON.parse(malformedRes.text), { status: 'DROP' });
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await delay(1000);
     assert.equal(
       capture.received.some((r) => r && r.topic === 'malformed-envelope-topic'),
       false,

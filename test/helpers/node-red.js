@@ -10,6 +10,7 @@ const { httpRequest } = require('./http');
 
 const WORKSPACE = path.resolve(__dirname, '..', '..');
 const PKG = require(path.join(WORKSPACE, 'package.json'));
+const { setTimeout: delay } = require('node:timers/promises');
 const NODE_RED_BIN = path.join(WORKSPACE, 'node_modules', 'node-red', 'red.js');
 
 // Ask the OS for a currently-free loopback port. A small TOCTOU window exists
@@ -50,8 +51,6 @@ function settingsSource(uiPort, { loggingExtra = '' } = {}) {
 `;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 // Drives the package.json-pinned `node-red` process in an isolated temporary user
 // directory, with this workspace package made discoverable so its nodes load
 // exactly as an installed package would. Black-box: tests observe behavior over
@@ -62,8 +61,56 @@ class NodeRed {
     this.proc = null;
     this.port = null;
     this.logs = [];
+    this._logWaiters = new Set(); // (text) => void, notified on each stdio chunk
     this._exited = null;
     this._linkPath = null;
+  }
+
+  // Called for every stdout/stderr chunk so waitForLog can resolve off the
+  // stream's own 'data' event rather than a poll of logText().
+  _appendLog(chunk) {
+    this.logs.push(chunk);
+    if (this._logWaiters.size === 0) {
+      return;
+    }
+    const text = this.logText();
+    // Copy first — a waiter removes itself while we iterate.
+    for (const waiter of [...this._logWaiters]) {
+      waiter(text);
+    }
+  }
+
+  // Resolve as soon as the child's own output matches. `pattern` is a
+  // substring or a RegExp; String#search is used rather than RegExp#test so a
+  // /g/ pattern's lastIndex cannot make repeat checks flap.
+  //
+  // Output already seen is checked first: the line frequently lands before the
+  // test gets around to awaiting it, and an event-only API would hang there.
+  async waitForLog(pattern, { timeoutMs = 10000 } = {}) {
+    const matches = (text) =>
+      typeof pattern === 'string' ? text.includes(pattern) : text.search(pattern) !== -1;
+    if (matches(this.logText())) {
+      return this.logText();
+    }
+    return new Promise((resolve, reject) => {
+      const waiter = (text) => {
+        if (!matches(text)) {
+          return;
+        }
+        clearTimeout(timer);
+        this._logWaiters.delete(waiter);
+        resolve(text);
+      };
+      const timer = setTimeout(() => {
+        this._logWaiters.delete(waiter);
+        reject(
+          new Error(
+            `waitForLog(${pattern}) timed out after ${timeoutMs}ms\n--- logs ---\n${this.logText()}`
+          )
+        );
+      }, timeoutMs);
+      this._logWaiters.add(waiter);
+    });
   }
 
   adminUrl(p = '/') {
@@ -116,8 +163,8 @@ class NodeRed {
         ],
         { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } }
       );
-      this.proc.stdout.on('data', (d) => this.logs.push(d.toString()));
-      this.proc.stderr.on('data', (d) => this.logs.push(d.toString()));
+      this.proc.stdout.on('data', (d) => this._appendLog(d.toString()));
+      this.proc.stderr.on('data', (d) => this._appendLog(d.toString()));
       this._exited = new Promise((resolve) =>
         this.proc.once('exit', (code, signal) => resolve({ code, signal }))
       );
@@ -150,7 +197,7 @@ class NodeRed {
       } catch {
         // not listening / not responding yet
       }
-      await sleep(200);
+      await delay(200);
     }
     throw new Error(
       `Node-RED did not become ready within ${timeoutMs}ms.\n--- logs ---\n${this.logText()}`
@@ -211,7 +258,7 @@ class NodeRed {
       } catch (err) {
         last = err;
       }
-      await sleep(intervalMs);
+      await delay(intervalMs);
     }
     const detail = last instanceof Error ? last.message : `last status ${last && last.status}`;
     throw new Error(

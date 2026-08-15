@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { SpanStatusCode, ROOT_CONTEXT, context, propagation, trace } = require('@opentelemetry/api');
 const { logs } = require('@opentelemetry/api-logs');
+const { setTimeout: delay } = require('node:timers/promises');
 const {
   NodeTracerProvider,
   InMemorySpanExporter,
@@ -416,7 +417,7 @@ test('a node span with a no-op tracer never registers a pending entry', () => {
 test('a node span that never completes closes itself as incomplete after its timeout', async () => {
   const { tracer, exporter } = inMemoryTracer();
   startNodeSpan(tracer, ROOT_CONTEXT, FAKE_NODE, { timeoutMs: 20 });
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await delay(80);
   const [span] = exporter.getFinishedSpans();
   assert.equal(span.attributes['node_red.span.incomplete'], true);
   assert.equal(span.status.code, SpanStatusCode.OK); // incomplete, not an error

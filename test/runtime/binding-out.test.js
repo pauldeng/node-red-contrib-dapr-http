@@ -7,22 +7,12 @@ const { NodeRed, freePort } = require('../helpers/node-red');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
 const { startCapture } = require('../helpers/capture');
+const { createSignal } = require('../helpers/signal');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const healthPath = '/v1.0/healthz/outbound';
 const BINDING = 'orders-binding';
 const invokePath = () => `/v1.0/bindings/${BINDING}`;
-
-async function waitFor(fn, { timeoutMs = 10000, intervalMs = 50 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = await fn();
-    if (value) {
-      return value;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error('waitFor timed out');
-}
 
 function bindingFlow({ appPort, daprPort, bodyLimitMb, statusCaptureUrl }) {
   const flow = [
@@ -146,8 +136,8 @@ async function startFlow(t, respondents = [], flowOptions = {}) {
   t.after(() => nr.stop());
   const appPort = await freePort();
   await nr.deploy(bindingFlow({ appPort, daprPort: dapr.port, ...flowOptions }));
-  await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await dapr.waitForRequest(healthPath);
+  await delay(50);
   return { dapr, nr, appPort };
 }
 
@@ -219,12 +209,12 @@ test('late validation and oversized responses retain their error identity in Cat
   const invalid = await post(nr, { payload: { __circular: true } });
   assert.equal(invalid.status, 503);
   assert.equal(JSON.parse(invalid.text).code, 'INVALID_MESSAGE');
-  await waitFor(() => capture.received.find((status) => status?.text === 'invalid message'));
+  await capture.waitForMessage((status) => status?.text === 'invalid message');
 
   const response = await post(nr, {});
   assert.equal(response.status, 503);
   assert.equal(JSON.parse(response.text).code, 'RESPONSE_TOO_LARGE');
-  await waitFor(() => capture.received.find((status) => status?.text === 'response too large'));
+  await capture.waitForMessage((status) => status?.text === 'response too large');
 });
 
 test('missing bindingName/operation is rejected as INVALID_MESSAGE before contacting daprd', async (t) => {
@@ -251,7 +241,7 @@ test('binding invoke calls fail fast while the sidecar is unhealthy, with no rea
   t.after(() => nr.stop());
   const appPort = await freePort();
   await nr.deploy(bindingFlow({ appPort, daprPort: dapr.port }));
-  await waitFor(() => dapr.requests.find((request) => request.path === healthPath));
+  await dapr.waitForRequest(healthPath);
 
   const started = Date.now();
   const response = await post(nr, {});
@@ -268,7 +258,7 @@ test(
   'an in-flight binding invoke is aborted when the node is redeployed',
   { timeout: 60000 },
   async (t) => {
-    let aborted = false;
+    const aborted = createSignal();
     const { dapr, nr, appPort } = await startFlow(t, [
       [
         'POST',
@@ -276,7 +266,7 @@ test(
         (_req, res) => {
           res.on('close', () => {
             if (!res.writableEnded) {
-              aborted = true;
+              aborted.fire();
             }
           });
         },
@@ -290,12 +280,12 @@ test(
         // Redeploy intentionally interrupts this request.
       }
     })();
-    await waitFor(() => dapr.requests.find((request) => request.path === invokePath()));
-    assert.equal(aborted, false);
+    await dapr.waitForRequest(invokePath());
+    assert.equal(aborted.hasFired, false);
 
     await nr.deploy(bindingFlow({ appPort, daprPort: dapr.port }));
-    await waitFor(() => aborted);
+    await aborted.fired;
     await pending;
-    assert.equal(aborted, true);
+    assert.equal(aborted.hasFired, true);
   }
 );
