@@ -99,46 +99,49 @@
       const that = this;
       const button = $('#dapr-test-connection');
       const result = $('#dapr-test-connection-result');
-      button.on('click', function () {
+      button.on('click', async function () {
         button.prop('disabled', true);
         result.removeClass('dapr-test-connection-error').show().text('Testing…');
+        // Kept as a handle (not just awaited) so oneditsave/oneditcancel can
+        // abort a request still in flight when the dialog closes.
         const request = $.getJSON('dapr-connection/' + encodeURIComponent(that.id) + '/metadata');
         that._daprMetadataRequest = request;
-        request
-          .done(function (body) {
-            const components = body.components || [];
-            const componentSummary = components
-              .map(function (c) {
-                return c.name + (c.type ? ' (' + c.type + ')' : '');
-              })
-              .join(', ');
-            result.text(
-              'Connected — app id "' +
-                (body.id || '(unknown)') +
-                '", runtime ' +
-                (body.runtimeVersion || '(unknown)') +
-                ', ' +
-                body.componentCount +
-                ' component(s)' +
-                (componentSummary ? ': ' + componentSummary : '') +
-                (body.componentCount > components.length
-                  ? ' (showing first ' + components.length + ')'
-                  : '') +
-                ', ' +
-                body.subscriptionCount +
-                ' subscription(s).'
-            );
-          })
-          .fail(function (xhr) {
-            const message = (xhr.responseJSON && xhr.responseJSON.message) || 'request failed';
-            result.addClass('dapr-test-connection-error').text(message);
-          })
-          .always(function () {
-            if (that._daprMetadataRequest === request) {
-              that._daprMetadataRequest = null;
-            }
-            button.prop('disabled', false);
-          });
+        try {
+          const body = await request;
+          const components = body.components || [];
+          const componentSummary = components
+            .map(function (c) {
+              return c.name + (c.type ? ' (' + c.type + ')' : '');
+            })
+            .join(', ');
+          result.text(
+            'Connected — app id "' +
+              (body.id || '(unknown)') +
+              '", runtime ' +
+              (body.runtimeVersion || '(unknown)') +
+              ', ' +
+              body.componentCount +
+              ' component(s)' +
+              (componentSummary ? ': ' + componentSummary : '') +
+              (body.componentCount > components.length
+                ? ' (showing first ' + components.length + ')'
+                : '') +
+              ', ' +
+              body.subscriptionCount +
+              ' subscription(s).'
+          );
+        } catch (xhr) {
+          // jQuery rejects an awaited jqXHR with the jqXHR itself, so the
+          // bounded { ok, message } body the admin route sent is on
+          // responseJSON. An aborted request (dialog closed) lands here too.
+          const message = (xhr && xhr.responseJSON && xhr.responseJSON.message) || 'request failed';
+          result.addClass('dapr-test-connection-error').text(message);
+        } finally {
+          if (that._daprMetadataRequest === request) {
+            that._daprMetadataRequest = null;
+          }
+          button.prop('disabled', false);
+        }
       });
     },
     oneditsave: function () {
