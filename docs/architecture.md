@@ -194,6 +194,17 @@ Three layers, each independently useful:
   trace across a subscribe → publish hop) still works unchanged when tracing
   is disabled — `propagation.inject()`/`extract()` are true no-ops with
   nothing registered — and is superseded by the real mechanism once enabled.
+
+  Why the CloudEvent wins over the headers: the two carriers name different
+  spans. A delivery's request headers carry the _subscribing_ sidecar's own
+  delivery span, while the CloudEvent carries the _publishing_ side's span.
+  Parenting a consumer span on the headers therefore puts both ends of the hop
+  inside the subscribing app, and anything that derives a topology from spans —
+  Grafana's service graph, Tempo's `service_graphs` processor — draws that app
+  calling itself instead of the hop that actually happened. Parenting on the
+  CloudEvent makes the consumer span a child of the publisher's span; the trace
+  is the same either way, only the parentage differs.
+
 - **Flow spans.** Every node in every flow gets its own span, via the four
   Node-RED runtime hooks built for exactly this (`onSend`, `preDeliver`,
   `onReceive`, `onComplete`) — not only this package's own nodes. `onSend`

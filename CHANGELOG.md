@@ -5,6 +5,26 @@ All notable changes to this package. This project follows
 `package.json` is what a consumer installs, so bump it and add an entry here in
 the same change that ships behavior.
 
+## 0.2.1 - unreleased
+
+### Fixed
+
+- **A `dapr-subscribe` consumer span now parents on the publisher's span, not on
+  the subscribing sidecar's delivery span.** A single delivery extracted its
+  trace context from the request headers, which carry the span of the sidecar
+  delivering the message — a span belonging to the subscribing app itself. The
+  consumer span was therefore a child of its own service, so a topology derived
+  from spans drew the subscriber calling itself and the publish hop vanished:
+  with a Grafana/Tempo service graph, a `sentinel -> dispatcher -> transcriber`
+  pipeline showed only `transcriber -> transcriber`. Dapr carries the publishing
+  side's `traceparent`/`tracestate` in the CloudEvent, and that is now the
+  preferred carrier, with the delivery's own carrier as the fallback: request
+  headers for a single delivery, entry metadata for a bulk one. Bulk deliveries
+  already preferred their entry's CloudEvent and are unchanged in behaviour;
+  both paths now share `lib/subscriptions.js` `traceCarrier`. Traces are
+  unaffected in shape or content beyond the corrected parent, and disabled
+  tracing is unaffected entirely.
+
 ## 0.2.0 - 2026-08-15
 
 ### Added

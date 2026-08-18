@@ -9,6 +9,7 @@ const {
   fingerprint,
   parseDelivery,
   parseBulkDelivery,
+  traceCarrier,
 } = require('../../lib/subscriptions');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 
@@ -571,4 +572,41 @@ test('parseDelivery rejects structurally invalid CloudEvent envelopes', () => {
       `expected rejection for ${body}`
     );
   }
+});
+
+test('traceCarrier prefers the CloudEvent trace context over the delivery headers', () => {
+  // Dapr puts the PUBLISHER's trace context in the CloudEvent, while the request
+  // headers carry this sidecar's own delivery span. Parenting a consumer span on
+  // the headers makes the publisher and the consumer look like one service to
+  // anything that derives a topology from spans, because the sidecar span belongs
+  // to the subscribing app; the CloudEvent value is the cross-service parent.
+  const headers = {
+    traceparent: '00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01',
+    'content-type': 'application/cloudevents+json',
+  };
+  const cloudEvent = {
+    id: 'evt-1',
+    traceparent: '00-11111111111111111111111111111111-2222222222222222-01',
+    tracestate: 'vendor=1',
+  };
+
+  const carrier = traceCarrier(headers, cloudEvent);
+  assert.equal(carrier.traceparent, cloudEvent.traceparent);
+  assert.equal(carrier.tracestate, 'vendor=1');
+});
+
+test('traceCarrier falls back to the delivery headers when the envelope carries no context', () => {
+  const headers = { traceparent: '00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01' };
+
+  // A raw delivery has no CloudEvent at all, and a CloudEvent without trace
+  // fields must not blank out the headers.
+  assert.equal(traceCarrier(headers, undefined).traceparent, headers.traceparent);
+  assert.equal(traceCarrier(headers, { id: 'evt-2' }).traceparent, headers.traceparent);
+  assert.equal(traceCarrier(headers, { traceparent: '' }).traceparent, headers.traceparent);
+});
+
+test('traceCarrier keeps other header entries and tolerates missing inputs', () => {
+  const carrier = traceCarrier({ 'x-request-id': 'r1' }, { traceparent: '00-1-2-01' });
+  assert.equal(carrier['x-request-id'], 'r1');
+  assert.deepEqual(traceCarrier(undefined, undefined), {});
 });

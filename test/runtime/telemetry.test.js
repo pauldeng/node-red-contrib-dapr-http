@@ -183,6 +183,10 @@ const forwardedPublishPath = '/v1.0/publish/pubsub/orders';
 const inboundTraceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
 const inboundTraceId = inboundTraceparent.split('-')[1];
 const inboundSpanId = inboundTraceparent.split('-')[2];
+// What a real daprd delivery carries in the CloudEvent: the PUBLISHER's span,
+// on a different trace from the header the subscribing sidecar wrote.
+const envelopeTraceparent = '00-9999999999999999999999999999aaaa-00f067aa0ba902b7-01';
+const envelopeTraceId = envelopeTraceparent.split('-')[1];
 
 test(
   'one trace ID survives a real daprd-style delivery through subscribe into an outbound publish',
@@ -250,6 +254,7 @@ test(
         id: 'e1',
         source: 'test',
         type: 'order',
+        traceparent: envelopeTraceparent,
         data: { orderId: 7 },
       }),
       timeoutMs: 5000,
@@ -261,7 +266,12 @@ test(
       dapr.requests.find((request) => request.path === forwardedPublishPath)
     );
     const [, traceId, spanId] = forwarded.headers.traceparent.split('-');
-    assert.equal(traceId, inboundTraceId, 'same trace across the whole delivery -> publish hop');
+    assert.equal(traceId, envelopeTraceId, 'the publisher CloudEvent context wins over the header');
+    assert.notEqual(
+      traceId,
+      inboundTraceId,
+      'not parented on the subscribing sidecar delivery span'
+    );
     assert.notEqual(spanId, inboundSpanId, 'a new span for the outbound publish, not a copy');
   }
 );

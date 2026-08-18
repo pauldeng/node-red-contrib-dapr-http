@@ -4,7 +4,12 @@ const crypto = require('node:crypto');
 
 const { context, propagation, trace, SpanKind } = require('@opentelemetry/api');
 
-const { buildSubscription, parseDelivery, parseBulkDelivery } = require('../lib/subscriptions');
+const {
+  buildSubscription,
+  parseDelivery,
+  parseBulkDelivery,
+  traceCarrier,
+} = require('../lib/subscriptions');
 const { HOP_BY_HOP } = require('../lib/http-headers');
 const { getTracer, endSpan } = require('../lib/telemetry');
 
@@ -15,11 +20,11 @@ function endDeliverySpan(span, status) {
   endSpan(span, status === 'SUCCESS' ? undefined : new Error(`delivery ${status}`));
 }
 
-// Extract the W3C trace context from a carrier (ctx.headers for a single
-// delivery; an entry's CloudEvent/metadata for a bulk one, which has no
-// per-message HTTP headers — see deliverBulk) and start this delivery's
-// consumer span as its child. A no-op extract/span (tracing disabled) costs
-// nothing and needs no branch of its own here.
+// Extract the W3C trace context from a carrier built by lib/subscriptions
+// traceCarrier — the publisher's context from the CloudEvent where it exists,
+// otherwise the delivery's own carrier — and start this delivery's consumer span
+// as its child. A no-op extract/span (tracing disabled) costs nothing and needs
+// no branch of its own here.
 function startConsumerSpan(definition, carrier) {
   const parentContext = propagation.extract(context.active(), carrier);
   const span = getTracer().startSpan(
@@ -219,7 +224,7 @@ module.exports = function registerDaprSubscribe(RED) {
       };
       const msg = { _msgid: RED.util.generateId(), payload: parsed.payload, dapr };
 
-      const consumer = startConsumerSpan(definition, ctx.headers);
+      const consumer = startConsumerSpan(definition, traceCarrier(ctx.headers, parsed.cloudEvent));
       if (definition.ackMode === 'auto') {
         context.with(consumer.context, () => node.send(msg));
         endDeliverySpan(consumer.span, 'SUCCESS');
@@ -283,10 +288,10 @@ module.exports = function registerDaprSubscribe(RED) {
           // Dapr 1.18.2 carries each non-raw entry's traceparent/tracestate in
           // its CloudEvent. Entry metadata is retained as a fallback (and is
           // the only possible carrier for a raw entry).
-          const consumer = startConsumerSpan(definition, {
-            ...entry.metadata,
-            ...(entry.cloudEvent || {}),
-          });
+          const consumer = startConsumerSpan(
+            definition,
+            traceCarrier(entry.metadata, entry.cloudEvent)
+          );
           if (definition.ackMode === 'auto') {
             context.with(consumer.context, () => node.send(msg));
             endDeliverySpan(consumer.span, 'SUCCESS');
