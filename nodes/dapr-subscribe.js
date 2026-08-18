@@ -21,10 +21,9 @@ function endDeliverySpan(span, status) {
 }
 
 // Extract the W3C trace context from a carrier built by lib/subscriptions
-// traceCarrier — the publisher's context from the CloudEvent where it exists,
-// otherwise the delivery's own carrier — and start this delivery's consumer span
-// as its child. A no-op extract/span (tracing disabled) costs nothing and needs
-// no branch of its own here.
+// traceCarrier and start this delivery's consumer span as its child. A no-op
+// extract/span (tracing disabled) costs nothing and needs no branch of its own
+// here.
 function startConsumerSpan(definition, carrier) {
   const parentContext = propagation.extract(context.active(), carrier);
   const span = getTracer().startSpan(
@@ -285,9 +284,9 @@ module.exports = function registerDaprSubscribe(RED) {
           };
           const msg = { _msgid: RED.util.generateId(), payload: entry.payload, dapr };
 
-          // Dapr 1.18.2 carries each non-raw entry's traceparent/tracestate in
-          // its CloudEvent. Entry metadata is retained as a fallback (and is
-          // the only possible carrier for a raw entry).
+          // Entry metadata is the delivery carrier here — bulk has no
+          // per-message HTTP headers — and is the only possible carrier for a
+          // raw entry, which has no CloudEvent at all.
           const consumer = startConsumerSpan(
             definition,
             traceCarrier(entry.metadata, entry.cloudEvent)

@@ -605,8 +605,60 @@ test('traceCarrier falls back to the delivery headers when the envelope carries 
   assert.equal(traceCarrier(headers, { traceparent: '' }).traceparent, headers.traceparent);
 });
 
-test('traceCarrier keeps other header entries and tolerates missing inputs', () => {
-  const carrier = traceCarrier({ 'x-request-id': 'r1' }, { traceparent: '00-1-2-01' });
+test('traceCarrier keeps other carrier entries and tolerates missing inputs', () => {
+  const carrier = traceCarrier(
+    { 'x-request-id': 'r1' },
+    { traceparent: '00-11111111111111111111111111111111-2222222222222222-01' }
+  );
   assert.equal(carrier['x-request-id'], 'r1');
   assert.deepEqual(traceCarrier(undefined, undefined), {});
+});
+
+test('traceCarrier keeps the delivery carrier when the envelope traceparent is unusable', () => {
+  // The envelope is remote data and the delivery carrier is local. A traceparent
+  // the propagator cannot parse extracts to nothing, so preferring it would make
+  // the consumer span a new root and sever the trace outright — strictly worse
+  // than the misparenting this preference exists to correct.
+  const headers = { traceparent: '00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01' };
+  const unusable = [
+    '00-1-2-01', // not the fixed 32/16 hex-digit widths
+    'not-a-traceparent',
+    '00-11111111111111111111111111111111-2222222222222222', // no flags
+    '00-11111111111111111111111111111111-2222222222222222-01-extra',
+    '00-1111111111111111111111111111111G-2222222222222222-01', // non-hex
+    '00-11111111111111111111111111111111-2222222222222222-01 ', // trailing space
+    'ff-11111111111111111111111111111111-2222222222222222-01', // forbidden version
+    '00-00000000000000000000000000000000-2222222222222222-01', // all-zero trace id
+    '00-11111111111111111111111111111111-0000000000000000-01', // all-zero parent id
+  ];
+  for (const traceparent of unusable) {
+    assert.equal(
+      traceCarrier(headers, { id: 'e1', traceparent }).traceparent,
+      headers.traceparent,
+      `expected fallback for ${JSON.stringify(traceparent)}`
+    );
+  }
+  // A non-string member must not throw its way past the check either.
+  assert.equal(traceCarrier(headers, { traceparent: 42 }).traceparent, headers.traceparent);
+  // Nothing from an unusable envelope is taken, not even its other members.
+  assert.equal(
+    traceCarrier(headers, { traceparent: 'bad', tracestate: 'v=1' }).tracestate,
+    undefined
+  );
+});
+
+test('traceCarrier carries baggage, which the registered propagator also reads', () => {
+  // lib/telemetry.js installs TraceContext + Baggage as the process propagator,
+  // so "baggage" is a carrier member on both sides, not just the two trace ids.
+  const valid = '00-11111111111111111111111111111111-2222222222222222-01';
+  assert.equal(
+    traceCarrier({}, { traceparent: valid, baggage: 'tenant=acme' }).baggage,
+    'tenant=acme'
+  );
+  // The delivery request carries baggage even when the envelope does not; Dapr
+  // propagates it as a header, so an absent envelope member must not erase it.
+  assert.equal(
+    traceCarrier({ baggage: 'tenant=acme' }, { traceparent: valid }).baggage,
+    'tenant=acme'
+  );
 });

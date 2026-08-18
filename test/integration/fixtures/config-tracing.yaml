@@ -1,0 +1,16 @@
+# Turns daprd's OWN tracing on and samples every trace, so the sidecar really
+# creates a delivery span rather than passing the publisher's context straight
+# through. Used by nats-trace-carrier.test.js to pin the daprd behaviour the
+# consumer-span parenting in lib/subscriptions.js traceCarrier rests on.
+#
+# The stdout exporter is deliberate: the test asserts on what daprd puts in the
+# delivery, not on daprd's exported spans, so it needs a real TracerProvider
+# and no collector to send it to.
+apiVersion: dapr.io/v1alpha1
+kind: Configuration
+metadata:
+  name: tracing-test
+spec:
+  tracing:
+    samplingRate: '1'
+    stdout: true

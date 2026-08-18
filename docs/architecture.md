@@ -205,6 +205,13 @@ Three layers, each independently useful:
   CloudEvent makes the consumer span a child of the publisher's span; the trace
   is the same either way, only the parentage differs.
 
+  The envelope is remote data while the delivery carrier came from the local
+  sidecar, so the envelope only wins where its `traceparent` actually parses as
+  a W3C trace context. An unusable one extracts to nothing, which would start a
+  fresh trace rather than continue the publisher's — strictly worse than the
+  misparenting the preference exists to correct. `test/integration/nats-trace-carrier.test.js`
+  pins the daprd behaviour the whole preference rests on.
+
 - **Flow spans.** Every node in every flow gets its own span, via the four
   Node-RED runtime hooks built for exactly this (`onSend`, `preDeliver`,
   `onReceive`, `onComplete`) — not only this package's own nodes. `onSend`
