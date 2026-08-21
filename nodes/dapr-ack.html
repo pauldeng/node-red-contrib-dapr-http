@@ -5,7 +5,8 @@
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
-      status: { value: 'SUCCESS' },
+      ackStatusSource: { value: 'fixed' },
+      ackStatus: { value: 'SUCCESS' },
     },
     inputs: 1,
     outputs: 1,
@@ -13,7 +14,23 @@
     icon: 'font-awesome/fa-check',
     paletteLabel: 'dapr ack',
     label: function () {
-      return this.name || `dapr ack: ${this.status || 'SUCCESS'}`;
+      if (this.ackStatusSource === 'message') {
+        return this.name || 'dapr ack: msg.ackStatus';
+      }
+      return this.name || `dapr ack: ${this.ackStatus || 'SUCCESS'}`;
+    },
+    oneditprepare: function () {
+      if (!['fixed', 'message'].includes(this.ackStatusSource)) {
+        $('#node-input-ackStatusSource').val('fixed');
+      }
+      if (!['SUCCESS', 'RETRY', 'DROP'].includes(this.ackStatus)) {
+        $('#node-input-ackStatus').val('SUCCESS');
+      }
+      const updateStatusSource = () => {
+        $('#node-ack-fixed-status').toggle($('#node-input-ackStatusSource').val() === 'fixed');
+      };
+      $('#node-input-ackStatusSource').on('change', updateStatusSource);
+      updateStatusSource();
     },
   });
 </script>
@@ -28,8 +45,15 @@
     <input type="text" id="node-input-connection" />
   </div>
   <div class="form-row">
-    <label for="node-input-status"><i class="fa fa-handshake-o"></i> Status</label>
-    <select id="node-input-status">
+    <label for="node-input-ackStatusSource"><i class="fa fa-exchange"></i> Status source</label>
+    <select id="node-input-ackStatusSource">
+      <option value="fixed">Fixed value</option>
+      <option value="message">msg.ackStatus</option>
+    </select>
+  </div>
+  <div class="form-row" id="node-ack-fixed-status">
+    <label for="node-input-ackStatus"><i class="fa fa-handshake-o"></i> Ack status</label>
+    <select id="node-input-ackStatus">
       <option value="SUCCESS">SUCCESS — processed</option>
       <option value="RETRY">RETRY — redeliver</option>
       <option value="DROP">DROP — discard</option>
@@ -47,8 +71,8 @@
   <dl class="message-properties">
     <dt>dapr.ackId <span class="property-type">string</span></dt>
     <dd>Correlation id set by the subscribe node. Must be preserved on the message.</dd>
-    <dt class="optional">dapr.status <span class="property-type">string</span></dt>
-    <dd>Overrides the configured status (SUCCESS, RETRY, or DROP).</dd>
+    <dt class="optional">ackStatus <span class="property-type">string</span></dt>
+    <dd>Required when <b>Status source</b> is <code>msg.ackStatus</code>.</dd>
   </dl>
 
   <h3>Details</h3>
@@ -56,13 +80,14 @@
     The first acknowledgement for an id wins; a later, expired, or foreign-generation id is rejected
     with an error (routable to a Catch node) and does not affect other deliveries. Preserve
     <code>msg.dapr</code> through the flow (mutate the message rather than replacing it) so
-    <code>ackId</code> reaches this node.
+    <code>ackId</code> reaches this node. Choose whether every message uses the fixed status
+    selected in the node or reads its own status from <code>msg.ackStatus</code>.
   </p>
 
   <h3>Example</h3>
   <p>Decide the outcome in a Function node before this one, then mutate and return the message:</p>
   <pre>
 // Function node before dapr ack
-msg.dapr.status = msg.payload.orderId ? 'SUCCESS' : 'DROP';
+msg.ackStatus = msg.payload.orderId ? 'SUCCESS' : 'DROP';
 return msg; // msg.dapr.ackId must survive</pre>
 </script>

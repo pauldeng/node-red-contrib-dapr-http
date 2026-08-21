@@ -113,12 +113,20 @@ return [report, msg];`,
 if (n === 3) {
   return null; // never acked — resolves as RETRY via our own timeout
 }
-msg.dapr.status = n === 2 ? 'DROP' : 'SUCCESS';
+msg.ackStatus = n === 2 ? 'DROP' : 'SUCCESS';
 return msg;`,
           outputs: 1,
           wires: [['ack']],
         },
-        { id: 'ack', type: 'dapr-ack', z: 'tab', connection: 'c1', wires: [[]] },
+        {
+          id: 'ack',
+          type: 'dapr-ack',
+          z: 'tab',
+          connection: 'c1',
+          ackStatusSource: 'message',
+          ackStatus: 'SUCCESS',
+          wires: [[]],
+        },
       ],
     });
     await waitFor(async () => {

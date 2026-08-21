@@ -67,7 +67,8 @@ msg.method = 'POST';
 msg.headers = { 'content-type': 'application/json' };
 const ackId = msg.dapr.ackId;
 msg.payload = JSON.stringify({ topic: 'drop-topic' });
-msg.dapr = { ackId, status: 'DROP' };
+msg.dapr = { ackId };
+msg.ackStatus = 'DROP';
 return msg;`,
           outputs: 1,
           wires: [['reportReq']],
@@ -81,7 +82,15 @@ return msg;`,
           url: '',
           wires: [['ackDrop']],
         },
-        { id: 'ackDrop', type: 'dapr-ack', z: 'tab', connection: 'c1', wires: [[]] },
+        {
+          id: 'ackDrop',
+          type: 'dapr-ack',
+          z: 'tab',
+          connection: 'c1',
+          ackStatusSource: 'message',
+          ackStatus: 'SUCCESS',
+          wires: [[]],
+        },
 
         // No ack node at all on this path — nothing ever settles the
         // delivery, so our own ack timeout (requestTimeoutSec above) fires

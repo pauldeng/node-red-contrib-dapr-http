@@ -457,6 +457,6 @@
   </p>
   <pre>
 // Function node after dapr subscribe
-msg.dapr.status = msg.payload.orderId ? 'SUCCESS' : 'DROP';
+msg.ackStatus = msg.payload.orderId ? 'SUCCESS' : 'DROP';
 return msg; // msg.dapr.ackId must survive to the dapr ack node</pre>
 </script>

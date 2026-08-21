@@ -81,7 +81,7 @@ the exact restart procedure.
 nodes/dapr-connection.js   config-node lifecycle, credentials, health polling, restart-status
 nodes/dapr-publish.js      publish wrapper
 nodes/dapr-subscribe.js    subscription wrapper (routing rules, bulk config)
-nodes/dapr-ack.js          acknowledgement wrapper
+nodes/dapr-ack.js          acknowledgement wrapper (status resolution in lib/ack.js)
 nodes/dapr-invoke.js       outbound invocation wrapper
 nodes/dapr-service.js      inbound service wrapper
 nodes/dapr-response.js     invocation response wrapper

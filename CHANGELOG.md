@@ -7,8 +7,27 @@ the same change that ships behavior.
 
 ## 0.2.1 - unreleased
 
+### Breaking
+
+- **`dapr-ack` now requires an explicit status source:** either a fixed
+  `SUCCESS`/`RETRY`/`DROP` selected in the editor, or `msg.ackStatus`. The former
+  implicit `msg.dapr.status` override remains compatible only while an old 0.2.0
+  node is left unedited. When editing one, choose the message source and change
+  upstream Function nodes to write `msg.ackStatus`, or keep the fixed `SUCCESS`
+  default selected by the editor.
+
+### Changed
+
+- `dapr-ack` no longer sends a green status update to every connected editor for
+  every successful acknowledgement. Missing connections and rejected stale ids
+  still show their low-volume diagnostic statuses.
+
 ### Fixed
 
+- `dapr-ack` no longer stores configuration under Node-RED's own `status` key,
+  which a runtime badge could replace with `{text, fill, shape}` during redeploy.
+  Fixed configuration now uses `ackStatus`; non-string outcomes are rejected
+  without interpolating their contents.
 - **A `dapr-subscribe` consumer span now parents on the publisher's span, not on
   the subscribing sidecar's delivery span.** A single delivery took its trace
   context from the request headers, which carry the span of the sidecar

@@ -110,11 +110,19 @@ return [report, msg];`,
           id: 'decide',
           type: 'function',
           z: 'tab',
-          func: "msg.dapr.status = 'RETRY'; return msg;", // always fails, explicitly
+          func: "msg.ackStatus = 'RETRY'; return msg;", // always fails, explicitly
           outputs: 1,
           wires: [['ack']],
         },
-        { id: 'ack', type: 'dapr-ack', z: 'tab', connection: 'c1', wires: [[]] },
+        {
+          id: 'ack',
+          type: 'dapr-ack',
+          z: 'tab',
+          connection: 'c1',
+          ackStatusSource: 'message',
+          ackStatus: 'SUCCESS',
+          wires: [[]],
+        },
         {
           id: 'sub2',
           type: 'dapr-subscribe',

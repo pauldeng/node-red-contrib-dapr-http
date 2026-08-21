@@ -43,7 +43,7 @@
     "type": "function",
     "z": "ex-bulk-tab",
     "name": "decide per entry",
-    "func": "// Each message here is one entry of the batch, carrying its own\n// msg.dapr.entryId and msg.dapr.ackId - keep msg.dapr intact.\nif (!msg.payload || typeof msg.payload.orderId === 'undefined') {\n    msg.dapr.status = 'DROP'; // malformed - never retry it\n} else if (msg.payload.status === 'pending') {\n    msg.dapr.status = 'RETRY'; // upstream isn't ready yet - ask Dapr to redeliver\n} else {\n    msg.dapr.status = 'SUCCESS';\n}\nreturn msg;",
+    "func": "// Each message here is one entry of the batch, carrying its own\n// msg.dapr.entryId and msg.dapr.ackId - keep msg.dapr intact.\nif (!msg.payload || typeof msg.payload.orderId === 'undefined') {\n    msg.ackStatus = 'DROP'; // malformed - never retry it\n} else if (msg.payload.status === 'pending') {\n    msg.ackStatus = 'RETRY'; // upstream isn't ready yet - ask Dapr to redeliver\n} else {\n    msg.ackStatus = 'SUCCESS';\n}\nreturn msg;",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -60,10 +60,11 @@
     "z": "ex-bulk-tab",
     "name": "",
     "connection": "ex-bulk-conn",
-    "status": "SUCCESS",
     "x": 630,
     "y": 140,
-    "wires": [["ex-bulk-debug"]]
+    "wires": [["ex-bulk-debug"]],
+    "ackStatusSource": "message",
+    "ackStatus": "SUCCESS"
   },
   {
     "id": "ex-bulk-debug",

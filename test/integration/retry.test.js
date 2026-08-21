@@ -61,7 +61,8 @@ msg.url = ${JSON.stringify(capture.url)};
 msg.method = 'POST';
 msg.headers = { 'content-type': 'application/json' };
 msg.payload = JSON.stringify({ attempt, status });
-msg.dapr = { ackId, status };
+msg.dapr = { ackId };
+msg.ackStatus = status;
 return msg;`,
           outputs: 1,
           wires: [['report']],
@@ -75,7 +76,15 @@ return msg;`,
           url: '',
           wires: [['ack']],
         },
-        { id: 'ack', type: 'dapr-ack', z: 'tab', connection: 'c1', wires: [[]] },
+        {
+          id: 'ack',
+          type: 'dapr-ack',
+          z: 'tab',
+          connection: 'c1',
+          ackStatusSource: 'message',
+          ackStatus: 'SUCCESS',
+          wires: [[]],
+        },
       ],
     });
     t.after(() => nr.stop());

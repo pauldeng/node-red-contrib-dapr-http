@@ -307,12 +307,20 @@ test(
         type: 'function',
         z: 'tab',
         func: `if (msg.dapr.entryId === 'e3') { return null; }
-msg.dapr.status = msg.dapr.entryId === 'e2' ? 'DROP' : 'SUCCESS';
+msg.ackStatus = msg.dapr.entryId === 'e2' ? 'DROP' : 'SUCCESS';
 return msg;`,
         outputs: 1,
         wires: [['ack']],
       },
-      { id: 'ack', type: 'dapr-ack', z: 'tab', connection: 'c1', status: 'SUCCESS', wires: [[]] },
+      {
+        id: 'ack',
+        type: 'dapr-ack',
+        z: 'tab',
+        connection: 'c1',
+        ackStatusSource: 'message',
+        ackStatus: 'SUCCESS',
+        wires: [[]],
+      },
     ]);
 
     const deliveryPath = await waitFor(async () => {
@@ -664,7 +672,15 @@ test(
         timeoutUnits: 'milliseconds',
         wires: [['ack']],
       },
-      { id: 'ack', type: 'dapr-ack', z: 'tab', connection: 'c1', status: 'SUCCESS', wires: [[]] },
+      {
+        id: 'ack',
+        type: 'dapr-ack',
+        z: 'tab',
+        connection: 'c1',
+        ackStatusSource: 'fixed',
+        ackStatus: 'SUCCESS',
+        wires: [[]],
+      },
     ]);
 
     const deliveryPath = '/node-red-dapr/subscriptions/sub1';

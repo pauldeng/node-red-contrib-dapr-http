@@ -2,6 +2,7 @@
 
 const { test, expect } = require('./helpers/fixtures');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
+const { httpRequest } = require('../helpers/http');
 const { waitFor } = require('../helpers/wait-for');
 const {
   gotoEditor,
@@ -10,6 +11,7 @@ const {
   closeDialog,
   openHelpFor,
   HELP_LABELS,
+  fullFlow,
 } = require('./helpers/editor');
 
 function interactionsFlow({ appPort, daprPort }) {
@@ -206,6 +208,112 @@ test('publish bulk mode is off for a legacy flow and persists when enabled', asy
 
   await openNodeDialog(page, 'pub');
   await expect(page.locator('#node-input-bulkEnabled')).toBeChecked();
+});
+
+test('a legacy ack opens with the safe fixed default and persists message mode', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  const flow = fullFlow({ appPort, daprPort });
+  const ack = flow.find((node) => node.id === 'e2e-ack');
+  delete ack.ackStatusSource;
+  delete ack.ackStatus;
+  ack.status = 'RETRY';
+  await nr.deploy(flow);
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'e2e-ack');
+  await expect(page.locator('#node-input-ackStatusSource')).toHaveValue('fixed');
+  await expect(page.locator('#node-input-ackStatus')).toHaveValue('SUCCESS');
+  await expect(page.locator('#node-ack-fixed-status')).toBeVisible();
+
+  await page.selectOption('#node-input-ackStatusSource', 'message');
+  await expect(page.locator('#node-ack-fixed-status')).toBeHidden();
+  await closeDialog(page, { save: true });
+
+  await openNodeDialog(page, 'e2e-ack');
+  await expect(page.locator('#node-input-ackStatusSource')).toHaveValue('message');
+  await expect(page.locator('#node-ack-fixed-status')).toBeHidden();
+});
+
+test('a successful acknowledgement does not send a status update to the editor', async ({
+  page,
+  nr,
+  appPort,
+}) => {
+  const dapr = await createFakeDaprStarted();
+  dapr.respond('GET', '/v1.0/healthz/outbound', (_req, res) => res.writeHead(204).end());
+  try {
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'ack-status' },
+      {
+        id: 'conn',
+        type: 'dapr-connection',
+        daprHost: '127.0.0.1',
+        daprPort: String(dapr.port),
+        bindAddress: '127.0.0.1',
+        appPort: String(appPort),
+      },
+      {
+        id: 'sub',
+        type: 'dapr-subscribe',
+        z: 'tab',
+        connection: 'conn',
+        pubsubName: 'pubsub',
+        topic: 'orders',
+        ackMode: 'manual',
+        metadata: '{}',
+        wires: [['ack']],
+      },
+      {
+        id: 'ack',
+        type: 'dapr-ack',
+        z: 'tab',
+        connection: 'conn',
+        ackStatusSource: 'fixed',
+        ackStatus: 'SUCCESS',
+        wires: [[]],
+      },
+    ]);
+    await gotoEditor(page, nr);
+    await waitFor(async () => {
+      const response = await httpRequest(`http://127.0.0.1:${appPort}/dapr/subscribe`, {
+        timeoutMs: 1000,
+      });
+      return response.status === 200 && response.text.includes('/node-red-dapr/subscriptions/sub');
+    });
+    await page.evaluate(() => {
+      window.ackStatusUpdates = [];
+      RED.comms.subscribe('status/ack', (_topic, status) => window.ackStatusUpdates.push(status));
+    });
+
+    const delivery = await httpRequest(
+      `http://127.0.0.1:${appPort}/node-red-dapr/subscriptions/sub`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/cloudevents+json' },
+        body: JSON.stringify({
+          specversion: '1.0',
+          id: 'e1',
+          source: 'test',
+          type: 'order',
+          data: { orderId: 7 },
+        }),
+        timeoutMs: 5000,
+      }
+    );
+    expect(delivery.status).toBe(200);
+    expect(JSON.parse(delivery.text)).toEqual({ status: 'SUCCESS' });
+    // A short settle is intentional: this is a negative assertion about the
+    // browser-side status channel after the delivery itself has completed.
+    await page.waitForTimeout(250);
+    expect(await page.evaluate(() => window.ackStatusUpdates)).toEqual([]);
+    await expect(page.locator('g#ack .red-ui-flow-node-status-group')).toBeHidden();
+  } finally {
+    await dapr.stop();
+  }
 });
 
 test('secret output property is a static msg path, not a message-directed destination', async ({

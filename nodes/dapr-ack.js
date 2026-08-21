@@ -1,8 +1,7 @@
 'use strict';
 
 const { DaprError, ErrorCodes } = require('../lib/errors');
-
-const VALID_STATUS = new Set(['SUCCESS', 'RETRY', 'DROP']);
+const { resolveAckStatus } = require('../lib/ack');
 
 module.exports = function registerDaprAck(RED) {
   function DaprAckNode(config) {
@@ -20,11 +19,9 @@ module.exports = function registerDaprAck(RED) {
 
     node.on('input', (msg, send, done) => {
       const dapr = msg.dapr || {};
-      const requested = dapr.status !== undefined ? dapr.status : config.status;
-      const status = typeof requested === 'string' ? requested.toUpperCase() : requested;
-
-      if (!VALID_STATUS.has(status)) {
-        done(new DaprError(ErrorCodes.INVALID_MESSAGE, `invalid ack status: ${requested}`));
+      const { status, error } = resolveAckStatus(msg, config);
+      if (error) {
+        done(new DaprError(ErrorCodes.INVALID_MESSAGE, error));
         return;
       }
       if (typeof dapr.ackId !== 'string' || dapr.ackId === '') {
@@ -36,7 +33,6 @@ module.exports = function registerDaprAck(RED) {
       // already-acknowledged — is rejected (done(error), no send) so it cannot be
       // mistaken for a successful acknowledgement, and never corrupts another.
       if (connection.settleAck(dapr.ackId, status)) {
-        node.status({ fill: 'green', shape: 'dot', text: status.toLowerCase() });
         send(msg);
         done();
       } else {

@@ -69,6 +69,25 @@ store/key that reaches a URL is validated and percent-encoded
 token-bearing request to another Dapr control-plane API. `GET /v1.0/metadata`
 is the one exception with no dynamic segment at all — nothing to interpolate.
 
+**Node configuration never uses a key Node-RED itself writes.** `dapr-ack`
+originally stored its acknowledgement outcome under `status`. The editor assigns a
+node's runtime badge (`{text, fill, shape}`) to that same property and then exports
+every `defaults` key off that same object, so a redeploy serialised the badge over
+the configured value: every acknowledgement failed with
+`invalid ack status: [object Object]`, deliveries redelivered until `maxDeliver`
+was exhausted, and the editor still showed a valid selection throughout. The field
+is `ackStatus` as of 0.2.1, paired with `ackStatusSource` so a flow states whether
+the outcome is that fixed value or `msg.ackStatus`. Nothing declares `status` any
+more, so a badge can never be exported as configuration; the runtime honours a
+legacy string only while `ackStatusSource` is absent, and treats a badge object
+there as the historical `SUCCESS` default. The failure this prevents is the worst
+shape available — an acknowledgement path that looks correct in the editor and
+silently stops settling deliveries.
+
+A successful acknowledgement deliberately sets no badge at all: that would publish
+one status event per delivery to every connected editor. The rare
+missing-connection and stale-id diagnostics remain.
+
 ## Security
 
 **App API token.** Enforce it (configured credential, else `APP_API_TOKEN`) on

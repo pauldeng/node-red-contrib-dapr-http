@@ -287,12 +287,20 @@ const attempt = flow.get('attempt_' + n);
 if (n === 1 && attempt === 1) {
   return null; // deliberately left pending, for the redeploy below to interrupt
 }
-msg.dapr.status = 'SUCCESS';
+msg.ackStatus = 'SUCCESS';
 return msg;`,
       outputs: 1,
       wires: [['ack']],
     },
-    { id: 'ack', type: 'dapr-ack', z: 'tab', connection: 'c1', wires: [[]] },
+    {
+      id: 'ack',
+      type: 'dapr-ack',
+      z: 'tab',
+      connection: 'c1',
+      ackStatusSource: 'message',
+      ackStatus: 'SUCCESS',
+      wires: [[]],
+    },
   ];
 }
 
