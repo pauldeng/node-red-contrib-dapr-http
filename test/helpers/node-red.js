@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { spawn } = require('node:child_process');
+const { EventEmitter, once } = require('node:events');
 
 const { httpRequest } = require('./http');
 
@@ -12,6 +13,30 @@ const WORKSPACE = path.resolve(__dirname, '..', '..');
 const PKG = require(path.join(WORKSPACE, 'package.json'));
 const { setTimeout: delay } = require('node:timers/promises');
 const NODE_RED_BIN = path.join(WORKSPACE, 'node_modules', 'node-red', 'red.js');
+
+async function waitForLogEvent(logEvents, initialText, pattern, timeoutMs) {
+  const matches = (text) =>
+    typeof pattern === 'string' ? text.includes(pattern) : text.search(pattern) !== -1;
+  let text = initialText;
+  if (matches(text)) {
+    return text;
+  }
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    while (!matches(text)) {
+      [text] = await once(logEvents, 'data', { signal });
+    }
+    return text;
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      throw err;
+    }
+    throw new Error(
+      `waitForLog(${pattern}) timed out after ${timeoutMs}ms\n--- logs ---\n${text}`,
+      { cause: err }
+    );
+  }
+}
 
 // A free loopback port for the child Node-RED's admin API, and for each flow's
 // Dapr app channel.
@@ -72,7 +97,7 @@ async function freePort(attempts = 50) {
   );
 }
 
-function settingsSource(uiPort, { loggingExtra = '' } = {}) {
+function settingsSource(uiPort, { loggingExtra = '', startupFlowLoadDelayMs = 0 } = {}) {
   // Minimal, deterministic settings: fixed port, default admin/node roots,
   // no editor auth, projects/tours off, info logging for readiness detection.
   // telemetry.enabled=false skips the first-run "Enable Update Notifications"
@@ -83,12 +108,15 @@ function settingsSource(uiPort, { loggingExtra = '' } = {}) {
   // call) spliced into the `logging` object for tests exercising the
   // settings.js-installed OTel logging bridge; the default preserves every
   // other test's exact prior settings.js output.
+  const storageLine = startupFlowLoadDelayMs
+    ? `  storageModule: require(${JSON.stringify(path.join(__dirname, 'delayed-storage'))}).delayedStorage(${startupFlowLoadDelayMs}),\n`
+    : '';
   return `module.exports = {
   uiPort: ${uiPort},
   httpAdminRoot: '/',
   httpNodeRoot: '/',
   flowFile: 'flows.json',
-  logging: { console: { level: 'info', metrics: false, audit: false }${loggingExtra} },
+${storageLine}  logging: { console: { level: 'info', metrics: false, audit: false }${loggingExtra} },
   editorTheme: { projects: { enabled: false }, tours: false },
   telemetry: { enabled: false },
   functionGlobalContext: {},
@@ -106,7 +134,8 @@ class NodeRed {
     this.proc = null;
     this.port = null;
     this.logs = [];
-    this._logWaiters = new Set(); // (text) => void, notified on each stdio chunk
+    this._logEvents = new EventEmitter();
+    this._logEvents.setMaxListeners(0);
     this._exited = null;
     this._linkPath = null;
   }
@@ -115,13 +144,8 @@ class NodeRed {
   // stream's own 'data' event rather than a poll of logText().
   _appendLog(chunk) {
     this.logs.push(chunk);
-    if (this._logWaiters.size === 0) {
-      return;
-    }
-    const text = this.logText();
-    // Copy first — a waiter removes itself while we iterate.
-    for (const waiter of [...this._logWaiters]) {
-      waiter(text);
+    if (this._logEvents.listenerCount('data') > 0) {
+      this._logEvents.emit('data', this.logText());
     }
   }
 
@@ -132,30 +156,7 @@ class NodeRed {
   // Output already seen is checked first: the line frequently lands before the
   // test gets around to awaiting it, and an event-only API would hang there.
   async waitForLog(pattern, { timeoutMs = 10000 } = {}) {
-    const matches = (text) =>
-      typeof pattern === 'string' ? text.includes(pattern) : text.search(pattern) !== -1;
-    if (matches(this.logText())) {
-      return this.logText();
-    }
-    return new Promise((resolve, reject) => {
-      const waiter = (text) => {
-        if (!matches(text)) {
-          return;
-        }
-        clearTimeout(timer);
-        this._logWaiters.delete(waiter);
-        resolve(text);
-      };
-      const timer = setTimeout(() => {
-        this._logWaiters.delete(waiter);
-        reject(
-          new Error(
-            `waitForLog(${pattern}) timed out after ${timeoutMs}ms\n--- logs ---\n${this.logText()}`
-          )
-        );
-      }, timeoutMs);
-      this._logWaiters.add(waiter);
-    });
+    return waitForLogEvent(this._logEvents, this.logText(), pattern, timeoutMs);
   }
 
   adminUrl(p = '/') {
@@ -171,7 +172,13 @@ class NodeRed {
     return this.logs.join('');
   }
 
-  async start({ flows = [], readyTimeoutMs = 30000, env = {}, loggingExtra = '' } = {}) {
+  async start({
+    flows = [],
+    readyTimeoutMs = 30000,
+    env = {},
+    loggingExtra = '',
+    startupFlowLoadDelayMs = 0,
+  } = {}) {
     this.port = await freePort();
     // Transactional: if any step fails (including readiness), tear down the
     // process and temp directory before rethrowing so nothing leaks.
@@ -191,7 +198,7 @@ class NodeRed {
 
       await fsp.writeFile(
         path.join(this.userDir, 'settings.js'),
-        settingsSource(this.port, { loggingExtra })
+        settingsSource(this.port, { loggingExtra, startupFlowLoadDelayMs })
       );
       await fsp.writeFile(path.join(this.userDir, 'flows.json'), JSON.stringify(flows));
 
@@ -222,31 +229,39 @@ class NodeRed {
     return this;
   }
 
+  // Ready means the runtime has STARTED its own flows, not merely that the
+  // admin port is listening. red.js calls server.listen() when RED.start()
+  // resolves, but runtime start() resolves as soon as the context plugin
+  // loads and leaves loadFlows()/startFlows() running detached (see
+  // @node-red/runtime/lib/index.js) — so /settings answers while the startup
+  // flow load is still in flight.
+  //
+  // A deploy posted into that window is silently lost: setFlows() sees its own
+  // `started` flag false, so it saves the flows and returns 200 WITHOUT
+  // starting them, and the in-flight startup load then overwrites
+  // activeFlowConfig with the config it read from disk before that POST. No
+  // node is ever created, so every node-served route 404s for the rest of the
+  // process's life and the test fails as a route-never-appeared timeout that
+  // names nothing. The harness regression reproduces this deterministically
+  // with a storage adapter that pauses after snapshotting the startup flow.
+  //
+  // Node-RED writes "Started flows" only after startFlows() completes. The log
+  // stream's data event wakes waitForLog directly, so readiness neither polls
+  // an endpoint nor mistakes an open admin socket for a running flow runtime.
   async _waitReady(timeoutMs) {
-    const deadline = Date.now() + timeoutMs;
-    let exited = false;
-    this._exited.then(() => {
-      exited = true;
-    });
-    while (Date.now() < deadline) {
-      if (exited) {
-        throw new Error(`Node-RED exited before becoming ready.\n--- logs ---\n${this.logText()}`);
-      }
-      try {
-        const res = await httpRequest(this.adminUrl('/settings'), {
-          timeoutMs: deadline - Date.now(),
+    try {
+      await this.waitForLog('Started flows', { timeoutMs });
+    } catch (err) {
+      if (this.proc.exitCode !== null || this.proc.signalCode !== null) {
+        throw new Error(`Node-RED exited before becoming ready.\n--- logs ---\n${this.logText()}`, {
+          cause: err,
         });
-        if (res.status >= 200 && res.status < 300) {
-          return;
-        }
-      } catch {
-        // not listening / not responding yet
       }
-      await delay(200);
+      throw new Error(
+        `Node-RED did not become ready within ${timeoutMs}ms.\n--- logs ---\n${this.logText()}`,
+        { cause: err }
+      );
     }
-    throw new Error(
-      `Node-RED did not become ready within ${timeoutMs}ms.\n--- logs ---\n${this.logText()}`
-    );
   }
 
   // Full-deploy a flow set via the documented Admin API (v2). Resolves once the
@@ -342,4 +357,4 @@ class NodeRed {
   }
 }
 
-module.exports = { NodeRed, freePort };
+module.exports = { NodeRed, freePort, waitForLogEvent };

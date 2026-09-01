@@ -70,6 +70,24 @@ test(
 );
 
 test(
+  'start waits for the startup flow load before an immediate deploy',
+  { timeout: 30000 },
+  async (t) => {
+    const nr = new NodeRed();
+    await nr.start({ startupFlowLoadDelayMs: 1500 });
+    t.after(async () => {
+      await nr.stop();
+    });
+
+    await nr.deploy(helloFlow('after-startup-load'));
+    const r = await nr.waitForHttp('/hello', {
+      until: (x) => x.status === 200 && x.json().marker === 'after-startup-load',
+    });
+    assert.equal(r.json().marker, 'after-startup-load');
+  }
+);
+
+test(
   'harness + fake daprd: a flow can call the sidecar and it records the call',
   { timeout: 60000 },
   async (t) => {

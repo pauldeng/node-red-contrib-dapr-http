@@ -8,6 +8,13 @@ const path = require('node:path');
 
 const { ContainerNodeRed } = require('../helpers/node-red-container');
 
+test('container readiness resolves from the flow-started log event', async () => {
+  const nr = new ContainerNodeRed();
+  queueMicrotask(() => nr._appendLog('1 Sep 10:00:00 - [info] Started flows\n'));
+
+  await nr._waitReady(1000);
+});
+
 test('stop treats container-owned temp-dir cleanup as best effort', async (t) => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'nrdapr-unremovable-'));
   const nested = path.join(dir, 'nested');
