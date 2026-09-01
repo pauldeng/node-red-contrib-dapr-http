@@ -32,9 +32,10 @@ const path = require('node:path');
 const os = require('node:os');
 const fsp = require('node:fs/promises');
 const { spawn } = require('node:child_process');
+const { EventEmitter } = require('node:events');
 
 const { httpRequest } = require('./http');
-const { freePort } = require('./node-red');
+const { freePort, waitForLogEvent } = require('./node-red');
 const { execFileP, ensureImage } = require('./docker');
 const { setTimeout: delay } = require('node:timers/promises');
 
@@ -71,6 +72,8 @@ class ContainerNodeRed {
     this.port = null;
     this._logProc = null;
     this._logs = [];
+    this._logEvents = new EventEmitter();
+    this._logEvents.setMaxListeners(0);
   }
 
   adminUrl(p = '/') {
@@ -84,6 +87,17 @@ class ContainerNodeRed {
 
   logText() {
     return this._logs.join('');
+  }
+
+  _appendLog(chunk) {
+    this._logs.push(chunk);
+    if (this._logEvents.listenerCount('data') > 0) {
+      this._logEvents.emit('data', this.logText());
+    }
+  }
+
+  async waitForLog(pattern, { timeoutMs = 10000 } = {}) {
+    return waitForLogEvent(this._logEvents, this.logText(), pattern, timeoutMs);
   }
 
   async start({ flows = [], readyTimeoutMs = 30000, env = {}, loggingExtra = '' } = {}) {
@@ -143,8 +157,8 @@ class ContainerNodeRed {
     this._logProc = spawn('docker', ['logs', '-f', this.name], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    this._logProc.stdout.on('data', (d) => this._logs.push(d.toString()));
-    this._logProc.stderr.on('data', (d) => this._logs.push(d.toString()));
+    this._logProc.stdout.on('data', (d) => this._appendLog(d.toString()));
+    this._logProc.stderr.on('data', (d) => this._appendLog(d.toString()));
   }
 
   async _containerStatus() {
@@ -152,29 +166,26 @@ class ContainerNodeRed {
   }
 
   async _waitReady(timeoutMs) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const status = await this._containerStatus().catch(() => null);
+    try {
+      await this.waitForLog('Started flows', { timeoutMs });
+    } catch (err) {
+      let status = null;
+      try {
+        status = await this._containerStatus();
+      } catch {
+        // Preserve the readiness failure when Docker status is unavailable.
+      }
       if (status && status !== 'running') {
         throw new Error(
-          `Node-RED container exited before becoming ready (state: ${status}).\n--- logs ---\n${this.logText()}`
+          `Node-RED container exited before becoming ready (state: ${status}).\n--- logs ---\n${this.logText()}`,
+          { cause: err }
         );
       }
-      try {
-        const res = await httpRequest(this.adminUrl('/settings'), {
-          timeoutMs: Math.min(deadline - Date.now(), 2000),
-        });
-        if (res.status >= 200 && res.status < 300) {
-          return;
-        }
-      } catch {
-        // not listening yet
-      }
-      await delay(200);
+      throw new Error(
+        `Node-RED container did not become ready within ${timeoutMs}ms.\n--- logs ---\n${this.logText()}`,
+        { cause: err }
+      );
     }
-    throw new Error(
-      `Node-RED container did not become ready within ${timeoutMs}ms.\n--- logs ---\n${this.logText()}`
-    );
   }
 
   // Full-deploy a flow set via the documented Admin API (v2) — identical to
