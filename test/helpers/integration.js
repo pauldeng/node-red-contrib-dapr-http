@@ -34,6 +34,8 @@ const DAPRD_IMAGE =
   'daprio/daprd:1.18.4@sha256:1e218523a15be5be5f36d64aa33a40cbde8fbe963ba6122d42d9c9de5b24a372';
 const REDIS_IMAGE =
   'redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99';
+const PLACEMENT_IMAGE =
+  'daprio/placement:1.18.4@sha256:ec614eefbf6dd8153adc8163f67486092debc50c5fe8eedf48cfe2295e9e17e3';
 const FIXTURES_DIR = path.resolve(__dirname, '..', 'integration', 'fixtures');
 
 function runId() {
@@ -96,7 +98,12 @@ spec:
 // suite that needs only state (no broker) passes this through startDaprd's
 // broker-agnostic `components` array instead of `redisPort` (which would
 // also write the pub/sub component this suite has no use for).
-function stateComponentYaml(redisPort, { name = 'statestore' } = {}) {
+function stateComponentYaml(redisPort, { name = 'statestore', actorStateStore = false } = {}) {
+  const actorMetadata = actorStateStore
+    ? `
+    - name: actorStateStore
+      value: "true"`
+    : '';
   return `apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
@@ -108,7 +115,7 @@ spec:
     - name: redisHost
       value: 127.0.0.1:${redisPort}
     - name: redisPassword
-      value: ''
+      value: ''${actorMetadata}
 `;
 }
 
@@ -213,6 +220,58 @@ async function startRedis({ notifyKeyspaceEvents } = {}) {
   };
 }
 
+// Starts a fresh Dapr Placement service, needed only by the actor runtime
+// (ordinary pub/sub, state, service-invocation, etc. never talk to it).
+// Runs the same binary shape as startRedis()/startDaprd(): raw `docker run`,
+// no --network host (Placement needs no loopback app-port reachability like
+// daprd does), reached instead via an explicit loopback-only -p mapping so a
+// --network host daprd can still dial 127.0.0.1:<grpc> without publishing
+// Placement beyond loopback. --enable-metrics=false avoids a second container
+// claiming the default 9090 metrics port that startDaprd's own --network host
+// sidecars already disable for the same reason (see startDaprd's comment on
+// --enable-metrics).
+async function startPlacement() {
+  await ensureImage(PLACEMENT_IMAGE);
+  const grpcPort = await freePort();
+  const healthzPort = await freePort();
+  const name = `nrdapr-it-placement-${runId()}`;
+  try {
+    await dockerRun([
+      '--name',
+      name,
+      '-p',
+      `127.0.0.1:${grpcPort}:${grpcPort}`,
+      '-p',
+      `127.0.0.1:${healthzPort}:${healthzPort}`,
+      PLACEMENT_IMAGE,
+      './placement',
+      `--port=${grpcPort}`,
+      `--healthz-port=${healthzPort}`,
+      '--enable-metrics=false',
+    ]);
+  } catch (err) {
+    // docker run can leave a named container behind after a partial failure
+    // (e.g. port publication rejected after create). Always gather logs and
+    // remove it before rethrowing, matching the readiness-failure path below.
+    const logs = await dockerLogs(name);
+    await dockerStop(name);
+    throw new Error(`${err.message}\n--- placement logs ---\n${logs}`, { cause: err });
+  }
+  try {
+    await waitForHttp(`http://127.0.0.1:${healthzPort}/healthz`);
+  } catch (err) {
+    const logs = await dockerLogs(name);
+    await dockerStop(name);
+    throw new Error(`${err.message}\n--- placement logs ---\n${logs}`, { cause: err });
+  }
+  return {
+    name,
+    port: grpcPort,
+    stop: () => dockerStop(name),
+    logs: () => dockerLogs(name),
+  };
+}
+
 // Writes a fresh per-run resources directory: the Redis pubsub component
 // (pointed at the given Redis port, if any), any broker-agnostic pre-rendered
 // components a suite supplies directly (e.g. test/helpers/nats.js's
@@ -279,6 +338,7 @@ async function startDaprd({
   daprApiToken,
   env = {},
   httpPort: presetHttpPort,
+  placementAddress,
 }) {
   await ensureImage(DAPRD_IMAGE);
   const resourcesDir = await writeResourcesDir({
@@ -328,6 +388,9 @@ async function startDaprd({
     );
     if (configFixture) {
       args.push(`--config=/components/${configFixture}`);
+    }
+    if (placementAddress) {
+      args.push(`--placement-host-address=${placementAddress}`);
     }
 
     await dockerRun(args);
@@ -379,6 +442,7 @@ async function startDaprd({
 
 module.exports = {
   startRedis,
+  startPlacement,
   startDaprd,
   waitForHttp,
   stateComponentYaml,
@@ -387,5 +451,6 @@ module.exports = {
   secretComponentYaml,
   DAPRD_IMAGE,
   REDIS_IMAGE,
+  PLACEMENT_IMAGE,
   FIXTURES_DIR,
 };

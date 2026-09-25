@@ -22,7 +22,7 @@ test('durable docs list every test tier and CI enforces cheap completion gates',
   // runnable for local iteration.
   assert.equal(
     pkg.scripts['test:integration'],
-    'npm run test:integration:nats && npm run test:integration:dapr && npm run test:integration:redis && node --test --test-concurrency=1 test/integration/telemetry.test.js test/integration/memorydb-pubsub.test.js'
+    'npm run test:integration:nats && npm run test:integration:dapr && npm run test:integration:redis && npm run test:integration:actors && node --test --test-concurrency=1 test/integration/telemetry.test.js test/integration/memorydb-pubsub.test.js'
   );
   assert.equal(
     pkg.scripts['test:integration:nats'],
@@ -32,6 +32,7 @@ test('durable docs list every test tier and CI enforces cheap completion gates',
     pkg.scripts['test:integration'],
     pkg.scripts['test:integration:dapr'],
     pkg.scripts['test:integration:redis'],
+    pkg.scripts['test:integration:actors'],
   ];
   const omitted = fs
     .readdirSync(path.resolve(__dirname, '../integration'))

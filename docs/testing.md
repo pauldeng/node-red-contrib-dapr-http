@@ -25,23 +25,25 @@ covered there like every other node. Runtime tests confirm each node loads.
 ```bash
 npm test                 # unit
 npm run test:runtime     # real Node-RED child-process harness
-npm run test:integration # the complete serialized gate: NATS, then no-broker daprd, then Redis
+npm run test:integration # the complete serialized gate: NATS, daprd, Redis, then actors
 npm run test:e2e         # Playwright tests against the real Node-RED editor
 
 npm run test:integration:nats      # NATS JetStream-backed tests only (test/integration/nats-*.test.js)
 npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown, output bindings, secrets, metadata)
 npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish, state management, dynamic configuration
+npm run test:integration:actors    # Placement + actor-flagged Redis store probe (actors-probe.test.js)
 npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
 
-`npm run test:integration` chains the three focused scripts above, NATS
+`npm run test:integration` chains the four focused scripts above, NATS
 first, then a trailing invocation for the two files that belong to neither
 bucket — `telemetry.test.js`'s broker-free trace/log correlation test and
 `memorydb-pubsub.test.js`'s self-gated optional one. Each `--test-concurrency=1`
 sub-invocation stays fully serialized, so the chain as a whole is too; running
 a focused script on its own during local iteration is faster and just as
 serialized. `npm run test:integration` (only) first runs `pretest:integration`
-(`test/helpers/pull-images.js`), which pre-pulls all five pinned images. A
+(`test/helpers/pull-images.js`), which pre-pulls all six pinned images,
+including the Placement service the actor integration tier needs. A
 cold pull can take minutes on a fresh runner — far longer than a single
 integration test's own timeout, which includes its setup — so pulling happens
 once, up front, outside any individual test's clock, not lazily on whichever
