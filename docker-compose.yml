@@ -48,7 +48,7 @@ services:
       - '4222:4222'
 
   daprd:
-    image: daprio/daprd:1.18.2@sha256:8e94ba37d6bc95875e88545ce7d8ff781354f29080db02706d57446285fcc4a5
+    image: daprio/daprd:1.18.4@sha256:1e218523a15be5be5f36d64aa33a40cbde8fbe963ba6122d42d9c9de5b24a372
     network_mode: host
     depends_on:
       - redis

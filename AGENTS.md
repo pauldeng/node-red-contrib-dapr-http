@@ -13,9 +13,13 @@ token loads on every request. Detail belongs in `docs/`, linked below.
 
 ## Stack
 
-Node.js >= 22.9 · Node-RED 5.0.4 (`>=5.0.1 <6`) · Dapr runtime 1.18.2.
+Node.js >= 22.9 · Node-RED 5.0.4 (`>=5.0.1 <6`) · Dapr runtime 1.18.4.
 Tests use the native `node:test` runner — no Mocha/Jest/Vitest/Sinon/Supertest,
 no `node-red-node-test-helper`.
+
+Dapr images use explicit release tags and immutable digests, never `latest`:
+patches on older release lines can move that tag backwards. CI imports the
+pin from `test/helpers/integration.js`; upgrades are deliberate and tested.
 
 Runtime dependencies are pinned and deliberately minimal, not zero: the
 official OpenTelemetry packages back optional tracing and log export. **Any

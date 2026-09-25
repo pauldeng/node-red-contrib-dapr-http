@@ -11,7 +11,7 @@ No Mocha/Jest/Vitest/Sinon/Supertest and no `node-red-node-test-helper`.
 | ----------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
 | Unit        | `test/unit/`                               | `lib/` module contracts in isolation.                                                                                                | Node only.                                   |
 | Runtime     | `test/runtime/`                            | Real Node-RED loads, registers, wires, and runs the nodes; a fake Dapr HTTP sidecar stands in for daprd.                             | Node + `node-red` CLI.                       |
-| Integration | `test/integration/`                        | Behavior against real daprd 1.18.2, with NATS JetStream as the primary pub/sub broker and Redis as a secondary compatibility target. | Docker.                                      |
+| Integration | `test/integration/`                        | Behavior against real daprd 1.18.4, with NATS JetStream as the primary pub/sub broker and Redis as a secondary compatibility target. | Docker.                                      |
 | E2E         | `test/e2e/`                                | Editor dialogs, validation, and a full publish/subscribe + invoke/service flow.                                                      | Playwright + Node-RED.                       |
 | MemoryDB    | `test/integration/memorydb-pubsub.test.js` | The same chain against a real AWS MemoryDB cluster: TLS, Redis ACL auth, cluster mode.                                               | **Optional** — a live cluster + VPC routing. |
 
@@ -48,7 +48,9 @@ once, up front, outside any individual test's clock, not lazily on whichever
 test happens to need an image first. A focused script run standalone still
 works correctly without it — each container helper calls `ensureImage()`
 itself — it just risks a slow cold pull counting against that test's own
-timeout instead.
+timeout instead. Every image is pinned by tag and digest, so a cached copy is
+already the exact pinned content. Never select a Dapr version with `latest`:
+a patch on an older release line can move that tag backwards.
 
 `test/integration/state.test.js` lives in the Redis bucket for a different
 reason than the pub/sub tests beside it: state management has no
@@ -182,7 +184,7 @@ HTTP. A fake Dapr HTTP sidecar (`test/helpers/fake-dapr.js`) stands in for daprd
 
 The integration harness spins up a fresh, isolated set of pinned containers
 per test file via raw `docker run` (not docker-compose, so files stay
-parallel-safe on dynamically allocated ports): `daprio/daprd:1.18.2`,
+parallel-safe on dynamically allocated ports): `daprio/daprd:1.18.4`,
 `redis:7.4-alpine` (`test/helpers/integration.js`), `nats:2.14.3-alpine`
 (`test/helpers/nats.js` — JetStream only, started with `-js`; `pubsub.natsstreaming`
 is deprecated and out of scope), Node-RED itself, as the pinned

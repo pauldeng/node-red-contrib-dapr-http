@@ -5,6 +5,14 @@ All notable changes to this package. This project follows
 `package.json` is what a consumer installs, so bump it and add an entry here in
 the same change that ships behavior.
 
+## Unreleased
+
+### Changed
+
+- Pin the Dapr integration runtime and deployment examples to 1.18.4 by
+  image digest. The full real-daprd integration suite passes on 1.18.4, and
+  the NATS JetStream `deadLetterTopic` stall still reproduces there.
+
 ## 0.2.1 - 2026-08-22
 
 ### Breaking

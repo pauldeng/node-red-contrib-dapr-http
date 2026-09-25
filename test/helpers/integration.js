@@ -1,6 +1,6 @@
 'use strict';
 
-// Spins up real daprd 1.18.2 + Redis via `docker run` for the integration
+// Spins up real daprd 1.18.4 + Redis via `docker run` for the integration
 // tier — one fresh, isolated pair per test file, on dynamically allocated
 // ports (so test files stay parallel-safe, matching the runtime tier's
 // per-file freePort() convention).
@@ -26,12 +26,12 @@ const { freePort } = require('./node-red');
 const { execFileP, ensureImage } = require('./docker');
 const { setTimeout: delay } = require('node:timers/promises');
 
-// Pinned by digest, not just tag — a tag (even a version tag like "1.18.2")
+// Pinned by digest, not just tag — a tag (even a version tag like "1.18.4")
 // can be moved to point at different content; only the digest is immutable.
 // Re-pin deliberately: `docker image inspect <image>:<tag> --format
 // '{{index .RepoDigests 0}}'` after pulling the tag you intend to adopt.
 const DAPRD_IMAGE =
-  'daprio/daprd:1.18.2@sha256:8e94ba37d6bc95875e88545ce7d8ff781354f29080db02706d57446285fcc4a5';
+  'daprio/daprd:1.18.4@sha256:1e218523a15be5be5f36d64aa33a40cbde8fbe963ba6122d42d9c9de5b24a372';
 const REDIS_IMAGE =
   'redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99';
 const FIXTURES_DIR = path.resolve(__dirname, '..', 'integration', 'fixtures');

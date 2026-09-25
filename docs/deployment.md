@@ -37,7 +37,7 @@ services:
     ports:
       - '1880:1880'
   daprd:
-    image: daprio/daprd:1.18.2@sha256:8e94ba37d6bc95875e88545ce7d8ff781354f29080db02706d57446285fcc4a5
+    image: daprio/daprd:1.18.4@sha256:1e218523a15be5be5f36d64aa33a40cbde8fbe963ba6122d42d9c9de5b24a372
     network_mode: 'service:node-red'
     command:
       - './daprd'
@@ -92,7 +92,7 @@ That component is named `pubsub-nats` (both it and the Redis one live in the sam
 mounted directory, so only one can be called `pubsub`); use topics under
 `manual.*` so they match that stream's subject filter.
 
-With the pinned Dapr 1.18.2 runtime, do not use `deadLetterTopic` with NATS
+With the pinned Dapr 1.18.4 runtime, do not use `deadLetterTopic` with NATS
 JetStream. The real integration test observes the original delivery stall
 before a dead-letter message arrives. Use Redis or broker-side dead-letter
 handling instead, and reverify this limitation before adopting a later Dapr

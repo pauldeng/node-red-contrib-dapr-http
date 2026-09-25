@@ -48,7 +48,7 @@ const { waitFor } = require('../helpers/wait-for');
 const { startCapture } = require('../helpers/capture');
 
 test(
-  'deadLetterTopic stalls with real NATS JetStream in Dapr 1.18.2: bounded wait sees one delivery attempt and no dead-letter message',
+  'deadLetterTopic stalls with real NATS JetStream in Dapr 1.18.4: bounded wait sees one delivery attempt and no dead-letter message',
   { timeout: 60000 },
   async (t) => {
     const appId = 'it-nats-dlt';
