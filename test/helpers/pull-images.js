@@ -9,7 +9,7 @@
 // with images already cached just inspects and returns.
 
 const { ensureImage } = require('./docker');
-const { DAPRD_IMAGE, REDIS_IMAGE, PLACEMENT_IMAGE } = require('./integration');
+const { DAPRD_IMAGE, REDIS_IMAGE, PLACEMENT_IMAGE, SCHEDULER_IMAGE } = require('./integration');
 const { NODE_RED_IMAGE } = require('./node-red-container');
 const { NATS_IMAGE } = require('./nats');
 const { OTEL_COLLECTOR_IMAGE } = require('./otel-collector');
@@ -19,6 +19,7 @@ async function main() {
     DAPRD_IMAGE,
     REDIS_IMAGE,
     PLACEMENT_IMAGE,
+    SCHEDULER_IMAGE,
     NODE_RED_IMAGE,
     NATS_IMAGE,
     OTEL_COLLECTOR_IMAGE,

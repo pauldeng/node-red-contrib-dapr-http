@@ -12,5 +12,11 @@ Changes: the implementations are Node-RED Function nodes, persist one `record`
 through actor replies, and route validation failures through a scoped Catch.
 SetMyData adds an ISO UTC timestamp; the counter accepts one JSON argument object,
 persists its value and returns the new count. Upstream increment methods return
-no result and store the counter in memory. Upstream deletion, timers and reminders
-are omitted. This is a teaching example, not an SDK compatibility layer.
+no result and store the counter in memory. Upstream deletion and timers are
+omitted (this package's v1 has no delete, and timers are not supported). The
+sample's `register_reminder`/`unregister_reminder` are adapted as a
+`dapr-actor-schedule` node (operations set/get/delete), and its
+`receive_reminder` is adapted as a `dapr-actor-method` node with Trigger set
+to Reminder, which receives every reminder of its actor type by name rather
+than one dedicated callback method. This is a teaching example, not an SDK
+compatibility layer.

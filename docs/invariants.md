@@ -122,6 +122,15 @@ before, and "no actors" never raises a restart warning. The one exception is a
 tombstoned actor type: its own paths keep answering 503 after its last method
 is removed; every other `/actors` path falls through to service routes.
 
+**A reminder callback is an ordinary actor turn, under one reserved key that
+no method name can ever equal.** It shares the exact same gate, deadline, and
+reply/commit path as a method call — there is no second commit mechanism to
+keep consistent with the first. One `dapr-actor-method` node's
+`trigger: 'reminder'` registers under a fixed internal key
+(`lib/actor-messages.js`'s `REMINDER_METHOD`) that `validateActorSegment`
+rejects for any configured method name, so an ordinary registration can never
+collide with, or be forged as, the reminder registration.
+
 ## Security
 
 **App API token.** Enforce it (configured credential, else `APP_API_TOKEN`) on

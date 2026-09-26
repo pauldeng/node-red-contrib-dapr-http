@@ -1,0 +1,230 @@
+<script type="text/javascript">
+  // Mirrors lib/actor-messages.js's validateActorSegment: nonempty, bounded,
+  // no "/" or control character, never "." or "..". Editor validation is not
+  // runtime validation. Kept in sync by test/unit/editor-runtime-contract.test.js.
+  function isValidActorSegment(value) {
+    const raw = String(value === undefined || value === null ? '' : value);
+    if (raw === '' || raw.length > 256 || raw === '.' || raw === '..') {
+      return false;
+    }
+    if (raw.includes('/')) {
+      return false;
+    }
+    if (/[\x00-\x1f\x7f]/.test(raw)) {
+      return false;
+    }
+    return true;
+  }
+
+  // Mirrors lib/actor-messages.js's validateScheduleTime: blank is valid
+  // (omitted on the wire), else a string at most 128 characters.
+  function isValidScheduleTime(value) {
+    return value === undefined || (typeof value === 'string' && value.length <= 128);
+  }
+
+  RED.nodes.registerType('dapr-actor-schedule', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      operation: { value: 'set', required: true },
+      actorType: { value: '', required: true, validate: isValidActorSegment },
+      actorId: { value: '', required: true, validate: isValidActorSegment },
+      scheduleName: { value: '', required: true, validate: isValidActorSegment },
+      dueTime: { value: '', validate: isValidScheduleTime },
+      period: { value: '', validate: isValidScheduleTime },
+      ttl: { value: '', validate: isValidScheduleTime },
+      overwrite: { value: true },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-clock-o',
+    paletteLabel: 'actor schedule',
+    label: function () {
+      return this.name || `${this.actorType || 'actor'} ${this.operation || 'set'} reminder`;
+    },
+    oneditprepare: function () {
+      // A flow imported/hand-authored with no `overwrite` key leaves it
+      // `undefined` at the node level (Node-RED does not backfill
+      // defaults.overwrite.value on import -- the same gap dialogs.spec.js
+      // documents for other fields), and Node-RED's editor populates a
+      // checkbox straight from that raw value, so it would render UNCHECKED
+      // even though the runtime default (lib/actor-messages.js's
+      // validateOverwrite) is `true`. Force the checkbox to match the
+      // runtime default here so opening and saving such a node cannot
+      // silently flip its behavior from "unset (true)" to explicit false.
+      if (typeof this.overwrite !== 'boolean') {
+        $('#node-input-overwrite').prop('checked', true);
+      }
+      const updateVisibility = () => {
+        const isSet = $('#node-input-operation').val() === 'set';
+        $('#node-actor-schedule-set-fields').toggle(isSet);
+      };
+      $('#node-input-operation').on('change', updateVisibility);
+      updateVisibility();
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-actor-schedule">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-operation"><i class="fa fa-cogs"></i> Operation</label>
+    <select id="node-input-operation" style="width:70%">
+      <option value="set">Set reminder</option>
+      <option value="get">Get reminder</option>
+      <option value="delete">Delete reminder</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-actorType"><i class="fa fa-cube"></i> Actor type</label>
+    <input type="text" id="node-input-actorType" placeholder="DemoActor" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-actorId"><i class="fa fa-hashtag"></i> Actor id</label>
+    <input type="text" id="node-input-actorId" placeholder="demo-1" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-scheduleName"><i class="fa fa-tag"></i> Reminder name</label>
+    <input type="text" id="node-input-scheduleName" placeholder="demo_reminder" />
+  </div>
+  <div id="node-actor-schedule-set-fields">
+    <div class="form-row">
+      <label for="node-input-dueTime"><i class="fa fa-clock-o"></i> Due time</label>
+      <input type="text" id="node-input-dueTime" placeholder="10s" />
+    </div>
+    <div class="form-row">
+      <label for="node-input-period"><i class="fa fa-refresh"></i> Period</label>
+      <input type="text" id="node-input-period" placeholder="1m (blank: one-shot)" />
+    </div>
+    <div class="form-row">
+      <label for="node-input-ttl"><i class="fa fa-hourglass-end"></i> TTL</label>
+      <input type="text" id="node-input-ttl" placeholder="Forever" />
+    </div>
+    <div class="form-row">
+      <label for="node-input-overwrite" style="width:auto"><i class="fa fa-refresh"></i></label>
+      <input type="checkbox" id="node-input-overwrite" style="display:inline-block; width:auto" />
+      <span>Overwrite an existing reminder of the same name</span>
+    </div>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-actor-schedule">
+  <p>
+    Sets, gets, or deletes one Dapr actor <b>reminder</b> through the local sidecar. A reminder
+    wakes the matching <code>dapr actor method</code> node (with <b>Trigger</b> set to
+    <code>Reminder</code>) on schedule, even if the actor was idle or the app restarted since the
+    reminder was set &mdash; Dapr's Scheduler service, not this app, keeps track of it. Timers are
+    not supported by this package; a reminder is the only scheduled-callback mechanism available.
+  </p>
+
+  <h3>Fields</h3>
+  <dl class="message-properties">
+    <dt>operation</dt>
+    <dd><code>set</code> (create or overwrite), <code>get</code>, or <code>delete</code>.</dd>
+    <dt>actor type / actor id / reminder name</dt>
+    <dd>
+      Identify the actor and the reminder on it, exactly like <code>dapr actor call</code>'s actor
+      type/id fields.
+    </dd>
+    <dt class="optional">due time <span class="property-type">string</span></dt>
+    <dd>
+      When the reminder first fires: an RFC 3339 timestamp (<code>2026-10-01T08:00:00Z</code>) or a
+      duration (<code>5s</code>, <code>10m</code>). A timestamp already in the past fires promptly.
+      Blank omits it.
+    </dd>
+    <dt class="optional">period <span class="property-type">string</span></dt>
+    <dd>
+      How often it repeats after the first firing, as a duration (<code>5s</code>). Blank means
+      one-shot: the reminder fires once and is then gone.
+    </dd>
+    <dt class="optional">ttl <span class="property-type">string</span></dt>
+    <dd>
+      When to stop the reminder outright, as a duration (<code>4s</code>). Blank means forever.
+    </dd>
+    <dt>overwrite <span class="property-type">boolean</span></dt>
+    <dd>
+      Default checked (<code>true</code>, Dapr's own default). Setting an existing reminder name
+      with <code>overwrite</code> true replaces it and <b>resets its whole schedule</b> &mdash; the
+      next firing is timed from the new <code>dueTime</code>, not the original one. With
+      <code>overwrite</code> false, setting a name that already exists fails instead of touching it.
+    </dd>
+  </dl>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt class="optional">payload <span class="property-type">any</span></dt>
+    <dd>
+      For <code>set</code> only: the reminder's data, delivered back on <code>msg.payload</code> to
+      the reminder-trigger method node each time it fires. Omitted entirely (<code>undefined</code>)
+      &rarr; no data key on the wire; explicit
+      <code>null</code>/<code>false</code>/<code>0</code>/<code>""</code>/an array/an object are all
+      sent as given. Data must be JSON-serializable; its encoded callback envelope, including Dapr's
+      escaping, must fit the connection's body limit. Ignored for
+      <code>get</code>/<code>delete</code>.
+    </dd>
+    <dt class="optional">dapr.actorSchedule <span class="property-type">object</span></dt>
+    <dd>
+      Each property present here (<code>operation</code>, <code>actorType</code>,
+      <code>actorId</code>, <code>scheduleName</code>, <code>dueTime</code>, <code>period</code>,
+      <code>ttl</code>, <code>overwrite</code>) overrides this node's configured value for that one
+      message; a present-but-invalid override fails rather than silently falling back to the
+      configured value.
+    </dd>
+  </dl>
+
+  <h3>Outputs</h3>
+  <dl class="message-properties">
+    <dt>payload <span class="property-type">object | null</span></dt>
+    <dd>
+      <code>set</code>/<code>delete</code>: <code>msg</code> passes through unchanged.
+      <code>get</code>: the reminder object Dapr returns (its recorded
+      <code>data</code>/<code>dueTime</code>/ <code>period</code>), or <code>null</code> when no
+      reminder by that name exists &mdash; not an error.
+    </dd>
+  </dl>
+
+  <h3>Details</h3>
+  <p>
+    Needs a Dapr Placement service (like every actor node) and, specifically for reminders, a Dapr
+    Scheduler service (<code>--scheduler-host-address</code>); a sidecar started without it fails
+    every <code>set</code> here. Reminder management must go to a sidecar that actually hosts the
+    target actor type &mdash; any other sidecar answers 403
+    <code>ERR_ACTOR_REMINDER_NON_HOSTED</code>. A remote app should call an actor method that sets
+    the reminder locally instead of addressing this node at another app's sidecar.
+  </p>
+  <p>
+    Setting a reminder from inside a <code>dapr actor method</code> flow takes effect immediately
+    and is <b>not</b> rolled back if that flow's reply or commit later fails &mdash; unlike
+    <code>dapr.actor.nextState</code>, there is no proposal/commit step here to undo.
+  </p>
+  <p>
+    On failure this node calls <code>done(error)</code> once with
+    <code>ACTOR_SCHEDULE_FAILED</code> (a confirmed non-2xx, with Dapr's status/errorCode/message on
+    <code>msg.error.cause</code>) or <code>SIDECAR_UNAVAILABLE</code>/<code>INVALID_MESSAGE</code>.
+    An oversized sidecar response fails as <code>RESPONSE_TOO_LARGE</code>.
+  </p>
+
+  <h3>Example</h3>
+  <p>
+    Wire an Inject (overriding <code>msg.dapr.actorSchedule</code> and, for <code>set</code>,
+    <code>msg.payload</code>) &rarr; <code>dapr actor schedule</code>. See
+    <code>examples/actor-demo.json</code>, which sets a repeating <code>demo_reminder</code>, a
+    one-shot reminder at a fixed RFC 3339 time, and deletes the repeating one again:
+  </p>
+  <pre>
+// Inject node props: msg.payload and msg.dapr.actorSchedule
+msg.payload = { message: "reminder_state" };
+msg.dapr.actorSchedule = {
+  operation: "set", actorType: "DemoActor", actorId: "demo-1",
+  scheduleName: "demo_reminder", dueTime: "5s", period: "5s"
+};</pre>
+</script>

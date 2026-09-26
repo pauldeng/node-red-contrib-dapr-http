@@ -1389,3 +1389,424 @@ test(
     assert.equal(nr.proc.signalCode, null, 'shutdown must not require SIGKILL');
   }
 );
+
+// ---- milestone 4: actor REMINDERS -------------------------------------------
+
+function remindPath(type, id, name) {
+  return `/actors/${type}/${id}/method/remind/${name}`;
+}
+
+function remindPut(appPort, type, id, name, bodyText) {
+  return httpRequest(`http://127.0.0.1:${appPort}${remindPath(type, id, name)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: bodyText,
+    timeoutMs: 8000,
+  });
+}
+
+test(
+  'reminder callback: PUT .../method/remind/{name} routes to a trigger:"reminder" method node, and the save must complete before the response',
+  { timeout: 30000 },
+  async (t) => {
+    const saveGate = Promise.withResolvers();
+    let savedBody = null;
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        ['GET', stateReadPath('RemT', 'd1'), (_req, res) => res.writeHead(204).end()],
+        [
+          'POST',
+          stateSavePath('RemT', 'd1'),
+          async (_req, res, ctx) => {
+            savedBody = ctx.body.toString('utf8');
+            await saveGate.promise;
+            res.writeHead(204).end();
+          },
+        ],
+      ],
+    });
+
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'remt' },
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '5' }),
+      {
+        id: 'm1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'RemT',
+        trigger: 'reminder',
+        wires: [['fn1']],
+      },
+      {
+        id: 'fn1',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = { ok: true };\nmsg.dapr.actor.nextState = { name: msg.dapr.actor.trigger.name, data: msg.dapr.actor.state === null ? "no-state" : msg.dapr.actor.state };\nreturn msg;',
+        outputs: 1,
+        wires: [['reply1']],
+      },
+      {
+        id: 'reply1',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+    ]);
+    await dapr.waitForRequest(healthPath);
+
+    const pending = remindPut(
+      appPort,
+      'RemT',
+      'd1',
+      'demo_reminder',
+      '{"data":{"greeting":"hi"},"dueTime":"","period":""}'
+    );
+    await dapr.waitForRequest((r) => r.method === 'POST' && r.path === stateSavePath('RemT', 'd1'));
+
+    const race = await notYetSettled(pending, 200);
+    assert.equal(race, NOT_YET, 'the caller must not see a response before the save resolves');
+
+    saveGate.resolve();
+    const res = await pending;
+    assert.equal(res.status, 200, res.text);
+    assert.equal(
+      savedBody,
+      JSON.stringify([
+        {
+          operation: 'upsert',
+          request: { key: 'record', value: { name: 'demo_reminder', data: 'no-state' } },
+        },
+      ])
+    );
+  }
+);
+
+test(
+  'a duplicate reminder registration for the same actor type is rejected and logged',
+  { timeout: 30000 },
+  async (t) => {
+    const { dapr, nr, appPort } = await startHarness(t);
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'dup-rem' },
+      connectionNode(appPort, dapr.port),
+      {
+        id: 'r1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'DUPREM',
+        trigger: 'reminder',
+        wires: [[]],
+      },
+      {
+        id: 'r2',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'DUPREM',
+        trigger: 'reminder',
+        wires: [[]],
+      },
+    ]);
+    await nr.waitForLog(/duplicate actor method DUPREM\/remind\//i, { timeoutMs: 5000 });
+  }
+);
+
+test(
+  'a method literally named "reminder" and a reminder registration coexist on one actor type -- PUT .../method/reminder reaches the method node, PUT .../method/remind/x reaches the reminder node',
+  { timeout: 30000 },
+  async (t) => {
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        ['GET', stateReadPath('ReminderWord', 'd1'), (_req, res) => res.writeHead(204).end()],
+      ],
+    });
+
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'reminder-word' },
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '5' }),
+      {
+        id: 'm1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'ReminderWord',
+        method: 'reminder', // an ordinary method literally named "reminder"
+        wires: [['fn-method']],
+      },
+      {
+        id: 'fn-method',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = "method-node";\nreturn msg;',
+        outputs: 1,
+        wires: [['reply-method']],
+      },
+      {
+        id: 'reply-method',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+      {
+        id: 'r1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'ReminderWord',
+        trigger: 'reminder',
+        wires: [['fn-reminder']],
+      },
+      {
+        id: 'fn-reminder',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = "reminder-node:" + msg.dapr.actor.trigger.name;\nreturn msg;',
+        outputs: 1,
+        wires: [['reply-reminder']],
+      },
+      {
+        id: 'reply-reminder',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+    ]);
+    await dapr.waitForRequest(healthPath);
+
+    const methodRes = await actorPut(appPort, 'ReminderWord', 'd1', 'reminder', {});
+    assert.equal(methodRes.status, 200, methodRes.text);
+    assert.equal(JSON.parse(methodRes.text), 'method-node');
+
+    const reminderRes = await remindPut(
+      appPort,
+      'ReminderWord',
+      'd1',
+      'x',
+      '{"dueTime":"","period":""}'
+    );
+    assert.equal(reminderRes.status, 200, reminderRes.text);
+    assert.equal(JSON.parse(reminderRes.text), 'reminder-node:x');
+  }
+);
+
+// ---- milestone 4: dapr-actor-schedule ---------------------------------------
+
+function scheduleReminderPath(type, id, name) {
+  return `/v1.0/actors/${type}/${id}/reminders/${name}`;
+}
+
+function scheduleFlow({ appPort, daprPort }) {
+  return [
+    { id: 'tab', type: 'tab', label: 'sched' },
+    connectionNode(appPort, daprPort, { requestTimeoutSec: '5' }),
+    { id: 'in', type: 'http in', z: 'tab', url: '/sched', method: 'post', wires: [['before']] },
+    {
+      id: 'before',
+      type: 'function',
+      z: 'tab',
+      func: 'const body = msg.payload;\nmsg.dapr = body.dapr;\nmsg.payload = Object.hasOwn(body, "payload") ? body.payload : undefined;\nreturn msg;',
+      outputs: 1,
+      wires: [['sched1']],
+    },
+    {
+      id: 'sched1',
+      type: 'dapr-actor-schedule',
+      z: 'tab',
+      connection: 'c1',
+      operation: 'set',
+      actorType: 'SchedType',
+      actorId: 'sched-1',
+      scheduleName: 'demo_reminder',
+      dueTime: '10s',
+      period: '',
+      ttl: '',
+      overwrite: true,
+      wires: [['success']],
+    },
+    {
+      id: 'success',
+      type: 'function',
+      z: 'tab',
+      func: 'msg.statusCode = 200; msg.payload = { payload: msg.payload }; return msg;',
+      outputs: 1,
+      wires: [['res']],
+    },
+    {
+      id: 'errors',
+      type: 'catch',
+      z: 'tab',
+      scope: ['sched1'],
+      uncaught: false,
+      wires: [['failure']],
+    },
+    {
+      id: 'failure',
+      type: 'function',
+      z: 'tab',
+      func: 'msg.statusCode = 503; msg.payload = { message: msg.error.message, code: msg.error.code, cause: msg.error.cause }; return msg;',
+      outputs: 1,
+      wires: [['res']],
+    },
+    { id: 'res', type: 'http response', z: 'tab' },
+  ];
+}
+
+// `arguments.length` (not a third named parameter) distinguishes "payload
+// omitted entirely" from "payload passed as undefined" -- the flow's own
+// `before` function relies on Object.hasOwn to tell those apart the same way
+// dapr-actor-schedule.js does for msg.payload.
+function postSchedule(nr, dapr) {
+  const body = arguments.length >= 3 ? { dapr, payload: arguments[2] } : { dapr };
+  return httpRequest(nr.nodeUrl('/sched'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    timeoutMs: 5000,
+  });
+}
+
+test(
+  'schedule node: set sends dueTime/overwrite/data explicitly (period/ttl omitted when blank); get resolves the reminder or null; delete resolves',
+  { timeout: 30000 },
+  async (t) => {
+    const requests = [];
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        [
+          'POST',
+          scheduleReminderPath('SchedType', 'sched-1', 'demo_reminder'),
+          (_req, res, ctx) => {
+            requests.push(JSON.parse(ctx.body.toString()));
+            res.writeHead(204).end();
+          },
+        ],
+        [
+          'GET',
+          scheduleReminderPath('SchedType', 'sched-1', 'demo_reminder'),
+          (_req, res) => {
+            res
+              .writeHead(404, { 'content-type': 'application/json' })
+              .end(JSON.stringify({ errorCode: 'ERR_ACTOR_REMINDER_NOT_FOUND' }));
+          },
+        ],
+        [
+          'DELETE',
+          scheduleReminderPath('SchedType', 'sched-1', 'demo_reminder'),
+          (_req, res) => res.writeHead(204).end(),
+        ],
+      ],
+    });
+    await nr.deploy(scheduleFlow({ appPort, daprPort: dapr.port }));
+    await nr.waitForLog(/Dapr sidecar is available/i);
+
+    const setRes = await postSchedule(nr, {}, { message: 'hi' }); // config default operation: 'set'
+    assert.equal(setRes.status, 200, setRes.text);
+    assert.deepEqual(requests[0], { dueTime: '10s', data: { message: 'hi' }, overwrite: true });
+
+    const getRes = await postSchedule(nr, { actorSchedule: { operation: 'get' } });
+    assert.equal(getRes.status, 200, getRes.text);
+    assert.equal(JSON.parse(getRes.text).payload, null);
+
+    const delRes = await postSchedule(nr, { actorSchedule: { operation: 'delete' } });
+    assert.equal(delRes.status, 200, delRes.text);
+  }
+);
+
+test(
+  'schedule node: msg.dapr.actorSchedule overrides the target/time fields per message; a present-but-invalid override fails rather than falling back',
+  { timeout: 30000 },
+  async (t) => {
+    const requests = [];
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        [
+          'POST',
+          scheduleReminderPath('OverrideType', 'override-1', 'override_reminder'),
+          (_req, res, ctx) => {
+            requests.push(JSON.parse(ctx.body.toString()));
+            res.writeHead(204).end();
+          },
+        ],
+      ],
+    });
+    await nr.deploy(scheduleFlow({ appPort, daprPort: dapr.port }));
+    await nr.waitForLog(/Dapr sidecar is available/i);
+
+    const overrideRes = await postSchedule(
+      nr,
+      {
+        actorSchedule: {
+          actorType: 'OverrideType',
+          actorId: 'override-1',
+          scheduleName: 'override_reminder',
+          period: '1m',
+          overwrite: false,
+        },
+      },
+      { x: 1 }
+    );
+    assert.equal(overrideRes.status, 200, overrideRes.text);
+    assert.deepEqual(requests[0], {
+      dueTime: '10s', // not overridden -- falls back to the configured value
+      period: '1m',
+      data: { x: 1 },
+      overwrite: false,
+    });
+
+    const badRes = await postSchedule(nr, { actorSchedule: { actorType: '' } }, {});
+    assert.equal(badRes.status, 503);
+    assert.equal(JSON.parse(badRes.text).code, 'INVALID_MESSAGE');
+    assert.equal(requests.length, 1, 'the invalid override must never have reached the sidecar');
+    for (const overwrite of [null, '']) {
+      const invalid = await postSchedule(nr, {
+        actorSchedule: {
+          actorType: 'OverrideType',
+          actorId: 'override-1',
+          scheduleName: 'override_reminder',
+          overwrite,
+        },
+      });
+      assert.equal(JSON.parse(invalid.text).code, 'INVALID_MESSAGE');
+    }
+    assert.equal(requests.length, 1, 'invalid overwrite must never replace a reminder');
+  }
+);
+
+test(
+  'schedule node: a confirmed non-2xx from the sidecar fails as ACTOR_SCHEDULE_FAILED with bounded cause',
+  { timeout: 30000 },
+  async (t) => {
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        [
+          'POST',
+          scheduleReminderPath('SchedType', 'sched-1', 'demo_reminder'),
+          (_req, res) =>
+            res.writeHead(409, { 'content-type': 'application/json' }).end(
+              JSON.stringify({
+                errorCode: 'ERR_ACTOR_REMINDER_ALREADY_EXISTS',
+                message: 'exists',
+              })
+            ),
+        ],
+      ],
+    });
+    await nr.deploy(scheduleFlow({ appPort, daprPort: dapr.port }));
+    await nr.waitForLog(/Dapr sidecar is available/i);
+
+    const res = await postSchedule(nr, {}, {});
+    assert.equal(res.status, 503);
+    const body = JSON.parse(res.text);
+    assert.equal(body.code, 'ACTOR_SCHEDULE_FAILED');
+    assert.equal(body.cause.statusCode, 409);
+    assert.equal(body.cause.errorCode, 'ERR_ACTOR_REMINDER_ALREADY_EXISTS');
+  }
+);

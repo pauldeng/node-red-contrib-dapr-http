@@ -27,7 +27,9 @@ A `dapr-connection` node manages two things that never share a listener:
     (`POST /configuration/<store>/<key>`, one per watched key). These use
     `kind: 'internal'`, so a mesh service caller cannot address them.
   - With actor methods registered: `GET /dapr/config`,
-    `PUT /actors/<type>/<id>/method/<method>`, and the deactivation callback
+    `PUT /actors/<type>/<id>/method/<method>` (including the reminder callback
+    shape `method/remind/<name>`, routed to the one node registered with
+    `trigger: 'reminder'` for that type), and the deactivation callback
     `DELETE /actors/<type>/<id>`. Removed registrations remain retryable;
     see "Actor request ownership" below.
   - Everything else: 404. A registered path called with the wrong verb: 405
@@ -94,12 +96,13 @@ nodes/dapr-config-get.js   configuration get wrapper (message-triggered)
 nodes/dapr-config-subscribe.js  configuration subscribe wrapper (deploy-time, long-lived)
 nodes/dapr-binding-out.js  output-binding invoke wrapper (message-triggered)
 nodes/dapr-secret-get.js   scoped single-secret retrieval wrapper (message-triggered)
-nodes/dapr-actor-method.js inbound actor method registration
+nodes/dapr-actor-method.js inbound actor method registration (or, trigger:'reminder', every reminder of a type)
 nodes/dapr-actor-reply.js  validates and settles an actor reply proposal
 nodes/dapr-actor-call.js   outbound actor invocation wrapper
+nodes/dapr-actor-schedule.js  set/get/delete one actor reminder
 lib/actor-host.js          actor turn ownership, state read, reply wait and commit
-lib/actor-client.js        sidecar actor invocation and record storage APIs
-lib/actor-messages.js      actor identity and reply proposal validation
+lib/actor-client.js        sidecar actor invocation, record storage, and reminder set/get/delete APIs
+lib/actor-messages.js      actor identity, reply proposal, and reminder schedule validation
 lib/options.js             config/env precedence and validation
 lib/messages.js            content-type inference and CloudEvent conversion
 lib/state-messages.js      per-message state request validation and shaping
@@ -387,6 +390,66 @@ which asserts each point so a pin bump that changes one fails:
   `ERR_ACTOR_INSTANCE_MISSING`. Method calls and state need Placement but not
   the Scheduler service.
 
+### Actor reminders
+
+Observed against real daprd 1.18.4 + Placement + Scheduler by
+`test/integration/actors-schedule-probe.test.js` (raw wire protocol) and
+`test/integration/actors-reminders.test.js` (the shipped nodes end to end).
+Timers exist on the same wire protocol but are not exposed by this package
+(no node schedules one); the probe covers them only to document their
+existence, not to support them.
+
+- **Reminder callback routing shares actor invocation entirely.** `lib/app-channel.js`
+  parses `PUT /actors/{type}/{id}/method/remind/{name}` into
+  `{ shape: 'reminder', type, id, name }` and hands it to the exact same
+  `lib/actor-host.js` turn (gate, deadline, commit) as an ordinary method
+  call; only the registry key and the emitted trigger identity differ. One
+  `dapr-actor-method` node's `trigger: 'reminder'` registers under
+  `lib/actor-messages.js`'s `REMINDER_METHOD` (`'remind/'`) instead of a
+  configured method name — a key `validateActorSegment` can never accept for
+  an ordinary method (it contains `/`), so a plain method registration can
+  never collide with, or be forged as, the reminder registration; there is
+  exactly one such registration per actor type on a connection (a duplicate is
+  rejected the same way a duplicate ordinary method pair is).
+- **The callback body is daprd's own fixed envelope**, never the raw
+  scheduling call's argument: `{"data":<value>,"dueTime":"","period":""}`,
+  with `data` omitted entirely when the reminder was created with none.
+  `lib/actor-host.js` unwraps `data` onto `msg.payload` and sets
+  `msg.dapr.actor.trigger = { kind: 'reminder', name }` (also mirrored onto
+  `msg.dapr.actor.method`) from the parsed route — never from this body — so
+  a forged envelope cannot spoof which reminder fired. A reminder callback
+  never carries `dapr-caller-app-id`, whether delivered locally or forwarded
+  to the replica hosting the actor (`actors-replicas-probe.test.js`), and
+  carries `traceparent` only sometimes. Reminder routes reject `dapr-caller-app-id` as internal
+  callbacks; ordinary actor method calls still accept it.
+- **A failing, expired, or commit-unknown reminder occurrence is retried by
+  daprd itself**, up to 3 more times about 1 second apart, before it gives up
+  on that occurrence and waits for the next one — reminder flows must
+  tolerate being run more than once for the same firing. Nothing disables a
+  reminder that keeps failing.
+- **Setting an existing name with `overwrite: true` (the default) resets the
+  whole schedule**, timing the next firing from the new `dueTime` rather than
+  the original one; `overwrite: false` against an existing name fails with
+  409 `ERR_ACTOR_REMINDER_ALREADY_EXISTS` instead. Delete is idempotent (204
+  whether or not the name existed). Get resolves the reminder Dapr reports
+  or, specifically for a 404 body carrying `ERR_ACTOR_REMINDER_NOT_FOUND`,
+  `{ found: false }`; any other non-2xx is an ordinary confirmed failure.
+- **Reminder management must go to a sidecar that hosts the target actor
+  type**; any other sidecar answers 403 `ERR_ACTOR_REMINDER_NON_HOSTED` for
+  set/get alike. A remote app reaches a reminder by calling an actor method
+  that sets it locally, not by addressing this package's schedule node at
+  another app's sidecar.
+- **Setting a reminder inside a method flow is not transactional with that
+  flow.** It takes effect as soon as the sidecar call completes and is never
+  rolled back by a later reply or commit failure — unlike
+  `dapr.actor.nextState`, there is no proposal/commit step for a schedule
+  call to participate in.
+- The reply's `X-DaprReminderCancel` header is recognized by daprd's
+  app-dispatch layer but not wired to the Scheduler on 1.18.4 (a known
+  upstream TODO): a reminder keeps firing on schedule regardless of a reply's
+  outcome. This package's reply node exposes no "cancel" outcome for that
+  reason; stop a reminder with a schedule delete instead.
+
 ### Actor limits
 
 - There is no storage-level fence. The actor HTTP API does not expose the
@@ -396,7 +459,9 @@ which asserts each point so a pin bump that changes one fails:
 - A caller-side timeout or `ACTOR_COMMIT_UNKNOWN` does not prove the write did
   not happen. The next call reads the authoritative record.
 - A method flow must finish within the connection's request timeout minus the
-  commit reserve. Delays, reminders and timers belong outside the method flow.
+  commit reserve. Long delays and retries belong outside the method flow;
+  scheduling a reminder from inside one is an ordinary bounded sidecar call,
+  but the reminder's own callback always runs as a later, separate turn.
 
 Actor-call errors retain the stable `ACTOR_INVOKE_FAILED` code and generic
 message. For non-2xx responses, `Error.cause` carries `statusCode` and any

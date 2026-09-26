@@ -41,9 +41,10 @@ own dialog rather than dragged from the palette.
 | `dapr-config-subscribe` | Watch configuration keys and emit a message whenever any of them change.                 |
 | `dapr-binding-out`      | Invoke an output binding with a component-specific operation.                            |
 | `dapr-secret-get`       | Read one scoped secret from a secret store.                                              |
-| `dapr-actor-method`     | Register an actor method; emits its argument and loaded state.                           |
+| `dapr-actor-method`     | Register an actor method, or (Trigger: Reminder) every reminder of a type.               |
 | `dapr-actor-reply`      | Settle an actor method's response and optional next state.                               |
 | `dapr-actor-call`       | Invoke an actor method through the local sidecar.                                        |
+| `dapr-actor-schedule`   | Set, get, or delete an actor reminder.                                                   |
 
 ## Scope
 
@@ -88,13 +89,16 @@ export:
   loaded record; a reply node proposes the response and, optionally, the
   replacement record (the reply node never touches storage itself — the
   request handler commits after the reply is accepted); a call node invokes a
-  method on any actor through the local sidecar. Needs a Dapr Placement
-  service and a state-store component configured with
-  `actorStateStore: "true"`. See `examples/actor-demo.json`.
+  method on any actor through the local sidecar; a schedule node sets, gets,
+  or deletes a reminder, and a method node with its Trigger set to Reminder
+  receives every reminder of its actor type. Needs a Dapr Placement service
+  and a state-store component configured with `actorStateStore: "true"`;
+  reminders additionally need a Dapr Scheduler service. Timers are not
+  supported. See `examples/actor-demo.json`.
 
-Deliberately **not** covered: input bindings, bulk secrets, actor reminders,
-timers, and reentrancy, workflows, distributed lock, jobs, the conversation
-API, and gRPC transport.
+Deliberately **not** covered: input bindings, bulk secrets, actor timers and
+reentrancy, workflows, distributed lock, jobs, the conversation API, and gRPC
+transport.
 A flow that needs one of those can reach it with a `dapr-invoke` node or a
 core `http request` node against the sidecar's own API in the meantime.
 
@@ -284,7 +288,9 @@ daprd. See `examples/actor-demo.json` and "Run the actor example" in
 `examples/README.md`.
 
 - **Setup:** run a Dapr Placement service and give daprd one state-store
-  component with `actorStateStore: "true"`. Scheduler is not needed.
+  component with `actorStateStore: "true"`. Reminders additionally need a
+  Dapr Scheduler service (`--scheduler-host-address`); method calls and state
+  do not need it.
 - **Restart daprd after adding or removing an actor type.** daprd reads
   `/dapr/config` once at startup; the connection shows `restart sidecar` when
   its advertised types changed. Adding a method to an existing type needs no
@@ -296,8 +302,16 @@ daprd. See `examples/actor-demo.json` and "Run the actor example" in
 - **A timeout is not proof nothing was saved.** Treat `ACTOR_COMMIT_UNKNOWN`
   and caller timeouts as "unknown" and read the record again.
 - **Keep method flows short.** They must reply within the connection's request
-  timeout minus a commit reserve. Put Delay nodes, schedules and retries
-  outside the method flow. Actor reminders and timers are not supported.
+  timeout minus a commit reserve. Put Delay nodes and retries outside the
+  method flow.
+- **Reminders wake an actor on schedule, even if it went idle or the app
+  restarted.** Set/get/delete one with `dapr-actor-schedule`; a
+  `dapr-actor-method` node with Trigger set to Reminder receives every
+  reminder of its actor type, named on each firing by
+  `msg.dapr.actor.trigger.name`. A failing, expired, or commit-unknown
+  reminder flow is retried a bounded number of times by daprd itself, so
+  reminder flows must tolerate being run more than once for the same firing.
+  Timers are not supported by this package.
 
 ## More documentation
 

@@ -103,6 +103,22 @@ function interactionsFlow({ appPort, daprPort }) {
       y: 520,
       wires: [[]],
     },
+    {
+      id: 'actorSchedule',
+      type: 'dapr-actor-schedule',
+      z: 'tab',
+      name: 'schedule reminder',
+      connection: 'conn',
+      operation: 'set',
+      actorType: 'DemoActor',
+      actorId: 'demo-1',
+      scheduleName: 'demo_reminder',
+      dueTime: '5s',
+      period: '5s',
+      x: 200,
+      y: 600,
+      wires: [[]],
+    },
   ];
 }
 
@@ -614,4 +630,126 @@ test('actor call rejects an actor type containing a slash', async ({
   await actorId.fill('demo/1');
   await actorId.blur();
   await expect(actorId).toHaveClass(/input-error/);
+});
+
+test('actor method trigger select persists and hides/relaxes the method field in reminder mode', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  // The fixture's actorMethod node has no `trigger` key at all (an imported,
+  // pre-reminder flow) -- regression lock for the editor defect where
+  // Node-RED's own field population leaves the select blank for a missing
+  // property instead of the node's own runtime default ('method').
+  await openNodeDialog(page, 'actorMethod');
+  const trigger = page.locator('#node-input-trigger');
+  await expect(trigger).toHaveValue('method');
+  await expect(page.locator('#node-actor-method-field')).toBeVisible();
+
+  await trigger.selectOption('reminder');
+  await expect(page.locator('#node-actor-method-field')).toBeHidden();
+  await closeDialog(page, { save: true });
+
+  await openNodeDialog(page, 'actorMethod');
+  await expect(page.locator('#node-input-trigger')).toHaveValue('reminder');
+  await expect(page.locator('#node-actor-method-field')).toBeHidden();
+  await closeDialog(page, { save: true });
+
+  expect(await page.evaluate(() => RED.nodes.node('actorMethod').valid)).toBe(true);
+});
+
+test('actor schedule operation select shows/hides the set-only fields and persists across save/reopen', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'actorSchedule');
+  const operation = page.locator('#node-input-operation');
+  const setFields = page.locator('#node-actor-schedule-set-fields');
+  await expect(operation).toHaveValue('set');
+  await expect(setFields).toBeVisible();
+
+  await operation.selectOption('get');
+  await expect(setFields).toBeHidden();
+  await operation.selectOption('delete');
+  await expect(setFields).toBeHidden();
+  await operation.selectOption('set');
+  await expect(setFields).toBeVisible();
+
+  await page.fill('#node-input-actorType', 'OtherActor');
+  await page.fill('#node-input-actorId', 'other-1');
+  await page.fill('#node-input-scheduleName', 'other_reminder');
+  await page.fill('#node-input-dueTime', '10s');
+  await operation.selectOption('get');
+  await closeDialog(page, { save: true });
+
+  await openNodeDialog(page, 'actorSchedule');
+  await expect(page.locator('#node-input-operation')).toHaveValue('get');
+  await expect(page.locator('#node-input-actorType')).toHaveValue('OtherActor');
+  await expect(page.locator('#node-input-actorId')).toHaveValue('other-1');
+  await expect(page.locator('#node-input-scheduleName')).toHaveValue('other_reminder');
+  await expect(page.locator('#node-actor-schedule-set-fields')).toBeHidden();
+});
+
+test('actor schedule required fields (actor type, actor id, reminder name) mark the node invalid when blank', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'actorSchedule');
+
+  const actorType = page.locator('#node-input-actorType');
+  await actorType.fill('');
+  await actorType.blur();
+  await expect(actorType).toHaveClass(/input-error/);
+  await actorType.fill('DemoActor');
+  await actorType.blur();
+  await expect(actorType).not.toHaveClass(/input-error/);
+
+  const actorId = page.locator('#node-input-actorId');
+  await actorId.fill('');
+  await actorId.blur();
+  await expect(actorId).toHaveClass(/input-error/);
+  await actorId.fill('demo-1');
+  await actorId.blur();
+  await expect(actorId).not.toHaveClass(/input-error/);
+
+  const scheduleName = page.locator('#node-input-scheduleName');
+  await scheduleName.fill('');
+  await scheduleName.blur();
+  await expect(scheduleName).toHaveClass(/input-error/);
+  await closeDialog(page, { save: true });
+
+  expect(await page.evaluate(() => RED.nodes.node('actorSchedule').valid)).toBe(false);
+});
+
+test('actor schedule overwrite checkbox defaults to checked for a node with no configured overwrite', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  // e2e-actor-schedule (test/e2e/helpers/editor.js's fullFlow) omits the
+  // optional overwrite field entirely, the same convention dialogs.spec.js
+  // documents for other fields -- regression lock for the editor defect
+  // where Node-RED populates a checkbox straight from the node's raw
+  // (undefined) property instead of the runtime's own true default.
+  await nr.deploy(fullFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'e2e-actor-schedule');
+  await expect(page.locator('#node-input-overwrite')).toBeChecked();
+  await closeDialog(page, { save: false });
 });

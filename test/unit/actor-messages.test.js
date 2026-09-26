@@ -3,7 +3,14 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { validateActorSegment, serializeProposal } = require('../../lib/actor-messages');
+const {
+  validateActorSegment,
+  serializeProposal,
+  validateScheduleTime,
+  validateOverwrite,
+  prepareReminderData,
+  REMINDER_METHOD,
+} = require('../../lib/actor-messages');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 
 test('validateActorSegment accepts an ordinary identifier', () => {
@@ -240,4 +247,123 @@ test('fail replies respect the byte limit even with multibyte error text', () =>
 
 test('an unknown outcome is invalid', () => {
   assert.throws(() => serializeProposal({ payload: 1 }, 'other'), DaprError);
+});
+
+// ---- REMINDER_METHOD --------------------------------------------------------
+//
+// Deliberately the OPPOSITE of a normal registry key: it must be a value no
+// real, user-configured method name can ever equal, or an ordinary method
+// registration could collide with (or be silently routed into) the reminder
+// registration -- see lib/connection-registry.js's addActorMethod.
+
+test('REMINDER_METHOD is never a valid actor segment -- no real method name can equal it', () => {
+  assert.throws(() => validateActorSegment(REMINDER_METHOD, 'method'), DaprError);
+});
+
+// ---- validateScheduleTime ---------------------------------------------------
+
+test('validateScheduleTime: absent or empty means omitted', () => {
+  assert.equal(validateScheduleTime(undefined, 'dueTime'), undefined);
+  assert.equal(validateScheduleTime('', 'dueTime'), undefined);
+});
+
+test('validateScheduleTime: an ordinary string is returned unchanged', () => {
+  assert.equal(validateScheduleTime('10s', 'dueTime'), '10s');
+  assert.equal(validateScheduleTime('x'.repeat(128), 'dueTime'), 'x'.repeat(128));
+});
+
+test('validateScheduleTime: rejects null, a non-string, and over-length', () => {
+  for (const bad of [null, 42, true, {}, [], 'x'.repeat(129)]) {
+    assert.throws(() => validateScheduleTime(bad, 'dueTime'), DaprError);
+  }
+});
+
+// ---- validateOverwrite -------------------------------------------------------
+
+test('validateOverwrite: absent defaults to true', () => {
+  assert.equal(validateOverwrite(undefined), true);
+});
+
+test('validateOverwrite: an explicit boolean is returned as-is', () => {
+  assert.equal(validateOverwrite(true), true);
+  assert.equal(validateOverwrite(false), false);
+});
+
+test('validateOverwrite: rejects a non-boolean', () => {
+  for (const bad of [null, '', 'true', 1, 0, {}]) {
+    assert.throws(() => validateOverwrite(bad), DaprError);
+  }
+});
+
+// ---- prepareReminderData ----------------------------------------------------
+
+test('prepareReminderData: hasData false means no data key at all', () => {
+  assert.deepEqual(prepareReminderData(undefined, false), { hasData: false, data: undefined });
+});
+
+test('prepareReminderData: an explicit null is preserved as valid data', () => {
+  assert.deepEqual(prepareReminderData(null, true), { hasData: true, data: null });
+});
+
+test('prepareReminderData: an ordinary object is accepted', () => {
+  const value = { greeting: 'hi' };
+  assert.deepEqual(prepareReminderData(value, true), { hasData: true, data: value });
+});
+
+test('prepareReminderData: a non-serializable value (BigInt, circular, Buffer) is invalid', () => {
+  assert.throws(() => prepareReminderData(1n, true), DaprError);
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.throws(() => prepareReminderData(cyclic, true), DaprError);
+  assert.throws(() => prepareReminderData(Buffer.from('x'), true), DaprError);
+});
+
+test('prepareReminderData: bounds the escaped envelope size against the connection body limit', () => {
+  // '{"blob":"xx"}' is 13 bytes with no escapable characters; envelope adds 34.
+  const small = { blob: 'xx' };
+  assert.deepEqual(prepareReminderData(small, true, 13 + 34), { hasData: true, data: small });
+  assert.throws(() => prepareReminderData(small, true, 13 + 34 - 1), DaprError);
+});
+
+test('prepareReminderData: HTML-escaped worst case -- each <, >, & counts as 6 bytes, not 1', () => {
+  // JSON.stringify({a:'<&>'}) === '{"a":"<&>"}' -- 11 bytes raw, but escaped it
+  // is '{"a":"\\u003c\\u0026\\u003e"}': each of the 3 special characters becomes
+  // a 6-byte escape (net +5 each), so the escaped length is 11 + 3*5 = 26.
+  const value = { a: '<&>' };
+  const rawBytes = Buffer.byteLength(JSON.stringify(value), 'utf8');
+  assert.equal(rawBytes, 11);
+  const escapedBytes = rawBytes + 3 * 5;
+  assert.deepEqual(prepareReminderData(value, true, escapedBytes + 34), {
+    hasData: true,
+    data: value,
+  });
+  assert.throws(() => prepareReminderData(value, true, escapedBytes + 34 - 1), DaprError);
+  // Without accounting for escaping, the raw byte count alone would have
+  // wrongly fit a limit that the real escaped wire body cannot.
+  assert.throws(() => prepareReminderData(value, true, rawBytes + 34), DaprError);
+});
+
+test('prepareReminderData: no maxBodyBytes means no bound is enforced', () => {
+  const value = { blob: 'x'.repeat(1000) };
+  assert.deepEqual(prepareReminderData(value, true), { hasData: true, data: value });
+});
+
+test('prepareReminderData: bounds Go-escaped Unicode separators in keys and values', () => {
+  const value = { '\u2028': '\u2029' };
+  const envelope = '{"data":{"\\u2028":"\\u2029"},"dueTime":"","period":""}';
+  const limit = Buffer.byteLength(envelope);
+  assert.deepEqual(prepareReminderData(value, true, limit).data, value);
+  assert.throws(() => prepareReminderData(value, true, limit - 1), { code: 'INVALID_MESSAGE' });
+});
+
+test('prepareReminderData: sends the validated snapshot without invoking toJSON a second time', () => {
+  let serializations = 0;
+  const value = Object.create({
+    toJSON() {
+      return ++serializations === 1 ? 'small' : 'x'.repeat(1000);
+    },
+  });
+  const prepared = prepareReminderData(value, true, 100);
+  assert.equal(JSON.stringify(prepared.data), '"small"');
+  assert.equal(serializations, 1);
 });

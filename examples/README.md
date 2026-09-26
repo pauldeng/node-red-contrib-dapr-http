@@ -160,10 +160,12 @@ metadata, dead-letter topic, raw-payload mode, CEL rules, or bulk settings.
   without logging or retaining it.
 
 - `actor-demo.json` has two actor types modelled on Dapr's own SDK samples:
-  `DemoActor` (`SetMyData` / `GetMyData`) and `DemoActorCounter` (`count` /
-  `countBy` / `getCounter`). It needs no broker, but does need a Dapr
-  Placement service and a state-store component configured with
-  `actorStateStore: "true"` -- see [Run the actor example](#run-the-actor-example).
+  `DemoActor` (`SetMyData` / `GetMyData`, plus a reminder that records its own
+  firing) and `DemoActorCounter` (`count` / `countBy` / `getCounter`). It
+  needs no broker, but does need a Dapr Placement service and a state-store
+  component configured with `actorStateStore: "true"`; the reminder Injects
+  additionally need a Dapr Scheduler service -- see
+  [Run the actor example](#run-the-actor-example).
 
 For `cel-routing.json` or `bulk-acknowledgement.json`, create the NATS stream
 with the `orders` subject too:
@@ -250,16 +252,26 @@ docker run -d --rm --name nrdapr-example-placement \
   -p 127.0.0.1:50005:50005 \
   daprio/placement:1.18.4@sha256:ec614eefbf6dd8153adc8163f67486092debc50c5fe8eedf48cfe2295e9e17e3 \
   ./placement --port=50005 --enable-metrics=false
+docker run -d --rm --name nrdapr-example-scheduler \
+  -p 127.0.0.1:50006:50006 -p 127.0.0.1:50007:50007 \
+  daprio/scheduler:1.18.4@sha256:ff8f98c68624421606ff1b2d660ed139187360adbee7f7f57ef5d268d1f447b8 \
+  ./scheduler --port=50006 --healthz-port=50007 --enable-metrics=false \
+  --etcd-data-dir=/tmp/sched --override-broadcast-host-port=127.0.0.1:50006
 daprd --app-id actor-demo --app-port 3000 --app-protocol http \
   --dapr-http-port 3500 --resources-path ./components-actors \
-  --placement-host-address 127.0.0.1:50005
+  --placement-host-address 127.0.0.1:50005 \
+  --scheduler-host-address 127.0.0.1:50006
 ```
 
-Use daprd 1.18.4, matching Placement. If reading this from an installed package,
-copy the YAML from that package's `examples/` directory instead. The Redis example
-is for local development; replace it with any Dapr actor-capable store. The
-ordinary `redis-statestore-component.yaml` is not actor-enabled. A broker and
-Scheduler are unnecessary for these method/state examples; reminders are not used.
+Use daprd 1.18.4, matching Placement and Scheduler. If reading this from an
+installed package, copy the YAML from that package's `examples/` directory
+instead. The Redis example is for local development; replace it with any Dapr
+actor-capable store. The ordinary `redis-statestore-component.yaml` is not
+actor-enabled. A broker is unnecessary for these method/state/reminder
+examples. The Scheduler container's `--etcd-data-dir` is container-local and
+the container runs with `--rm`, so it is not durable across restarts: any
+reminder set against it is lost when the container stops, same as this
+development Redis container's state.
 
 Click SetMyData then GetMyData to read the saved object plus its timestamp. On
 `counter-1`, count increments by one, countBy adds ten with the supplied fixture,
@@ -267,14 +279,29 @@ and getCounter reads the result. Only read methods are safe to repeat without
 changing state. Restarting Node-RED/daprd with the same app ID and retained store
 preserves the record. Restart daprd after adding/removing actor types.
 
+Click "set reminder: demo_reminder every 5s" to schedule a repeating reminder;
+its data is recorded into DemoActor's record every time it fires (watch the
+main actor debug via a GetMyData click, or the "schedule response" debug for
+the schedule node's own set/get/delete result). "set one-shot reminder ...
+at an RFC 3339 time" schedules `demo_reminder_once` for a fixed timestamp a
+few days out at authoring time; once that time is in the past it fires
+promptly (Dapr treats a past `dueTime` as "now"), fires exactly once (blank
+`period`), and is then gone. "delete reminder: demo_reminder" removes the
+repeating reminder; deleting one that is not currently scheduled is not an
+error. Reminders need the Scheduler service above; the ordinary method/state
+flows do not.
+
 These are adaptations of Dapr's SDK samples, not SDK-compatible implementations.
 The public flow's Comment links the exact upstream revisions: the Python sample
-uses a different state key and has deletion/timer/reminder methods omitted here;
-the JavaScript counter is in-memory and its increment methods return no result.
-This flow uses a durable `record`, accepts countBy arguments as one JSON object,
-and returns the updated counter. See [source attribution](DAPR-SAMPLES.md).
+uses a different state key and has its `clear_my_data` deletion method omitted
+here (this package's v1 has no delete); the JavaScript counter is in-memory and
+its increment methods return no result. This flow uses a durable `record`,
+accepts countBy arguments as one JSON object, and returns the updated counter.
+Timers are not supported by this package. See
+[source attribution](DAPR-SAMPLES.md).
 
 Stop the example containers with `docker stop nrdapr-example-placement
-nrdapr-example-redis`. This development Redis container is ephemeral; stopping it
-does not demonstrate durable production storage. Actor lifecycle/redeploy
-qualification remains pending as described in `../docs/architecture.md`.
+nrdapr-example-scheduler nrdapr-example-redis`. This development Redis
+container is ephemeral; stopping it does not demonstrate durable production
+storage. Actor lifecycle/redeploy qualification remains pending as described
+in `../docs/architecture.md`.

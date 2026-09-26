@@ -36,6 +36,8 @@ const REDIS_IMAGE =
   'redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99';
 const PLACEMENT_IMAGE =
   'daprio/placement:1.18.4@sha256:ec614eefbf6dd8153adc8163f67486092debc50c5fe8eedf48cfe2295e9e17e3';
+const SCHEDULER_IMAGE =
+  'daprio/scheduler:1.18.4@sha256:ff8f98c68624421606ff1b2d660ed139187360adbee7f7f57ef5d268d1f447b8';
 const FIXTURES_DIR = path.resolve(__dirname, '..', 'integration', 'fixtures');
 
 function runId() {
@@ -272,6 +274,70 @@ async function startPlacement() {
   };
 }
 
+// Starts a fresh Dapr Scheduler service, needed by actor REMINDERS
+// specifically (Placement handles actor placement/method routing; per
+// docs/architecture.md's "Actor wire behavior" section, "method calls and
+// state need Placement but not the Scheduler service" — reminders are the
+// exception that does). Observed once against 1.18.4, not re-asserted by
+// this suite: a daprd started with no `--scheduler-host-address` still
+// creates and fires actor TIMERS (204, unaffected), but a reminder create on
+// that same daprd fails with 500 `ERR_ACTOR_REMINDER_CREATE` ("scheduler
+// clients are disabled") — only reminders need this service. Same binary
+// shape as startPlacement(): raw `docker run`, loopback-only -p mappings,
+// --enable-metrics=false, readiness via /healthz, logs+cleanup on partial
+// start failure.
+//
+// The scheduler embeds its own single-node etcd (--etcd-embed defaults true),
+// bound to its own defaults (client 2379, peer 2380 via the default
+// --etcd-initial-cluster). Unlike its own gRPC and healthz ports, neither
+// etcd port is published with -p: this container runs on the default bridge
+// network (not --network host like startDaprd()'s sidecars), so each
+// scheduler gets its own private network namespace and those defaults can
+// never collide across suites — publishing them would only expose an
+// unauthenticated etcd on the host for no reason. --etcd-data-dir points at a
+// container-local path (not a host bind mount), so no directory needs
+// cleanup beyond removing the container itself.
+async function startScheduler() {
+  await ensureImage(SCHEDULER_IMAGE);
+  const port = await freePort();
+  const healthzPort = await freePort();
+  const name = `nrdapr-it-scheduler-${runId()}`;
+  try {
+    await dockerRun([
+      '--name',
+      name,
+      '-p',
+      `127.0.0.1:${port}:${port}`,
+      '-p',
+      `127.0.0.1:${healthzPort}:${healthzPort}`,
+      SCHEDULER_IMAGE,
+      './scheduler',
+      `--port=${port}`,
+      `--healthz-port=${healthzPort}`,
+      '--enable-metrics=false',
+      '--etcd-data-dir=/tmp/sched',
+      `--override-broadcast-host-port=127.0.0.1:${port}`,
+    ]);
+  } catch (err) {
+    const logs = await dockerLogs(name);
+    await dockerStop(name);
+    throw new Error(`${err.message}\n--- scheduler logs ---\n${logs}`, { cause: err });
+  }
+  try {
+    await waitForHttp(`http://127.0.0.1:${healthzPort}/healthz`);
+  } catch (err) {
+    const logs = await dockerLogs(name);
+    await dockerStop(name);
+    throw new Error(`${err.message}\n--- scheduler logs ---\n${logs}`, { cause: err });
+  }
+  return {
+    name,
+    port,
+    stop: () => dockerStop(name),
+    logs: () => dockerLogs(name),
+  };
+}
+
 // Writes a fresh per-run resources directory: the Redis pubsub component
 // (pointed at the given Redis port, if any), any broker-agnostic pre-rendered
 // components a suite supplies directly (e.g. test/helpers/nats.js's
@@ -339,6 +405,7 @@ async function startDaprd({
   env = {},
   httpPort: presetHttpPort,
   placementAddress,
+  schedulerAddress,
 }) {
   await ensureImage(DAPRD_IMAGE);
   const resourcesDir = await writeResourcesDir({
@@ -392,6 +459,9 @@ async function startDaprd({
     if (placementAddress) {
       args.push(`--placement-host-address=${placementAddress}`);
     }
+    if (schedulerAddress) {
+      args.push(`--scheduler-host-address=${schedulerAddress}`);
+    }
 
     await dockerRun(args);
     try {
@@ -443,6 +513,7 @@ async function startDaprd({
 module.exports = {
   startRedis,
   startPlacement,
+  startScheduler,
   startDaprd,
   waitForHttp,
   stateComponentYaml,
@@ -452,5 +523,6 @@ module.exports = {
   DAPRD_IMAGE,
   REDIS_IMAGE,
   PLACEMENT_IMAGE,
+  SCHEDULER_IMAGE,
   FIXTURES_DIR,
 };

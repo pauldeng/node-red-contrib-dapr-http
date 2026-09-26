@@ -32,6 +32,7 @@ const NODES = [
   { id: 'e2e-actor-method', type: 'dapr-actor-method' },
   { id: 'e2e-actor-reply', type: 'dapr-actor-reply' },
   { id: 'e2e-actor-call', type: 'dapr-actor-call' },
+  { id: 'e2e-actor-schedule', type: 'dapr-actor-schedule' },
 ];
 
 // A regression lock for a real bug found while building this tier: a field
