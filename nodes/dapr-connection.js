@@ -5,6 +5,8 @@ const { acquireListener } = require('../lib/app-channel');
 const { ErrorCodes } = require('../lib/errors');
 const { createConnectionRegistry } = require('../lib/connection-registry');
 const { connectionStatus } = require('../lib/connection-status');
+const { createActorHost } = require('../lib/actor-host');
+const { readRecord: actorReadRecord, saveRecord: actorSaveRecord } = require('../lib/actor-client');
 const { PendingRegistry } = require('../lib/pending');
 const { sidecarRequest } = require('../lib/sidecar-http');
 const { getMetadata } = require('../lib/metadata-client');
@@ -154,9 +156,13 @@ module.exports = function registerDaprConnection(RED) {
     // message that arrives in that window must not be failed as "sidecar down"
     // when the sidecar is in fact up.
     let markHealthKnown;
-    const healthKnown = new Promise((resolve) => {
-      markHealthKnown = resolve;
-    });
+    // Exposes a resolver captured for later, unrelated calls
+    // (pollOnce/startListener/close) to settle — not a single awaited op.
+    const healthKnown = /* allow-promise: resolver captured for later settlement */ new Promise(
+      (resolve) => {
+        markHealthKnown = resolve;
+      }
+    );
 
     node.isSidecarHealthy = () => healthy;
     node.whenHealthKnown = () => healthKnown;
@@ -194,19 +200,32 @@ module.exports = function registerDaprConnection(RED) {
     // coordinate here. The aggregation itself lives in lib/, so this file
     // only wires it to Node-RED's own lifecycle. ----
     const registry = createConnectionRegistry();
+    const actorHost = createActorHost({
+      limits: options.limits,
+      client: {
+        baseUrl: options.outbound.baseUrl,
+        token: options.daprApiToken,
+        readRecord: actorReadRecord,
+        saveRecord: actorSaveRecord,
+      },
+    });
     const pendingAcks = new PendingRegistry({ max: options.limits.maxPending });
     const pendingResponses = new PendingRegistry({ max: options.limits.maxPending });
     let desiredFingerprint = registry.activation().fingerprint;
+    let desiredActorFingerprint = null; // no actor methods yet — see applyActivation
     let activateScheduled = false;
     let warnedFingerprint = null; // rate-limits the restart warning to once per change
+    let warnedActorFingerprint; // undefined means no warning, null means all actors removed
 
     const refreshStatus = () => {
-      const { status, restartRequired } = connectionStatus({
+      const { status, restartRequired, actorRestartRequired } = connectionStatus({
         hasLease: Boolean(node.lease),
         healthy,
         servedFingerprint: node.lease ? node.lease.servedFingerprint() : null,
         desiredFingerprint,
         subscriptionCount: registry.subscriptionCount,
+        servedActorFingerprint: node.lease ? node.lease.servedActorFingerprint() : null,
+        desiredActorFingerprint,
       });
       // Warn once per change, not once per status refresh.
       if (restartRequired) {
@@ -219,18 +238,33 @@ module.exports = function registerDaprConnection(RED) {
       } else {
         warnedFingerprint = null;
       }
+      if (actorRestartRequired) {
+        if (warnedActorFingerprint !== desiredActorFingerprint) {
+          warnedActorFingerprint = desiredActorFingerprint;
+          node.warn('actor types changed; restart the Dapr sidecar so it re-reads /dapr/config');
+        }
+      } else {
+        warnedActorFingerprint = undefined;
+      }
       node.status(status);
     };
 
     // Atomically re-activate the app channel with the aggregated subscription
-    // set and delivery routes, and fingerprint it for restart detection.
+    // set, delivery routes, and (when any actor method is registered) actor
+    // config; fingerprints both independently for restart detection.
     const applyActivation = () => {
       if (!node.lease) {
         return;
       }
-      const activation = registry.activation();
+      const activation = registry.activation({ requestTimeoutMs: options.limits.requestTimeoutMs });
       desiredFingerprint = activation.fingerprint;
-      node.lease.activate({ ...activation, onDiscovery: refreshStatus });
+      desiredActorFingerprint = activation.actorFingerprint;
+      node.lease.activate({
+        ...activation,
+        onDiscovery: refreshStatus,
+        getActorHandler: (actorType, method) => registry.actorHandlerFor(actorType, method),
+        actorInvoke: (args) => actorHost.invoke(args),
+      });
       refreshStatus();
     };
 
@@ -269,6 +303,18 @@ module.exports = function registerDaprConnection(RED) {
       scheduleActivation();
       return reactivateOn(remove);
     };
+    // dapr-actor-method registers here; `emit` is called by the actor host
+    // (lib/actor-host.js) to send the invocation message into the flow.
+    node.registerActorMethod = (definition, emit) => {
+      const remove = registry.addActorMethod(definition, emit);
+      scheduleActivation();
+      return reactivateOn(remove);
+    };
+    // dapr-actor-reply settles a live proposal; dapr-actor-call's self-call
+    // guard reads identity for a live, not-yet-completed invocation.
+    node.settleActorReply = (requestId, proposal) =>
+      actorHost.settleActorReply(requestId, proposal);
+    node.actorIdentity = (requestId) => actorHost.actorIdentity(requestId);
     node.addPendingAck = (ackId, ackOptions) => pendingAcks.add(ackId, ackOptions);
     node.settleAck = (ackId, status) => pendingAcks.settle(ackId, status);
     node.addPendingResponse = (id, responseOptions) => pendingResponses.add(id, responseOptions);
@@ -385,9 +431,12 @@ module.exports = function registerDaprConnection(RED) {
       // rather than hitting the release backstop.
       const drained =
         pendingAcks.drain('RETRY') +
-        pendingResponses.drain({ status: 503, headers: {}, body: 'connection restarting' });
+        pendingResponses.drain({ status: 503, headers: {}, body: 'connection restarting' }) +
+        actorHost.drain();
       if (drained > 0) {
-        await new Promise((resolve) => setImmediate(resolve));
+        // Yields one tick with no event to await on; setImmediate has no
+        // native promise form.
+        await new Promise((resolve) => setImmediate(resolve)); // allow-promise: one tick, no event to await
       }
       if (node.lease) {
         // On a redeploy (removed === false) hold the listener through a short

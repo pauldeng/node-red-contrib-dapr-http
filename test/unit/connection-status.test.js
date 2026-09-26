@@ -82,3 +82,78 @@ test('a served set matching the desired one is connected', () => {
   assert.equal(status.text, 'connected');
   assert.equal(restartRequired, false);
 });
+
+// ---- Actor fingerprint: removing the last advertised type is a change ----
+
+test('only a connection that never advertised actors remains connected without actors', () => {
+  // No actors ever advertised is different from removing the last type:
+  // daprd retains its previous placement registration until restarted.
+  for (const servedActorFingerprint of [null, 'anything']) {
+    const { status, restartRequired, actorRestartRequired } = connectionStatus({
+      ...base,
+      servedActorFingerprint,
+      desiredActorFingerprint: null,
+    });
+    assert.equal(
+      status.text,
+      servedActorFingerprint === null ? 'connected' : 'restart sidecar: actor types changed'
+    );
+    assert.equal(restartRequired, false);
+    assert.equal(actorRestartRequired, servedActorFingerprint !== null);
+  }
+});
+
+test('actors desired but never served is not yet a restart warning (first activation)', () => {
+  const { status, actorRestartRequired } = connectionStatus({
+    ...base,
+    servedActorFingerprint: null,
+    desiredActorFingerprint: 'fp1',
+  });
+  assert.equal(status.text, 'connected');
+  assert.equal(actorRestartRequired, false);
+});
+
+test('a served actor fingerprint differing from the desired one requires a restart', () => {
+  const { status, restartRequired, actorRestartRequired } = connectionStatus({
+    ...base,
+    servedActorFingerprint: 'stale',
+    desiredActorFingerprint: 'fresh',
+  });
+  assert.equal(status.text, 'restart sidecar: actor types changed');
+  assert.equal(restartRequired, false);
+  assert.equal(actorRestartRequired, true);
+});
+
+test('a matching served actor fingerprint is connected', () => {
+  const { status, actorRestartRequired } = connectionStatus({
+    ...base,
+    servedActorFingerprint: 'fp1',
+    desiredActorFingerprint: 'fp1',
+  });
+  assert.equal(status.text, 'connected');
+  assert.equal(actorRestartRequired, false);
+});
+
+test('a stale subscription set outranks an actor-fingerprint drift', () => {
+  const { status, restartRequired, actorRestartRequired } = connectionStatus({
+    ...base,
+    servedFingerprint: 'stale',
+    desiredFingerprint: 'fresh',
+    servedActorFingerprint: 'stale-actor',
+    desiredActorFingerprint: 'fresh-actor',
+  });
+  assert.equal(status.text, 'restart sidecar: subscriptions changed');
+  assert.equal(restartRequired, true);
+  assert.equal(actorRestartRequired, false);
+});
+
+test('an unhealthy sidecar outranks an actor-fingerprint drift too', () => {
+  const { status, actorRestartRequired } = connectionStatus({
+    ...base,
+    healthy: false,
+    servedActorFingerprint: 'stale-actor',
+    desiredActorFingerprint: 'fresh-actor',
+  });
+  assert.equal(status.text, 'sidecar unavailable');
+  assert.equal(actorRestartRequired, false);
+});

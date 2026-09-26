@@ -1,0 +1,178 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-actor-call', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      // Mirrors lib/actor-messages.js's validateActorSegment: nonempty, bounded,
+      // no "/" or control characters, never "." or "..". Editor validation is
+      // not runtime validation — a msg.dapr.actorCall override still hits the
+      // runtime check. Kept in sync by test/unit/editor-runtime-contract.test.js.
+      actorType: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          const raw = String(value === undefined || value === null ? '' : value);
+          if (raw === '' || raw.length > 256 || raw === '.' || raw === '..') {
+            return false;
+          }
+          if (raw.includes('/')) {
+            return false;
+          }
+          for (let i = 0; i < raw.length; i += 1) {
+            const code = raw.charCodeAt(i);
+            if (code <= 0x1f || code === 0x7f) {
+              return false;
+            }
+          }
+          return true;
+        },
+      },
+      actorId: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          const raw = String(value === undefined || value === null ? '' : value);
+          if (raw === '' || raw.length > 256 || raw === '.' || raw === '..') {
+            return false;
+          }
+          if (raw.includes('/')) {
+            return false;
+          }
+          for (let i = 0; i < raw.length; i += 1) {
+            const code = raw.charCodeAt(i);
+            if (code <= 0x1f || code === 0x7f) {
+              return false;
+            }
+          }
+          return true;
+        },
+      },
+      method: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          const raw = String(value === undefined || value === null ? '' : value);
+          if (raw === '' || raw.length > 256 || raw === '.' || raw === '..') {
+            return false;
+          }
+          if (raw.includes('/')) {
+            return false;
+          }
+          for (let i = 0; i < raw.length; i += 1) {
+            const code = raw.charCodeAt(i);
+            if (code <= 0x1f || code === 0x7f) {
+              return false;
+            }
+          }
+          return true;
+        },
+      },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-exchange',
+    paletteLabel: 'actor call',
+    label: function () {
+      return this.name || `${this.actorType || 'actor'}/${this.method || 'call'}`;
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-actor-call">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-actorType"><i class="fa fa-cube"></i> Actor type</label>
+    <input type="text" id="node-input-actorType" placeholder="DemoActor" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-actorId"><i class="fa fa-hashtag"></i> Actor id</label>
+    <input type="text" id="node-input-actorId" placeholder="demo-1" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-method"><i class="fa fa-code-fork"></i> Method</label>
+    <input type="text" id="node-input-method" placeholder="GetMyData" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-actor-call">
+  <p>
+    Invokes an actor method through the local sidecar and replaces
+    <code>msg.payload</code> with the result.
+  </p>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt class="optional">payload <span class="property-type">object | null | any</span></dt>
+    <dd>
+      The method's JSON argument. Omitted (<code>undefined</code>) sends no request body; an
+      explicit <code>null</code> sends a JSON <code>null</code> body.
+    </dd>
+    <dt class="optional">
+      dapr.actorCall.type / dapr.actorCall.id / dapr.actorCall.method
+      <span class="property-type">string</span>
+    </dt>
+    <dd>
+      Per-message overrides of the configured target. Each property PRESENT on
+      <code>dapr.actorCall</code> overrides the configured value; an invalid or empty override fails
+      instead of falling back to the configured one. Never read from <code>dapr.actor</code> &mdash;
+      that is the inbound method's own metadata, not a call target.
+    </dd>
+  </dl>
+
+  <h3>Outputs</h3>
+  <dl class="message-properties">
+    <dt>payload <span class="property-type">object | null | undefined</span></dt>
+    <dd>
+      The parsed JSON result. <code>undefined</code> when the method answered with no body; every
+      other message property is preserved.
+    </dd>
+  </dl>
+
+  <h3>Details</h3>
+  <p>
+    Actor type, id, and method are validated and percent-encoded, so a value cannot escape the actor
+    invoke route. If this node is itself running inside a live actor-method invocation on the same
+    connection (its input message still carries the original
+    <code>dapr.actorRequestId</code>), a call that targets the exact same actor type and id &mdash;
+    any method &mdash; fails immediately as a direct self-call, rather than deadlocking on Dapr's
+    own per-actor serialization. Calls that form a longer cycle (A calls B, B calls A) are not
+    detected; avoid designing them. A call to another actor is an independent effect: it is not
+    rolled back if this flow's own later work fails.
+  </p>
+  <p>
+    On failure this node calls <code>done(error)</code> exactly once for a Catch node to branch on
+    <code>msg.error.code</code>: <code>ACTOR_SELF_CALL</code> for the guard above,
+    <code>ACTOR_INVOKE_FAILED</code> for a non-2xx from the target method or a non-JSON success
+    body, <code>SIDECAR_UNAVAILABLE</code> for a timeout or transport error, and
+    <code>INVALID_MESSAGE</code>
+    for an invalid target or payload. There is no automatic retry. A call still in flight when the
+    node is stopped or redeployed is aborted.
+  </p>
+
+  <h3>Example</h3>
+  <p>
+    For a non-2xx Dapr response, Catch also receives <code>msg.error.cause.statusCode</code> and,
+    when Dapr supplies strings, <code>msg.error.cause.errorCode</code> (up to 128 characters) and
+    <code>msg.error.cause.message</code> (up to 2048 characters). Dapr may embed the actor's fail
+    envelope, such as <code>INVALID_ARGUMENT</code>, in that message. Its wording is
+    version-dependent diagnostic text, not a stable business-error contract. Treat it as remote
+    text; do not forward it unchanged as your own fail reply. <code>msg.error.code</code> remains
+    <code>ACTOR_INVOKE_FAILED</code>.
+  </p>
+  <p>Target a different actor than this flow's own method, from a Function node:</p>
+  <pre>
+msg.dapr = msg.dapr || {}; // preserve the current invocation's reply correlation
+msg.dapr.actorCall = { type: 'DemoActor', id: 'demo-2', method: 'GetMyData' };
+msg.payload = undefined; // GetMyData takes no argument
+return msg;
+// After the node: msg.payload is the parsed result</pre>
+</script>

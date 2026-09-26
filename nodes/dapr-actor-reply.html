@@ -1,0 +1,126 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-actor-reply', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      outcome: {
+        value: 'complete',
+        validate: function (value) {
+          return value === 'complete' || value === 'fail';
+        },
+      },
+    },
+    inputs: 1,
+    outputs: 0,
+    align: 'right',
+    icon: 'font-awesome/fa-reply',
+    paletteLabel: 'actor reply',
+    label: function () {
+      return this.name || `actor reply: ${this.outcome || 'complete'}`;
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-actor-reply">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-outcome"><i class="fa fa-check-circle-o"></i> Outcome</label>
+    <select id="node-input-outcome">
+      <option value="complete">Complete</option>
+      <option value="fail">Fail</option>
+    </select>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-actor-reply">
+  <p>
+    Settles a live <code>dapr actor method</code> invocation. Place one <b>Complete</b> reply and,
+    optionally, one scoped <b>Fail</b> reply per method flow.
+  </p>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt>dapr.actorRequestId <span class="property-type">string</span></dt>
+    <dd>Correlation id set by the method node. Preserve it through the flow.</dd>
+    <dt class="optional">payload <span class="property-type">object | null</span></dt>
+    <dd>
+      Required for a <b>Complete</b> reply: the JSON response returned to the caller. Use explicit
+      <code>null</code> for "no result".
+    </dd>
+    <dt class="optional">
+      dapr.actor.nextState <span class="property-type">object | null | any</span>
+    </dt>
+    <dd>
+      The replacement record, for a <b>Complete</b> reply only. Absent means no write at all &mdash;
+      mutating <code>dapr.actor.state</code> alone never saves anything. Explicit <code>null</code>,
+      <code>false</code>, <code>0</code>, <code>""</code>, an array, and an object are all valid
+      replacement values and are written as given.
+    </dd>
+    <dt class="optional">dapr.actor.error <span class="property-type">object</span></dt>
+    <dd>
+      Required for a <b>Fail</b> reply: <code>{ code, message }</code>. <code>code</code> must match
+      <code>/^[A-Z][A-Z0-9_]{0,63}$/</code>.
+    </dd>
+  </dl>
+
+  <h3>Details</h3>
+  <p>
+    <code>done()</code> on this node means the proposal was accepted by the pending registry &mdash;
+    it does <b>not</b> mean the state write has committed. This node never talks to storage; the
+    request handler that is holding the caller's HTTP request performs the commit (when
+    <code>nextState</code> is present) and only then answers the caller. A commit failure, or the
+    request's deadline expiring between acceptance and commit, is reported to the caller and to
+    sanitized host diagnostics, not as a second completion of this node's input.
+  </p>
+  <p>
+    The first reply for a given <code>actorRequestId</code> wins; a second reply, or one that
+    arrives after the request's deadline has passed, is rejected with
+    <code>ACTOR_REPLY_EXPIRED</code> and settles nothing. A caller-visible failure is not proof that
+    no state was written &mdash; and receiving no response at all (a timeout) is not proof that
+    nothing committed either; Dapr does not retry by default. The commit budget reserves time for a
+    response before the request watchdog. Event-loop stalls, forced close, or redeploy can still
+    interrupt that response while the write's outcome is unknown. There is no automatic retry of a
+    failed reply or a failed commit.
+  </p>
+  <p>
+    The handler rechecks the flow deadline after accepting every proposal, including read-only and
+    <b>Fail</b> replies. An expired proposal can therefore produce 503 from the app instead of your
+    fail envelope; daprd may wrap that response in its own invocation error. Acceptance by this node
+    does not guarantee that the caller receives your proposed error body.
+  </p>
+  <p>
+    <code>payload</code>, <code>dapr.actor.nextState</code>, and <code>dapr.actor.error</code> are
+    fully validated and copied at the moment this node runs, so a later branch mutating
+    <code>msg</code> cannot change what was proposed. Undefined, <code>Buffer</code>, non-finite
+    numbers, functions, <code>BigInt</code>, cycles, and excessive nesting or byte size are rejected
+    before anything is proposed. Both the response and replacement record must fit the connection's
+    body limit individually.
+  </p>
+  <p>
+    A method flow calling another actor through <b>dapr actor call</b> and targeting its own (type,
+    id) fails immediately as a self-call rather than deadlocking; see that node's help. Actor
+    deactivation (Dapr's own idle timeout) never deletes the stored record.
+  </p>
+
+  <h3>Example</h3>
+  <p>
+    Scope Catch to your method Functions and the <b>Complete</b> reply node, then wire it through a
+    safe-error Function to a <b>Fail</b> reply. This also handles proposal validation errors while
+    time remains. Keep the Fail reply and safe-error Function out of that Catch scope to prevent an
+    error loop:
+  </p>
+  <pre>
+// Function node in a Catch scope
+delete msg.dapr.actor.nextState; // never propose a write from a failure path
+msg.dapr.actor.error = { code: 'INTERNAL', message: 'unexpected error' };
+return msg;</pre>
+</script>

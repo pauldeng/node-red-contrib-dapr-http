@@ -7,6 +7,22 @@ the same change that ships behavior.
 
 ## Unreleased
 
+### Fixed
+
+- Provide an actor-enabled state-store example and setup instructions for the generic actor demo.
+- Preserve all own JSON fields in the demo’s SetMyData method without changing object prototypes.
+
+### Added
+
+- Actor mode: `dapr-actor-method`, `dapr-actor-reply`, and `dapr-actor-call`
+  nodes, plus an example flow (`examples/actor-demo.json`) with two actor
+  types modelled on Dapr's own SDK samples. One JSON `record` per actor; needs
+  a Dapr Placement service and a state store configured with
+  `actorStateStore: "true"`. Actor proposals enforce response and state byte
+  limits; expired or draining invocations cannot start new flow work. Call
+  failures retain bounded Dapr diagnostics for Catch; the example catches
+  complete-reply validation failures without looping through its fail reply.
+
 ### Changed
 
 - Pin the Dapr integration runtime and deployment examples to 1.18.4 by

@@ -1,0 +1,398 @@
+[
+  {
+    "id": "ex-actor-tab",
+    "type": "tab",
+    "label": "Dapr: actor demo",
+    "disabled": false,
+    "info": "Two generic actor types, each backed by a single JSON `record`. Actor hosting needs a Dapr Placement service and an actor-flagged state store (metadata actorStateStore: \"true\") -- see docs/deployment.md and redis-statestore-component.yaml. Set the connection node's Dapr host/port and app port before deploying. Click the caller-side Inject nodes in order (SetMyData before GetMyData, count/countBy before getCounter) and watch the debug sidebar."
+  },
+  {
+    "id": "ex-actor-comment",
+    "type": "comment",
+    "z": "ex-actor-tab",
+    "name": "An actor is one object with its own saved state, addressed by an actor type and an ID",
+    "info": "Dapr runs calls to the same actor one at a time; calls to different actors run concurrently.\n\nThis example has two actor types, each modelled on one of Dapr's own SDK samples and each persisting its state as this package's single `record` per actor:\n\n- `DemoActor` (GetMyData / SetMyData) mirrors dapr/python-sdk's demo_actor.py: https://github.com/dapr/python-sdk/blob/c44c28d83f0648052094af6e7dfaa5a362fcf118/examples/demo_actor/demo_actor/demo_actor.py -- SetMyData copies the given object and adds a `ts` timestamp, the way the sample does. The sample also has a `clear_my_data` that deletes state; this package's v1 has no delete, so that method is omitted here.\n- `DemoActorCounter` (count / countBy / getCounter) mirrors dapr/js-sdk's DemoActorCounterImpl.ts: https://github.com/dapr/js-sdk/blob/2395a2103cb3e7474e628012189867bfe836ac78/test/actor/DemoActorCounterImpl.ts -- the sample keeps its counter in memory; this example persists `{ counter }` in the actor's record instead, so the count survives a restart.\n\nAdapted from the Dapr Authors' Apache-2.0 samples. See examples/DAPR-SAMPLES.md and examples/LICENSE-DAPR-2.0.txt. Unlike the JavaScript SDK sample, count/countBy return the new count and countBy accepts one JSON object argument.",
+    "x": 200,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "ex-actor-conn",
+    "type": "dapr-connection",
+    "name": "sidecar",
+    "daprHost": "",
+    "daprPort": "",
+    "bindAddress": "127.0.0.1",
+    "appPort": "3000",
+    "bodyLimitMb": "",
+    "requestTimeoutSec": ""
+  },
+  {
+    "id": "ex-actor-getmydata-method",
+    "type": "dapr-actor-method",
+    "z": "ex-actor-tab",
+    "name": "GetMyData",
+    "connection": "ex-actor-conn",
+    "actorType": "DemoActor",
+    "method": "GetMyData",
+    "x": 190,
+    "y": 140,
+    "wires": [["ex-actor-getmydata-fn"]]
+  },
+  {
+    "id": "ex-actor-getmydata-fn",
+    "type": "function",
+    "z": "ex-actor-tab",
+    "name": "GetMyData: return stored data",
+    "func": "// Returns the stored record, or null when this actor has never received one\n// -- no write either way. Mirrors demo_actor.py's GetMyData; v1 of this\n// package has no delete, so there is no equivalent of the sample's\n// clear_my_data.\nmsg.payload = msg.dapr.actor.stateExists ? msg.dapr.actor.state : null;\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 140,
+    "wires": [["ex-actor-reply-complete"], ["ex-actor-reply-fail"]]
+  },
+  {
+    "id": "ex-actor-setmydata-method",
+    "type": "dapr-actor-method",
+    "z": "ex-actor-tab",
+    "name": "SetMyData",
+    "connection": "ex-actor-conn",
+    "actorType": "DemoActor",
+    "method": "SetMyData",
+    "x": 190,
+    "y": 220,
+    "wires": [["ex-actor-setmydata-fn"]]
+  },
+  {
+    "id": "ex-actor-setmydata-fn",
+    "type": "function",
+    "z": "ex-actor-tab",
+    "name": "SetMyData: store with timestamp",
+    "func": "// Stores msg.payload with a server-set timestamp -- mirrors dapr/python-sdk's\n// demo_actor.py SetMyData (see this tab's Comment for the source link). The\n// request handler commits msg.dapr.actor.nextState only after the reply node\n// accepts this proposal; this function never touches storage itself.\nfunction fail(code, message) {\n    msg.dapr.actor.error = { code, message };\n    return [null, msg];\n}\n\nconst data = msg.payload;\nif (!data || typeof data !== 'object' || Array.isArray(data)) {\n    return fail('INVALID_ARGUMENT', 'SetMyData requires a plain JSON object argument');\n}\n\nmsg.dapr.actor.nextState = { ...data, ts: new Date().toISOString() };\nmsg.payload = null;\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 220,
+    "wires": [["ex-actor-reply-complete"], ["ex-actor-reply-fail"]]
+  },
+  {
+    "id": "ex-actor-count-method",
+    "type": "dapr-actor-method",
+    "z": "ex-actor-tab",
+    "name": "count",
+    "connection": "ex-actor-conn",
+    "actorType": "DemoActorCounter",
+    "method": "count",
+    "x": 190,
+    "y": 300,
+    "wires": [["ex-actor-count-fn"]]
+  },
+  {
+    "id": "ex-actor-count-fn",
+    "type": "function",
+    "z": "ex-actor-tab",
+    "name": "count: increment by one",
+    "func": "// Increments the persisted counter by 1. dapr/js-sdk's DemoActorCounterImpl\n// keeps the counter in memory; this example persists { counter } in the\n// actor's own record so it survives a restart.\nconst current = msg.dapr.actor.stateExists ? msg.dapr.actor.state.counter : 0;\nconst counter = current + 1;\nmsg.payload = counter;\nmsg.dapr.actor.nextState = { counter };\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 300,
+    "wires": [["ex-actor-reply-complete"], ["ex-actor-reply-fail"]]
+  },
+  {
+    "id": "ex-actor-countby-method",
+    "type": "dapr-actor-method",
+    "z": "ex-actor-tab",
+    "name": "countBy",
+    "connection": "ex-actor-conn",
+    "actorType": "DemoActorCounter",
+    "method": "countBy",
+    "x": 190,
+    "y": 380,
+    "wires": [["ex-actor-countby-fn"]]
+  },
+  {
+    "id": "ex-actor-countby-fn",
+    "type": "function",
+    "z": "ex-actor-tab",
+    "name": "countBy: increment by amount*multiplier",
+    "func": "// Increments by amount * multiplier (multiplier defaults to 1), mirroring\n// DemoActorCounterImpl's countBy. Rejects a non-finite amount or multiplier\n// rather than storing NaN/Infinity.\nfunction fail(code, message) {\n    msg.dapr.actor.error = { code, message };\n    return [null, msg];\n}\n\nconst arg = msg.payload || {};\nconst amount = arg.amount;\nconst multiplier = arg.multiplier === undefined ? 1 : arg.multiplier;\nif (typeof amount !== 'number' || !Number.isFinite(amount)) {\n    return fail('INVALID_ARGUMENT', 'countBy requires a finite numeric amount');\n}\nif (typeof multiplier !== 'number' || !Number.isFinite(multiplier)) {\n    return fail('INVALID_ARGUMENT', 'countBy requires a finite numeric multiplier');\n}\n\nconst current = msg.dapr.actor.stateExists ? msg.dapr.actor.state.counter : 0;\nconst counter = current + amount * multiplier;\nmsg.payload = counter;\nmsg.dapr.actor.nextState = { counter };\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 380,
+    "wires": [["ex-actor-reply-complete"], ["ex-actor-reply-fail"]]
+  },
+  {
+    "id": "ex-actor-getcounter-method",
+    "type": "dapr-actor-method",
+    "z": "ex-actor-tab",
+    "name": "getCounter",
+    "connection": "ex-actor-conn",
+    "actorType": "DemoActorCounter",
+    "method": "getCounter",
+    "x": 190,
+    "y": 460,
+    "wires": [["ex-actor-getcounter-fn"]]
+  },
+  {
+    "id": "ex-actor-getcounter-fn",
+    "type": "function",
+    "z": "ex-actor-tab",
+    "name": "getCounter: return stored counter",
+    "func": "// Returns the persisted counter, 0 when this actor has never been given one\n// -- no write either way.\nmsg.payload = msg.dapr.actor.stateExists ? msg.dapr.actor.state.counter : 0;\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 460,
+    "wires": [["ex-actor-reply-complete"], ["ex-actor-reply-fail"]]
+  },
+  {
+    "id": "ex-actor-catch",
+    "type": "catch",
+    "z": "ex-actor-tab",
+    "name": "catch method errors",
+    "scope": [
+      "ex-actor-getmydata-fn",
+      "ex-actor-setmydata-fn",
+      "ex-actor-count-fn",
+      "ex-actor-countby-fn",
+      "ex-actor-getcounter-fn",
+      "ex-actor-reply-complete"
+    ],
+    "uncaught": false,
+    "x": 200,
+    "y": 560,
+    "wires": [["ex-actor-catch-fn"]]
+  },
+  {
+    "id": "ex-actor-catch-fn",
+    "type": "function",
+    "z": "ex-actor-tab",
+    "name": "Catch: safe error",
+    "func": "delete msg.dapr.actor.nextState; // never propose a write from a failure path\nmsg.dapr.actor.error = { code: 'INTERNAL', message: 'unexpected error' };\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 560,
+    "wires": [["ex-actor-reply-fail"]]
+  },
+  {
+    "id": "ex-actor-reply-complete",
+    "type": "dapr-actor-reply",
+    "z": "ex-actor-tab",
+    "name": "reply: complete",
+    "connection": "ex-actor-conn",
+    "outcome": "complete",
+    "x": 670,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "ex-actor-reply-fail",
+    "type": "dapr-actor-reply",
+    "z": "ex-actor-tab",
+    "name": "reply: fail",
+    "connection": "ex-actor-conn",
+    "outcome": "fail",
+    "x": 670,
+    "y": 560,
+    "wires": []
+  },
+  {
+    "id": "ex-actor-inject-setmydata",
+    "type": "inject",
+    "z": "ex-actor-tab",
+    "name": "SetMyData: { greeting: \"hello world\" }",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "dapr.actorCall",
+        "v": "{\"type\":\"DemoActor\",\"id\":\"demo-1\",\"method\":\"SetMyData\"}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"greeting\":\"hello world\"}",
+    "payloadType": "json",
+    "x": 210,
+    "y": 700,
+    "wires": [["ex-actor-call"]]
+  },
+  {
+    "id": "ex-actor-inject-getmydata",
+    "type": "inject",
+    "z": "ex-actor-tab",
+    "name": "GetMyData (expect the stored greeting + ts)",
+    "props": [
+      {
+        "p": "dapr.actorCall",
+        "v": "{\"type\":\"DemoActor\",\"id\":\"demo-1\",\"method\":\"GetMyData\"}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 210,
+    "y": 760,
+    "wires": [["ex-actor-call"]]
+  },
+  {
+    "id": "ex-actor-inject-count",
+    "type": "inject",
+    "z": "ex-actor-tab",
+    "name": "count (expect 1, then 2 if clicked twice)",
+    "props": [
+      {
+        "p": "dapr.actorCall",
+        "v": "{\"type\":\"DemoActorCounter\",\"id\":\"counter-1\",\"method\":\"count\"}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 210,
+    "y": 820,
+    "wires": [["ex-actor-call"]]
+  },
+  {
+    "id": "ex-actor-inject-countby",
+    "type": "inject",
+    "z": "ex-actor-tab",
+    "name": "countBy: amount 5, multiplier 2 (expect +10)",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "dapr.actorCall",
+        "v": "{\"type\":\"DemoActorCounter\",\"id\":\"counter-1\",\"method\":\"countBy\"}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"amount\":5,\"multiplier\":2}",
+    "payloadType": "json",
+    "x": 210,
+    "y": 880,
+    "wires": [["ex-actor-call"]]
+  },
+  {
+    "id": "ex-actor-inject-getcounter",
+    "type": "inject",
+    "z": "ex-actor-tab",
+    "name": "getCounter (expect the running total)",
+    "props": [
+      {
+        "p": "dapr.actorCall",
+        "v": "{\"type\":\"DemoActorCounter\",\"id\":\"counter-1\",\"method\":\"getCounter\"}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 210,
+    "y": 940,
+    "wires": [["ex-actor-call"]]
+  },
+  {
+    "id": "ex-actor-inject-countby-invalid",
+    "type": "inject",
+    "z": "ex-actor-tab",
+    "name": "countBy: invalid amount (expect a caller error)",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "dapr.actorCall",
+        "v": "{\"type\":\"DemoActorCounter\",\"id\":\"counter-1\",\"method\":\"countBy\"}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"amount\":\"not-a-number\"}",
+    "payloadType": "json",
+    "x": 210,
+    "y": 1000,
+    "wires": [["ex-actor-call"]]
+  },
+  {
+    "id": "ex-actor-call",
+    "type": "dapr-actor-call",
+    "z": "ex-actor-tab",
+    "name": "actor call",
+    "connection": "ex-actor-conn",
+    "actorType": "DemoActor",
+    "actorId": "demo-1",
+    "method": "GetMyData",
+    "x": 650,
+    "y": 850,
+    "wires": [["ex-actor-debug"]]
+  },
+  {
+    "id": "ex-actor-debug",
+    "type": "debug",
+    "z": "ex-actor-tab",
+    "name": "actor response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 870,
+    "y": 850
+  }
+]

@@ -20,6 +20,7 @@ const {
 const { normalisePropertyExpression } = require('@node-red/util').util;
 const { buildSubscription } = require('../../lib/subscriptions');
 const { parseRequestHeaders } = require('../../lib/http-headers');
+const { validateActorSegment } = require('../../lib/actor-messages');
 
 // Editor code and runtime code are separate environments — the browser cannot
 // require lib/, and the runtime has no DOM — so a predicate needed on both sides
@@ -484,6 +485,45 @@ test('numeric editor fields never accept a value their runtime bound rejects', (
       runtime,
       cases: NUMBERS,
       mode: 'no-looser',
+    });
+  }
+});
+
+const ACTOR_SEGMENTS = [
+  '',
+  '   ',
+  'DemoActor',
+  'demo-1',
+  'a/b',
+  '.',
+  '..',
+  'a.b',
+  'a..b',
+  'x'.repeat(256),
+  'x'.repeat(257),
+  'a\u0000b',
+  'a\u007fb',
+  'a\tb',
+  'café',
+  '/leading',
+  'trailing/',
+];
+
+test('actor type/id/method: editor validation matches lib/actor-messages.js validateActorSegment', () => {
+  const pairs = [
+    ['actorType', 'dapr-actor-method.html'],
+    ['method', 'dapr-actor-method.html'],
+    ['actorType', 'dapr-actor-call.html'],
+    ['actorId', 'dapr-actor-call.html'],
+    ['method', 'dapr-actor-call.html'],
+  ];
+  for (const [property, file] of pairs) {
+    assertContract({
+      label: `${file} ${property}`,
+      editor: loadEditorValidator(file, property),
+      runtime: (value) => validateActorSegment(value, property),
+      cases: ACTOR_SEGMENTS,
+      mode: 'exact',
     });
   }
 });

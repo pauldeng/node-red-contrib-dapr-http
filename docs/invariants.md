@@ -59,7 +59,9 @@ or collector failure never fails, delays, or retries a Node-RED message.
 limit caps what the app channel buffers from an inbound request _and_ what an
 outbound call accepts back — an invoked app's response is the one body an
 operator does not control. Over-size fails as `RESPONSE_TOO_LARGE`, never as
-`SIDECAR_UNAVAILABLE`: the sidecar answered.
+`SIDECAR_UNAVAILABLE`: the sidecar answered. Actor reply proposals also bound
+the response and replacement record individually before settlement, so an
+oversized response cannot trigger a state write first.
 
 **Sidecar paths are built, never interpolated.** Any app id, method, pubsub
 name, topic, state store/key, configuration store, binding name, or secret

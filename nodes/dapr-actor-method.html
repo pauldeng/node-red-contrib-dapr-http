@@ -1,0 +1,150 @@
+<script type="text/javascript">
+  RED.nodes.registerType('dapr-actor-method', {
+    category: 'network',
+    color: '#f3c969',
+    defaults: {
+      name: { value: '' },
+      connection: { value: '', type: 'dapr-connection', required: true },
+      actorType: {
+        value: '',
+        required: true,
+        // Mirrors lib/actor-messages.js's validateActorSegment: nonempty,
+        // bounded, no "/" or control characters, never "." or "..". Editor
+        // validation is not runtime validation — imported flows still hit the
+        // runtime check. Kept in sync by test/unit/editor-runtime-contract.test.js.
+        validate: function (value) {
+          const raw = String(value === undefined || value === null ? '' : value);
+          if (raw === '' || raw.length > 256 || raw === '.' || raw === '..') {
+            return false;
+          }
+          if (raw.includes('/')) {
+            return false;
+          }
+          for (let i = 0; i < raw.length; i += 1) {
+            const code = raw.charCodeAt(i);
+            if (code <= 0x1f || code === 0x7f) {
+              return false;
+            }
+          }
+          return true;
+        },
+      },
+      method: {
+        value: '',
+        required: true,
+        validate: function (value) {
+          const raw = String(value === undefined || value === null ? '' : value);
+          if (raw === '' || raw.length > 256 || raw === '.' || raw === '..') {
+            return false;
+          }
+          if (raw.includes('/')) {
+            return false;
+          }
+          for (let i = 0; i < raw.length; i += 1) {
+            const code = raw.charCodeAt(i);
+            if (code <= 0x1f || code === 0x7f) {
+              return false;
+            }
+          }
+          return true;
+        },
+      },
+    },
+    inputs: 0,
+    outputs: 1,
+    icon: 'font-awesome/fa-sign-in',
+    paletteLabel: 'actor method',
+    label: function () {
+      return this.name || `${this.actorType || 'actor'}/${this.method || 'method'}`;
+    },
+  });
+</script>
+
+<script type="text/html" data-template-name="dapr-actor-method">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-connection"><i class="fa fa-server"></i> Connection</label>
+    <input type="text" id="node-input-connection" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-actorType"><i class="fa fa-cube"></i> Actor type</label>
+    <input type="text" id="node-input-actorType" placeholder="DemoActor" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-method"><i class="fa fa-code-fork"></i> Method</label>
+    <input type="text" id="node-input-method" placeholder="GetMyData" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="dapr-actor-method">
+  <p>
+    An actor is one object with its own saved state, addressed by an actor type and an ID. Dapr runs
+    calls to the same actor one at a time; calls to different actors run concurrently. See
+    <a
+      href="https://docs.dapr.io/developing-applications/building-blocks/actors/actors-overview/"
+      target="_blank"
+      >Dapr's actors overview</a
+    >.
+  </p>
+  <p>
+    Registers one method on an actor type, on this connection's dedicated app-channel listener. No
+    input; pair it with a <code>dapr actor reply</code> node to answer the caller.
+  </p>
+
+  <h3>Outputs</h3>
+  <dl class="message-properties">
+    <dt>payload <span class="property-type">object | null | undefined</span></dt>
+    <dd>The method's JSON argument, or <code>undefined</code> when the caller sent no body.</dd>
+    <dt>
+      dapr.actor.type / dapr.actor.id / dapr.actor.method <span class="property-type">string</span>
+    </dt>
+    <dd>
+      The invoked actor's type, id, and method name. Editing these does not retarget storage — the
+      request handler keeps its own authoritative identity.
+    </dd>
+    <dt>dapr.actor.stateExists <span class="property-type">boolean</span></dt>
+    <dd>Whether this actor has a stored <code>record</code> yet.</dd>
+    <dt>dapr.actor.state <span class="property-type">object | null</span></dt>
+    <dd>
+      The actor's current stored record (a private copy), or <code>null</code> when
+      <code>stateExists</code> is <code>false</code>.
+    </dd>
+    <dt>dapr.actorRequestId <span class="property-type">string</span></dt>
+    <dd>
+      Opaque correlation id for the matching <code>dapr actor reply</code> node. Preserve it through
+      the flow; it is scoped to this connection and expires if no reply arrives in time.
+    </dd>
+  </dl>
+
+  <h3>Details</h3>
+  <p>
+    Dapr serializes calls to the same actor id; different actor ids proceed concurrently.
+    Registering a duplicate (actor type, method) pair on this connection, or one that collides with
+    an existing service route's path, fails at deploy time with a status and a logged error. Only
+    registering a new actor <b>type</b> on this connection needs a sidecar restart to re-advertise
+    <code>/dapr/config</code> (the connection surfaces this as a status) — adding, removing, or
+    renaming a method on an already-registered type does not, since daprd only needs to know the
+    type for placement.
+  </p>
+  <p>
+    If no reply node settles this request before its deadline, the call fails for its caller — Dapr
+    reports every non-success outcome the same way, so a caller cannot distinguish "busy, retry"
+    from any other failure — and no state write occurs; this node does not see that outcome. Never
+    write actor state directly; only a paired <code>dapr actor reply</code> may propose it.
+  </p>
+
+  <h3>Example</h3>
+  <p>
+    Wire <code>dapr actor method</code> (actor type <code>DemoActor</code>, method
+    <code>GetMyData</code>) &rarr; a Function &rarr; <code>dapr actor reply</code>. See
+    <code>examples/actor-demo.json</code> for the full flow, including its <code>SetMyData</code>
+    counterpart:
+  </p>
+  <pre>
+// Function node between method and reply
+msg.payload = msg.dapr.actor.stateExists ? msg.dapr.actor.state : null;
+return msg; // no nextState -- nothing is written</pre>
+</script>

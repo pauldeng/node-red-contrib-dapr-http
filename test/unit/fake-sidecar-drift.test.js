@@ -39,6 +39,7 @@ const PROVEN_BY_REAL_DAPRD = {
   bindings: 'binding-out.test.js',
   secrets: 'secret-get.test.js',
   metadata: 'metadata.test.js',
+  actors: 'actors.test.js',
 };
 
 // Paths the fake serves that are deliberately NOT real Dapr endpoints — used
