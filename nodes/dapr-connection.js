@@ -6,7 +6,7 @@ const { ErrorCodes } = require('../lib/errors');
 const { createConnectionRegistry } = require('../lib/connection-registry');
 const { connectionStatus } = require('../lib/connection-status');
 const { createActorHost } = require('../lib/actor-host');
-const { readRecord: actorReadRecord, saveRecord: actorSaveRecord } = require('../lib/actor-client');
+const actorClient = require('../lib/actor-client');
 const { PendingRegistry } = require('../lib/pending');
 const { sidecarRequest } = require('../lib/sidecar-http');
 const { getMetadata } = require('../lib/metadata-client');
@@ -205,8 +205,8 @@ module.exports = function registerDaprConnection(RED) {
       client: {
         baseUrl: options.outbound.baseUrl,
         token: options.daprApiToken,
-        readRecord: actorReadRecord,
-        saveRecord: actorSaveRecord,
+        // The whole client module, so a new host operation cannot be left unwired.
+        ...actorClient,
       },
     });
     const pendingAcks = new PendingRegistry({ max: options.limits.maxPending });

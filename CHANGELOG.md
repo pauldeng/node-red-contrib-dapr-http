@@ -9,6 +9,9 @@ the same change that ships behavior.
 
 ### Added
 
+- Actor deletion requires an own `deleteState: true` property; inherited
+  properties cannot request a destructive state operation.
+
 - Actor mode: `dapr-actor-method`, `dapr-actor-reply`, and `dapr-actor-call`
   nodes host Dapr actors in flows and call actors hosted elsewhere, over the
   existing app channel and sidecar HTTP client. One JSON `record` per actor;
@@ -21,6 +24,11 @@ the same change that ships behavior.
   `msg.dapr.actor.trigger.name`. Needs a Dapr Scheduler service
   (`--scheduler-host-address`); reminders survive a Node-RED and daprd
   restart. Timers are not supported.
+- `msg.dapr.actor.deleteState: true` on a Complete reply deletes the actor's
+  entire record through the same commit path as an ordinary replacement,
+  with `nextState` absent. The next invocation reports `stateExists: false`;
+  deleting an already-absent record is not an error, and reminders are
+  unaffected.
 - The request handler, not the reply node, commits actor state, and only
   after the reply. Calls to one actor take turns; its gate and daprd's request
   stay open until the commit settles, including across a redeploy or

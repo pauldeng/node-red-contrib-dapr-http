@@ -10,6 +10,7 @@ const {
   invoke,
   readRecord,
   saveRecord,
+  deleteRecord,
   setReminder,
   getReminder,
   deleteReminder,
@@ -238,6 +239,46 @@ test('saveRecord throws SIDECAR_UNAVAILABLE on a transport failure (unknown outc
     saveRecord(
       { baseUrl: 'http://127.0.0.1:1' },
       { actorType: 'T', actorId: 'a', valueJson: 'null', timeoutMs: 1000 }
+    ),
+    (err) => {
+      assert.equal(err.code, ErrorCodes.SIDECAR_UNAVAILABLE);
+      return true;
+    }
+  );
+});
+
+test('deleteRecord posts one delete transaction for the record key', async (t) => {
+  const sidecar = await recordingSidecar(204, '');
+  t.after(sidecar.stop);
+  const result = await deleteRecord(
+    { baseUrl: sidecar.baseUrl, token: 'tok' },
+    { actorType: 'T', actorId: 'a', timeoutMs: 5000 }
+  );
+  assert.equal(result.status, 204);
+  assert.equal(sidecar.requests[0].method, 'POST');
+  assert.equal(sidecar.requests[0].path, '/v1.0/actors/T/a/state');
+  assert.equal(sidecar.requests[0].headers['dapr-api-token'], 'tok');
+  const sent = JSON.parse(sidecar.requests[0].body);
+  assert.deepEqual(sent, [{ operation: 'delete', request: { key: 'record' } }]);
+});
+
+test('deleteRecord throws STATE_OPERATION_FAILED on a confirmed non-2xx (definite failure)', async (t) => {
+  const sidecar = await recordingSidecar(400, 'ERR_ACTOR_INSTANCE_MISSING');
+  t.after(sidecar.stop);
+  await assert.rejects(
+    deleteRecord({ baseUrl: sidecar.baseUrl }, { actorType: 'T', actorId: 'a', timeoutMs: 1000 }),
+    (err) => {
+      assert.equal(err.code, ErrorCodes.STATE_OPERATION_FAILED);
+      return true;
+    }
+  );
+});
+
+test('deleteRecord throws SIDECAR_UNAVAILABLE on a transport failure (unknown outcome)', async () => {
+  await assert.rejects(
+    deleteRecord(
+      { baseUrl: 'http://127.0.0.1:1' },
+      { actorType: 'T', actorId: 'a', timeoutMs: 1000 }
     ),
     (err) => {
       assert.equal(err.code, ErrorCodes.SIDECAR_UNAVAILABLE);

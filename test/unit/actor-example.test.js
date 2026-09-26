@@ -91,6 +91,9 @@ function getMyDataFn() {
 function setMyDataFn() {
   return compile(functionNode(loadFlow(), 'SetMyData: store with timestamp'));
 }
+function clearMyDataFn() {
+  return compile(functionNode(loadFlow(), 'ClearMyData: clear stored data'));
+}
 function countFn() {
   return compile(functionNode(loadFlow(), 'count: increment by one'));
 }
@@ -158,6 +161,27 @@ test('SetMyData preserves an own __proto__ JSON field without changing the recor
   assert.equal(Object.getPrototypeOf(state), Object.prototype);
   assert.ok(Object.hasOwn(state, '__proto__'));
   assert.deepEqual(state.__proto__, data.__proto__);
+});
+
+// ---------------------------------------------------------------------------
+// ClearMyData
+// ---------------------------------------------------------------------------
+
+test('ClearMyData: proposes a delete, with payload null and no nextState', () => {
+  const existing = { greeting: 'hello world', ts: '2020-01-01T00:00:00.000Z' };
+  const result = assertComplete(
+    clearMyDataFn()(makeMsg(undefined, { stateExists: true, state: existing }))
+  );
+  assert.equal(result.payload, null);
+  assert.equal(result.dapr.actor.deleteState, true);
+  assert.equal(Object.hasOwn(result.dapr.actor, 'nextState'), false);
+  assert.doesNotThrow(() => serializeProposal(result, 'complete'));
+});
+
+test('ClearMyData: works the same on an unprovisioned actor (no record yet)', () => {
+  const result = assertComplete(clearMyDataFn()(makeMsg(undefined, { stateExists: false })));
+  assert.equal(result.payload, null);
+  assert.equal(result.dapr.actor.deleteState, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -249,6 +273,16 @@ test('Catch: safe error builds a sanitized INTERNAL error and drops any partial 
   assertErrorCode(result, 'INTERNAL');
   assert.equal(result.dapr.actor.error.message, 'unexpected error');
   assert.equal(result.dapr.actor.nextState, undefined);
+});
+
+test('Catch: safe error also drops deleteState, which would otherwise make the fail reply itself invalid', () => {
+  const fn = catchFn();
+  const msg = makeMsg(null, { stateExists: true });
+  msg.dapr.actor.deleteState = true;
+  const result = fn(msg);
+  assertErrorCode(result, 'INTERNAL');
+  assert.equal(Object.hasOwn(result.dapr.actor, 'deleteState'), false);
+  assert.doesNotThrow(() => serializeProposal(result, 'fail'));
 });
 
 // ---------------------------------------------------------------------------
@@ -364,6 +398,7 @@ test('flow wiring: each method node feeds its function, which feeds both reply n
   const methodToFn = {
     GetMyData: 'ex-actor-getmydata-fn',
     SetMyData: 'ex-actor-setmydata-fn',
+    ClearMyData: 'ex-actor-clearmydata-fn',
     count: 'ex-actor-count-fn',
     countBy: 'ex-actor-countby-fn',
     getCounter: 'ex-actor-getcounter-fn',
@@ -375,14 +410,14 @@ test('flow wiring: each method node feeds its function, which feeds both reply n
   assert.ok(replyFail, 'a dapr-actor-reply node with outcome "fail" must exist');
 
   const methodNodes = flow.filter((n) => n.type === 'dapr-actor-method');
-  assert.equal(methodNodes.length, 6);
+  assert.equal(methodNodes.length, 7);
   assert.deepEqual(
     new Set(methodNodes.map((n) => n.actorType)),
     new Set(['DemoActor', 'DemoActorCounter'])
   );
 
   const ordinaryMethods = methodNodes.filter((n) => n.trigger !== 'reminder');
-  assert.equal(ordinaryMethods.length, 5);
+  assert.equal(ordinaryMethods.length, 6);
   for (const method of ordinaryMethods) {
     assert.equal(method.wires.length, 1);
     const fnId = method.wires[0][0];
@@ -434,6 +469,7 @@ test('flow wiring: Catch covers method functions and complete reply, excluding f
 
   const scopedNames = catchNode.scope.map((id) => byId(id).name).sort();
   assert.deepEqual(scopedNames, [
+    'ClearMyData: clear stored data',
     'GetMyData: return stored data',
     'SetMyData: store with timestamp',
     'count: increment by one',

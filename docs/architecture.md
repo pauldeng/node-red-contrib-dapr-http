@@ -329,7 +329,13 @@ span IDs.
 
 `lib/actor-host.js` owns each invocation from state read through commit. The
 reply node submits a serialized proposal; only the handler writes the actor's
-`record`. State reads and flow work share an absolute deadline, leaving a
+`record` -- a full replacement (`msg.dapr.actor.nextState`), or a delete of
+it entirely (`msg.dapr.actor.deleteState: true`, with `nextState` absent),
+through the exact same admission gate, deadline/reserve, and commit-aware
+close drain; `lib/actor-client.js`'s `deleteRecord` shares `saveRecord`'s
+request building and only swaps the transaction body. Deleting the record
+never touches its registrations or reminders; a later reminder callback can
+recreate it. State reads and flow work share an absolute deadline, leaving a
 bounded commit reserve. Expiry or drain prevents new flow work, and every
 exit removes the pending reply and captured identity. An already-started
 commit retains its per-actor gate until the local HTTP operation settles.
@@ -389,6 +395,12 @@ which asserts each point so a pin bump that changes one fails:
 - A save through a sidecar that no longer hosts the actor fails with 400
   `ERR_ACTOR_INSTANCE_MISSING`. Method calls and state need Placement but not
   the Scheduler service.
+- Deleting the `record` (`operation: delete`) answers 2xx for both an
+  existing and an already-absent one, so `deleteRecord` never special-cases
+  "not found" -- observed by `test/integration/actors.test.js`'s shipped
+  `ClearMyData` sequence (SetMyData, ClearMyData, a direct `readRecord`
+  confirming `{ exists: false }`, then a repeated ClearMyData), not the probe
+  file above.
 
 ### Actor reminders
 

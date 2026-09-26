@@ -65,6 +65,17 @@
       <code>false</code>, <code>0</code>, <code>""</code>, an array, and an object are all valid
       replacement values and are written as given.
     </dd>
+    <dt class="optional">dapr.actor.deleteState <span class="property-type">boolean</span></dt>
+    <dd>
+      For a <b>Complete</b> reply only. Absent or <code>false</code> means no deletion. An own
+      <code>true</code> property deletes the actor's entire record &mdash; not just the fields your
+      flow happened to set, since there is one record per actor. <code>nextState</code> must then be
+      absent (any present value, including <code>null</code> or <code>undefined</code>, is
+      rejected); on a <b>Fail</b> reply <code>true</code> is always rejected. Deleting the record
+      never touches its registrations or reminders: a later reminder callback can still fire, and
+      its own commit can recreate the record. After a delete, the next invocation reports
+      <code>dapr.actor.stateExists: false</code>. Deleting an already-absent record is not an error.
+    </dd>
     <dt class="optional">dapr.actor.error <span class="property-type">object</span></dt>
     <dd>
       Required for a <b>Fail</b> reply: <code>{ code, message }</code>. <code>code</code> must match
@@ -77,9 +88,10 @@
     <code>done()</code> on this node means the proposal was accepted by the pending registry &mdash;
     it does <b>not</b> mean the state write has committed. This node never talks to storage; the
     request handler that is holding the caller's HTTP request performs the commit (when
-    <code>nextState</code> is present) and only then answers the caller. A commit failure, or the
-    request's deadline expiring between acceptance and commit, is reported to the caller and to
-    sanitized host diagnostics, not as a second completion of this node's input.
+    <code>nextState</code> is present, or <code>deleteState</code> is <code>true</code>) and only
+    then answers the caller. A commit failure, or the request's deadline expiring between acceptance
+    and commit, is reported to the caller and to sanitized host diagnostics, not as a second
+    completion of this node's input.
   </p>
   <p>
     The first reply for a given <code>actorRequestId</code> wins; a second reply, or one that
@@ -122,6 +134,7 @@
   <pre>
 // Function node in a Catch scope
 delete msg.dapr.actor.nextState; // never propose a write from a failure path
+delete msg.dapr.actor.deleteState; // left set, a fail reply would itself be invalid
 msg.dapr.actor.error = { code: 'INTERNAL', message: 'unexpected error' };
 return msg;</pre>
 </script>

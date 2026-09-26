@@ -189,6 +189,96 @@ test('an oversized response is rejected before accepting a state proposal', () =
   );
 });
 
+// ---- serializeProposal: deleteState ----
+
+test('deleteState inherited from a prototype cannot propose a deletion or invalidate a fail reply', () => {
+  const actor = Object.create({ deleteState: true });
+  actor.error = { code: 'EXPECTED', message: 'failed' };
+  const msg = { payload: null, dapr: { actor } };
+  assert.deepEqual(serializeProposal(msg, 'complete'), {
+    outcome: 'complete',
+    responseJson: 'null',
+  });
+  assert.equal(serializeProposal(msg, 'fail').outcome, 'fail');
+});
+
+test('deleteState absent is unaffected: nextState still behaves normally', () => {
+  const proposal = serializeProposal(
+    { payload: 1, dapr: { actor: { nextState: { a: 1 } } } },
+    'complete'
+  );
+  assert.deepEqual(proposal, { outcome: 'complete', responseJson: '1', nextStateJson: '{"a":1}' });
+  assert.equal(Object.hasOwn(proposal, 'deleteState'), false);
+});
+
+test('deleteState: false permits an ordinary nextState and adds no deleteState key', () => {
+  const proposal = serializeProposal(
+    { payload: 1, dapr: { actor: { deleteState: false, nextState: { a: 1 } } } },
+    'complete'
+  );
+  assert.deepEqual(proposal, { outcome: 'complete', responseJson: '1', nextStateJson: '{"a":1}' });
+});
+
+test('deleteState: true with no nextState proposes a delete, with no nextStateJson', () => {
+  const proposal = serializeProposal(
+    { payload: 1, dapr: { actor: { deleteState: true } } },
+    'complete'
+  );
+  assert.deepEqual(proposal, { outcome: 'complete', responseJson: '1', deleteState: true });
+  assert.equal('nextStateJson' in proposal, false);
+});
+
+for (const nextState of [{ a: 1 }, null, undefined, 0, false, '']) {
+  test(`deleteState: true with a present nextState (${JSON.stringify(nextState)}) is invalid`, () => {
+    assert.throws(
+      () =>
+        serializeProposal(
+          { payload: 1, dapr: { actor: { deleteState: true, nextState } } },
+          'complete'
+        ),
+      { code: ErrorCodes.INVALID_MESSAGE }
+    );
+  });
+}
+
+test('deleteState: true on a fail reply is invalid', () => {
+  assert.throws(
+    () =>
+      serializeProposal(
+        {
+          dapr: {
+            actor: { deleteState: true, error: { code: 'X', message: 'm' } },
+          },
+        },
+        'fail'
+      ),
+    { code: ErrorCodes.INVALID_MESSAGE }
+  );
+});
+
+test('deleteState: false on a fail reply is allowed', () => {
+  const proposal = serializeProposal(
+    { dapr: { actor: { deleteState: false, error: { code: 'X', message: 'm' } } } },
+    'fail'
+  );
+  assert.equal(proposal.outcome, 'fail');
+});
+
+for (const bad of [undefined, null, 0, 1, 'true', 'false', {}, []]) {
+  test(`deleteState: any non-boolean value (${JSON.stringify(bad)}) is invalid`, () => {
+    assert.throws(
+      () => serializeProposal({ payload: 1, dapr: { actor: { deleteState: bad } } }, 'complete'),
+      { code: ErrorCodes.INVALID_MESSAGE }
+    );
+  });
+}
+
+test('deleteState: true still requires msg.payload for the complete reply', () => {
+  assert.throws(() => serializeProposal({ dapr: { actor: { deleteState: true } } }, 'complete'), {
+    code: ErrorCodes.INVALID_MESSAGE,
+  });
+});
+
 // ---- serializeProposal: fail ----
 
 test('a fail reply serializes a sanitized error envelope', () => {

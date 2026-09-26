@@ -40,7 +40,7 @@ const {
   stateComponentYaml,
 } = require('../helpers/integration');
 const { waitFor } = require('../helpers/wait-for');
-const { invoke } = require('../../lib/actor-client');
+const { invoke, readRecord, deleteRecord } = require('../../lib/actor-client');
 const { ErrorCodes } = require('../../lib/errors');
 
 const FLOW_PATH = path.resolve(__dirname, '../../examples/actor-demo.json');
@@ -158,6 +158,73 @@ test(
     const stored = JSON.parse(getRes.text);
     assert.equal(stored.greeting, 'hello world');
     assert.match(stored.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+
+    // --- SetMyData then ClearMyData then GetMyData: a delete removes the
+    // whole record, not merely storing null -- a fresh actor id, distinct
+    // from demo-it-1 above, whose record must survive the later restart. ---
+    const clearId = 'demo-it-clear-1';
+    const setForClear = await actorCall(daprd.baseUrl, 'DemoActor', clearId, 'SetMyData', {
+      greeting: 'to be cleared',
+    });
+    assert.equal(setForClear.status, 200, setForClear.text);
+
+    // Positive control: readRecord must see the record BEFORE it is cleared,
+    // so the { exists: false } assertion below is evidence the delete
+    // actually ran, not evidence that this out-of-band read never finds
+    // anything.
+    const recordBeforeClear = await readRecord(
+      { baseUrl: daprd.baseUrl, timeoutMs: 10000 },
+      { actorType: 'DemoActor', actorId: clearId }
+    );
+    assert.equal(recordBeforeClear.exists, true);
+    assert.equal(recordBeforeClear.value.greeting, 'to be cleared');
+
+    const clearRes = await actorCall(daprd.baseUrl, 'DemoActor', clearId, 'ClearMyData', {});
+    assert.equal(clearRes.status, 200, clearRes.text);
+    assert.equal(JSON.parse(clearRes.text), null);
+
+    const afterClear = await actorCall(daprd.baseUrl, 'DemoActor', clearId, 'GetMyData', {});
+    assert.equal(afterClear.status, 200, afterClear.text);
+    assert.equal(JSON.parse(afterClear.text), null);
+
+    // GetMyData answering null cannot tell "never provisioned" apart from
+    // "just deleted" -- read the record directly through daprd's own actor
+    // state API (lib/actor-client.js's readRecord, the exact client the app
+    // itself uses) to confirm the delete actually removed the record rather
+    // than merely storing a JSON null.
+    const recordAfterClear = await readRecord(
+      { baseUrl: daprd.baseUrl, timeoutMs: 10000 },
+      { actorType: 'DemoActor', actorId: clearId }
+    );
+    assert.deepEqual(recordAfterClear, { exists: false });
+
+    // Deleting an already-absent record: observed against real daprd 1.18.4,
+    // a repeated ClearMyData still answers 200 through the app-channel
+    // round trip (a successful no-op, not an error) -- confirmed by running
+    // it again against the now-absent record.
+    const clearAgain = await actorCall(daprd.baseUrl, 'DemoActor', clearId, 'ClearMyData', {});
+    assert.equal(clearAgain.status, 200, clearAgain.text);
+    assert.equal(JSON.parse(clearAgain.text), null);
+    const recordAfterSecondClear = await readRecord(
+      { baseUrl: daprd.baseUrl, timeoutMs: 10000 },
+      { actorType: 'DemoActor', actorId: clearId }
+    );
+    assert.deepEqual(recordAfterSecondClear, { exists: false });
+
+    // Capture daprd's own exact status for the delete transaction itself
+    // (lib/actor-client.js's deleteRecord, the same client actor-host.js
+    // uses), rather than only the app-channel's own always-200 answer above.
+    const directDeleteOfAbsent = await deleteRecord(
+      { baseUrl: daprd.baseUrl, timeoutMs: 10000 },
+      { actorType: 'DemoActor', actorId: clearId }
+    );
+    assert.ok(
+      directDeleteOfAbsent.status >= 200 && directDeleteOfAbsent.status <= 299,
+      `expected a 2xx for deleting an already-absent record, got ${directDeleteOfAbsent.status}`
+    );
+    t.diagnostic(
+      `daprd status for deleting an already-absent record: ${directDeleteOfAbsent.status}`
+    );
 
     // --- countBy twice then getCounter ---------------------------------------
     const first = await actorCall(daprd.baseUrl, 'DemoActorCounter', 'counter-it-1', 'countBy', {

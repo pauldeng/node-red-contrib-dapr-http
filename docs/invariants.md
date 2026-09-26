@@ -93,9 +93,11 @@ missing-connection and stale-id diagnostics remain.
 ## Actors
 
 **Only the actor request handler writes actor state, and only after the
-reply.** The reply node validates and serializes a proposal; `lib/actor-host.js`
-commits it. A reply node or branch that wrote directly could commit after the
-caller had already seen a timeout, or two branches could both write.
+reply.** The reply node validates and serializes a proposal -- a replacement
+record, or a delete of it entirely -- and `lib/actor-host.js` commits it
+through the same gate either way. A reply node or branch that wrote directly
+could commit after the caller had already seen a timeout, or two branches
+could both write.
 
 **The per-actor gate and daprd's request stay open until the commit settles.**
 daprd releases an actor's turn when the app's request ends. Answering before

@@ -160,8 +160,9 @@ metadata, dead-letter topic, raw-payload mode, CEL rules, or bulk settings.
   without logging or retaining it.
 
 - `actor-demo.json` has two actor types modelled on Dapr's own SDK samples:
-  `DemoActor` (`SetMyData` / `GetMyData`, plus a reminder that records its own
-  firing) and `DemoActorCounter` (`count` / `countBy` / `getCounter`). It
+  `DemoActor` (`SetMyData` / `GetMyData` / `ClearMyData`, plus a reminder that
+  records its own firing) and `DemoActorCounter` (`count` / `countBy` /
+  `getCounter`). It
   needs no broker, but does need a Dapr Placement service and a state-store
   component configured with `actorStateStore: "true"`; the reminder Injects
   additionally need a Dapr Scheduler service -- see
@@ -273,11 +274,16 @@ the container runs with `--rm`, so it is not durable across restarts: any
 reminder set against it is lost when the container stops, same as this
 development Redis container's state.
 
-Click SetMyData then GetMyData to read the saved object plus its timestamp. On
+Click SetMyData then GetMyData to read the saved object plus its timestamp,
+then ClearMyData to delete it -- a following GetMyData reads null again unless
+another method or reminder has written a new record. ClearMyData does not
+cancel a scheduled reminder; use the separate delete-reminder Inject for that. On
 `counter-1`, count increments by one, countBy adds ten with the supplied fixture,
-and getCounter reads the result. Only read methods are safe to repeat without
-changing state. Restarting Node-RED/daprd with the same app ID and retained store
-preserves the record. Restart daprd after adding/removing actor types.
+and getCounter reads the result. Only read methods (and a repeated ClearMyData,
+which is a no-op once the record is already gone) are safe to repeat without
+changing state further. Restarting Node-RED/daprd with the same app ID and
+retained store preserves the record. Restart daprd after adding/removing actor
+types.
 
 Click "set reminder: demo_reminder every 5s" to schedule a repeating reminder;
 its data is recorded into DemoActor's record every time it fires (watch the
@@ -292,13 +298,14 @@ error. Reminders need the Scheduler service above; the ordinary method/state
 flows do not.
 
 These are adaptations of Dapr's SDK samples, not SDK-compatible implementations.
-The public flow's Comment links the exact upstream revisions: the Python sample
-uses a different state key and has its `clear_my_data` deletion method omitted
-here (this package's v1 has no delete); the JavaScript counter is in-memory and
-its increment methods return no result. This flow uses a durable `record`,
-accepts countBy arguments as one JSON object, and returns the updated counter.
-Timers are not supported by this package. See
-[source attribution](DAPR-SAMPLES.md).
+The public flow's Comment links the exact upstream revisions: the Python
+sample uses a different state key, and its `clear_my_data` is adapted as
+ClearMyData -- since this package stores one record per actor, deleting it
+also clears the reminder-trigger method's own bookkeeping, not just the
+SetMyData fields; the JavaScript counter is in-memory and its increment
+methods return no result. This flow uses a durable `record`, accepts countBy
+arguments as one JSON object, and returns the updated counter. Timers are not
+supported by this package. See [source attribution](DAPR-SAMPLES.md).
 
 Stop the example containers with `docker stop nrdapr-example-placement
 nrdapr-example-scheduler nrdapr-example-redis`. This development Redis
