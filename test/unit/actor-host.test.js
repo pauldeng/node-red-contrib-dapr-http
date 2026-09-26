@@ -25,8 +25,31 @@ function fakeClient(over = {}) {
     token: undefined,
     readRecord: async () => ({ exists: false }),
     saveRecord: async () => ({ status: 204 }),
+    deleteRecord: async () => ({ status: 204 }),
     ...over,
   };
+}
+
+// The actor host commits a delete through the exact same gate/deadline/close
+// path as an upsert, dispatched only by which field the proposal carries
+// (lib/actor-host.js). The commit-ownership tests below are parameterized
+// over both proposal shapes instead of writing a parallel suite; `commitKey`
+// is the client method each kind commits through.
+const COMMIT_KINDS = {
+  save: { commitKey: 'saveRecord', proposalExtra: { nextStateJson: '{}' } },
+  delete: { commitKey: 'deleteRecord', proposalExtra: { deleteState: true } },
+};
+
+function commitProposal(kind, responseJson = '"ok"') {
+  return { outcome: 'complete', responseJson, ...COMMIT_KINDS[kind].proposalExtra };
+}
+
+// A fakeClient whose one commit method (saveRecord or deleteRecord,
+// depending on `kind`) is `impl`; the other kind's commit method stays the
+// harmless default, so a host bug that commits through the wrong method is
+// caught by the counter never incrementing.
+function commitCountingClient(kind, impl) {
+  return fakeClient({ [COMMIT_KINDS[kind].commitKey]: impl });
 }
 
 function makeCtx({ body = Buffer.alloc(0), deadlineAt, aborted = false } = {}) {
@@ -195,20 +218,22 @@ test('admission is rejected once the active-handler budget is exhausted, even fo
   await p1;
 });
 
-test('settleActorReply is first-wins; a second settlement for the same id is ignored', async () => {
-  const host = createActorHost({ limits: limits(), client: fakeClient() });
-  const { promise, requestId } = await invokeAndCaptureRequest(host);
-  const first = host.settleActorReply(requestId, { outcome: 'complete', responseJson: '"first"' });
-  const second = host.settleActorReply(requestId, {
-    outcome: 'complete',
-    responseJson: '"second"',
+for (const kind of Object.keys(COMMIT_KINDS)) {
+  test(`settleActorReply is first-wins and commits exactly once (${kind})`, async () => {
+    let commits = 0;
+    const client = commitCountingClient(kind, async () => {
+      commits += 1;
+    });
+    const host = createActorHost({ limits: limits(), client });
+    const { promise, requestId } = await invokeAndCaptureRequest(host);
+    assert.equal(host.settleActorReply(requestId, commitProposal(kind, '"first"')), true);
+    assert.equal(host.settleActorReply(requestId, commitProposal(kind, '"second"')), false);
+    const result = await promise;
+    assert.equal(result.status, 200);
+    assert.equal(result.body, '"first"');
+    assert.equal(commits, 1);
   });
-  assert.equal(first, true);
-  assert.equal(second, false);
-  const result = await promise;
-  assert.equal(result.status, 200);
-  assert.equal(result.body, '"first"');
-});
+}
 
 test('a proposal that never arrives expires (reserve timeout) with no write', async () => {
   let saveCalls = 0;
@@ -230,56 +255,53 @@ test('a proposal that never arrives expires (reserve timeout) with no write', as
   assert.equal(saveCalls, 0);
 });
 
-test('a reply arriving after expiry is rejected (first-wins already spent) and never commits', async () => {
-  let saveCalls = 0;
-  const client = fakeClient({
-    saveRecord: async () => {
-      saveCalls += 1;
+for (const kind of Object.keys(COMMIT_KINDS)) {
+  test(`a reply arriving after expiry is rejected (first-wins already spent) and never commits (${kind})`, async () => {
+    let commitCalls = 0;
+    const client = commitCountingClient(kind, async () => {
+      commitCalls += 1;
       return { status: 204 };
-    },
+    });
+    const fixedLimits = limits({ requestTimeoutMs: 100000, drainTimeoutMs: 50 });
+    const host = createActorHost({ limits: fixedLimits, client });
+    const deadlineAt = Date.now() + 60;
+    const { promise, requestId } = await invokeAndCaptureRequest(host, {
+      ctx: makeCtx({ deadlineAt }),
+    });
+    const result = await promise;
+    assert.equal(result.status, 503);
+    const late = host.settleActorReply(requestId, commitProposal(kind));
+    assert.equal(late, false);
+    assert.equal(commitCalls, 0);
   });
-  const fixedLimits = limits({ requestTimeoutMs: 100000, drainTimeoutMs: 50 });
-  const host = createActorHost({ limits: fixedLimits, client });
-  const deadlineAt = Date.now() + 60;
-  const { promise, requestId } = await invokeAndCaptureRequest(host, {
-    ctx: makeCtx({ deadlineAt }),
-  });
-  const result = await promise;
-  assert.equal(result.status, 503);
-  const late = host.settleActorReply(requestId, {
-    outcome: 'complete',
-    responseJson: '1',
-    nextStateJson: '{}',
-  });
-  assert.equal(late, false);
-  assert.equal(saveCalls, 0);
-});
+}
 
-test('remaining time checked immediately before the commit: insufficient time means no write', async () => {
-  let saveCalls = 0;
-  const client = fakeClient({
-    saveRecord: async () => {
-      saveCalls += 1;
+for (const kind of Object.keys(COMMIT_KINDS)) {
+  test(`remaining time checked immediately before the commit: insufficient time means no write (${kind})`, async () => {
+    let commitCalls = 0;
+    const client = commitCountingClient(kind, async () => {
+      commitCalls += 1;
       return { status: 204 };
-    },
+    });
+    const fixedLimits = limits({ requestTimeoutMs: 1000, drainTimeoutMs: 300 });
+    let nowValue = Date.now();
+    const now = () => nowValue;
+    const host = createActorHost({ limits: fixedLimits, client, now });
+    const deadlineAt = nowValue + 1000;
+    const { promise, requestId } = await invokeAndCaptureRequest(host, {
+      ctx: makeCtx({ deadlineAt }),
+    });
+    assert.equal(typeof requestId, 'string', 'the flow must run before its deadline expires');
+    // Advance the clock past (deadlineAt - COMMIT_MARGIN_MS) before the
+    // proposal settles, so the pre-commit recheck finds no time left.
+    nowValue = deadlineAt - 100;
+    assert.equal(host.settleActorReply(requestId, commitProposal(kind)), true);
+    const result = await promise;
+    assert.equal(result.status, 503);
+    assert.equal(JSON.parse(result.body).error.code, ErrorCodes.ACTOR_REPLY_EXPIRED);
+    assert.equal(commitCalls, 0);
   });
-  const fixedLimits = limits();
-  let nowValue = Date.now();
-  const now = () => nowValue;
-  const host = createActorHost({ limits: fixedLimits, client, now });
-  const deadlineAt = nowValue + 1000;
-  const { promise, requestId } = await invokeAndCaptureRequest(host, {
-    ctx: makeCtx({ deadlineAt }),
-  });
-  // Advance the clock past (deadlineAt - COMMIT_MARGIN_MS) before the proposal
-  // settles, so the pre-commit recheck finds no time left.
-  nowValue = deadlineAt - 100;
-  host.settleActorReply(requestId, { outcome: 'complete', responseJson: '1', nextStateJson: '{}' });
-  const result = await promise;
-  assert.equal(result.status, 503);
-  assert.equal(JSON.parse(result.body).error.code, ErrorCodes.ACTOR_REPLY_EXPIRED);
-  assert.equal(saveCalls, 0);
-});
+}
 
 test('a caller disconnect before the commit starts means no commit runs', async () => {
   let saveCalls = 0;
@@ -338,63 +360,57 @@ test('a caller disconnect during the commit does not abort it; the gate is held 
   assert.equal(result.body, '"ok"');
 });
 
-test('no success is returned before the save resolves', async () => {
-  const { promise: saveGate, resolve: releaseSave } = Promise.withResolvers();
-  const client = fakeClient({
-    saveRecord: async () => {
-      await saveGate;
+for (const kind of Object.keys(COMMIT_KINDS)) {
+  test(`no success is returned before the commit resolves (${kind})`, async () => {
+    const { promise: commitGate, resolve: releaseCommit } = Promise.withResolvers();
+    const client = commitCountingClient(kind, async () => {
+      await commitGate;
       return { status: 204 };
-    },
+    });
+    const host = createActorHost({ limits: limits(), client });
+    const { promise, requestId } = await invokeAndCaptureRequest(host);
+    host.settleActorReply(requestId, commitProposal(kind));
+    await tick();
+    const busy = await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      emit: () => assert.fail('must not evaluate before the first commit settles'),
+      ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
+    });
+    assert.equal(busy.status, 503); // still gated: the commit has not resolved yet
+    releaseCommit();
+    assert.equal((await promise).status, 200);
   });
-  const host = createActorHost({ limits: limits(), client });
-  const { promise, requestId } = await invokeAndCaptureRequest(host);
-  host.settleActorReply(requestId, {
-    outcome: 'complete',
-    responseJson: '"ok"',
-    nextStateJson: '{}',
-  });
-  await tick();
-  const busy = await host.invoke({
-    actorType: 'T',
-    actorId: 'a',
-    method: 'M',
-    emit: () => assert.fail('must not evaluate before the first commit settles'),
-    ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
-  });
-  assert.equal(busy.status, 503); // still gated: the commit has not resolved yet
-  releaseSave();
-  assert.equal((await promise).status, 200);
-});
+}
 
-test('a transport failure mid-commit answers ACTOR_COMMIT_UNKNOWN, not a definite failure', async () => {
-  const client = fakeClient({
-    saveRecord: async () => {
+for (const kind of Object.keys(COMMIT_KINDS)) {
+  test(`a transport failure mid-commit answers ACTOR_COMMIT_UNKNOWN, not a definite failure (${kind})`, async () => {
+    const client = commitCountingClient(kind, async () => {
       throw new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'boom');
-    },
+    });
+    const host = createActorHost({ limits: limits(), client });
+    const { promise, requestId } = await invokeAndCaptureRequest(host);
+    host.settleActorReply(requestId, commitProposal(kind));
+    const result = await promise;
+    assert.equal(result.status, 500);
+    assert.equal(JSON.parse(result.body).error.code, ErrorCodes.ACTOR_COMMIT_UNKNOWN);
   });
-  const host = createActorHost({ limits: limits(), client });
-  const { promise, requestId } = await invokeAndCaptureRequest(host);
-  host.settleActorReply(requestId, { outcome: 'complete', responseJson: '1', nextStateJson: '{}' });
-  const result = await promise;
-  assert.equal(result.status, 500);
-  assert.equal(JSON.parse(result.body).error.code, ErrorCodes.ACTOR_COMMIT_UNKNOWN);
-});
 
-test('a confirmed non-2xx commit failure is a definite failure, not ACTOR_COMMIT_UNKNOWN', async () => {
-  const client = fakeClient({
-    saveRecord: async () => {
+  test(`a confirmed non-2xx commit failure is a definite failure, not ACTOR_COMMIT_UNKNOWN (${kind})`, async () => {
+    const client = commitCountingClient(kind, async () => {
       throw new DaprError(ErrorCodes.STATE_OPERATION_FAILED, 'daprd said no');
-    },
+    });
+    const host = createActorHost({ limits: limits(), client });
+    const { promise, requestId } = await invokeAndCaptureRequest(host);
+    host.settleActorReply(requestId, commitProposal(kind));
+    const result = await promise;
+    assert.equal(result.status, 500);
+    const body = JSON.parse(result.body);
+    assert.equal(body.error.code, ErrorCodes.STATE_OPERATION_FAILED);
+    assert.ok(!result.body.includes('daprd said no'));
   });
-  const host = createActorHost({ limits: limits(), client });
-  const { promise, requestId } = await invokeAndCaptureRequest(host);
-  host.settleActorReply(requestId, { outcome: 'complete', responseJson: '1', nextStateJson: '{}' });
-  const result = await promise;
-  assert.equal(result.status, 500);
-  const body = JSON.parse(result.body);
-  assert.equal(body.error.code, ErrorCodes.STATE_OPERATION_FAILED);
-  assert.ok(!result.body.includes('daprd said no'));
-});
+}
 
 test('a fail reply answers 500 with the proposal error body verbatim and never commits', async () => {
   let saveCalls = 0;
@@ -490,37 +506,33 @@ test('drain() unblocks a handler still awaiting a reply with a 503, and no write
 
 // ---- milestone 3: commit-aware close (whenCommitsSettled) -----------------
 
-test('whenCommitsSettled resolves only after a started commit actually settles', async () => {
-  const saveGate = Promise.withResolvers();
-  let saveCalls = 0;
-  const host = createActorHost({
-    limits: limits({ drainTimeoutMs: 5000 }),
-    client: fakeClient({
-      saveRecord: async () => {
-        saveCalls += 1;
-        await saveGate.promise;
+for (const kind of Object.keys(COMMIT_KINDS)) {
+  test(`whenCommitsSettled resolves only after a started commit actually settles (${kind}, close waits for an in-flight ${kind})`, async () => {
+    const commitGate = Promise.withResolvers();
+    let commitCalls = 0;
+    const host = createActorHost({
+      limits: limits({ drainTimeoutMs: 5000 }),
+      client: commitCountingClient(kind, async () => {
+        commitCalls += 1;
+        await commitGate.promise;
         return { status: 204 };
-      },
-    }),
+      }),
+    });
+    const { promise, requestId } = await invokeAndCaptureRequest(host);
+    host.settleActorReply(requestId, commitProposal(kind));
+    await tick(); // reach and call the commit method, which now blocks on commitGate
+    host.drain(); // a concurrent close/redeploy starts draining
+    const settled = host.whenCommitsSettled();
+    const race = await Promise.race([settled, delay(50, 'not-yet')]); // allow-timer: bounded negative -- the commit must still be in flight
+    assert.equal(race, 'not-yet', 'whenCommitsSettled must not resolve before the commit does');
+    assert.equal(commitCalls, 1);
+    commitGate.resolve();
+    await settled; // now resolves promptly once the commit settles
+    const result = await promise;
+    assert.equal(result.status, 200);
+    assert.equal(result.body, '"ok"');
   });
-  const { promise, requestId } = await invokeAndCaptureRequest(host);
-  host.settleActorReply(requestId, {
-    outcome: 'complete',
-    responseJson: '"ok"',
-    nextStateJson: '{}',
-  });
-  await tick(); // reach and call client.saveRecord, which now blocks on saveGate
-  host.drain(); // a concurrent close/redeploy starts draining
-  const settled = host.whenCommitsSettled();
-  const race = await Promise.race([settled, delay(50, 'not-yet')]); // allow-timer: bounded negative -- the commit must still be in flight
-  assert.equal(race, 'not-yet', 'whenCommitsSettled must not resolve before the commit does');
-  assert.equal(saveCalls, 1);
-  saveGate.resolve();
-  await settled; // now resolves promptly once the commit settles
-  const result = await promise;
-  assert.equal(result.status, 200);
-  assert.equal(result.body, '"ok"');
-});
+}
 
 test('a handler still waiting for a proposal at drain gets 503 and never commits; whenCommitsSettled needs no wait for it', async () => {
   let saveCalls = 0;

@@ -382,6 +382,175 @@ test(
   }
 );
 
+// ---- milestone 5: actor state delete ---------------------------------------
+
+test(
+  'method -> Function -> reply: deleteState commits a delete transaction, and the caller sees no response before it resolves',
+  { timeout: 30000 },
+  async (t) => {
+    const deleteGate = Promise.withResolvers();
+    let deletedBody = null;
+    let saveCalls = 0;
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        ['GET', stateReadPath('DEL', 'd1'), (_req, res) => res.writeHead(204).end()],
+        [
+          'POST',
+          stateSavePath('DEL', 'd1'),
+          async (_req, res, ctx) => {
+            const body = ctx.body.toString('utf8');
+            const [op] = JSON.parse(body);
+            if (op.operation === 'delete') {
+              deletedBody = body;
+              await deleteGate.promise;
+            } else {
+              saveCalls += 1;
+            }
+            res.writeHead(204).end();
+          },
+        ],
+      ],
+    });
+
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'del' },
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '5' }),
+      {
+        id: 'm1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'DEL',
+        method: 'ClearMyData',
+        wires: [['fn1']],
+      },
+      {
+        id: 'fn1',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = null;\nmsg.dapr.actor.deleteState = true;\nreturn msg;',
+        outputs: 1,
+        wires: [['reply1']],
+      },
+      {
+        id: 'reply1',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+    ]);
+    await dapr.waitForRequest(healthPath);
+
+    const pending = actorPut(appPort, 'DEL', 'd1', 'ClearMyData', {});
+    await dapr.waitForRequest((r) => r.method === 'POST' && r.path === stateSavePath('DEL', 'd1'));
+
+    const race = await notYetSettled(pending, 200);
+    assert.equal(race, NOT_YET, 'the caller must not see a response before the delete resolves');
+
+    deleteGate.resolve();
+    const res = await pending;
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.text, 'null');
+    assert.equal(
+      deletedBody,
+      JSON.stringify([{ operation: 'delete', request: { key: 'record' } }])
+    );
+    assert.equal(saveCalls, 0, 'a delete proposal must never reach an upsert');
+  }
+);
+
+test(
+  'deleteState: true together with a present nextState fails the reply node as INVALID_MESSAGE, which a scoped Catch can turn into a fail reply, and triggers no save or delete',
+  { timeout: 30000 },
+  async (t) => {
+    let commitCalls = 0;
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        ['GET', stateReadPath('DELBAD', 'd1'), (_req, res) => res.writeHead(204).end()],
+        [
+          'POST',
+          stateSavePath('DELBAD', 'd1'),
+          (_req, res) => {
+            commitCalls += 1;
+            res.writeHead(204).end();
+          },
+        ],
+      ],
+    });
+
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'delbad' },
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '5' }),
+      {
+        id: 'm1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'DELBAD',
+        method: 'Do',
+        wires: [['fn1']],
+      },
+      {
+        id: 'fn1',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = null;\nmsg.dapr.actor.deleteState = true;\nmsg.dapr.actor.nextState = { oops: true };\nreturn msg;',
+        outputs: 1,
+        wires: [['reply1']],
+      },
+      {
+        id: 'reply1',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+      // serializeProposal throws INVALID_MESSAGE (deleteState with nextState
+      // present) before the reply node ever settles the pending proposal, so
+      // this Catch fires while the request is still open -- the same
+      // fail/Catch wiring the reply node's help documents. fn2 must clear
+      // BOTH conflicting fields: leaving deleteState set would make the fail
+      // reply itself invalid (deleteState is never valid on a fail reply),
+      // which would surface as a 503 timeout instead of the fail envelope.
+      {
+        id: 'catch1',
+        type: 'catch',
+        z: 'tab',
+        scope: ['reply1'],
+        uncaught: false,
+        wires: [['fn2']],
+      },
+      {
+        id: 'fn2',
+        type: 'function',
+        z: 'tab',
+        func: "delete msg.dapr.actor.nextState;\ndelete msg.dapr.actor.deleteState;\nmsg.dapr.actor.error = { code: msg.error.code, message: 'rejected' };\nreturn msg;",
+        outputs: 1,
+        wires: [['reply2']],
+      },
+      {
+        id: 'reply2',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'fail',
+        wires: [],
+      },
+    ]);
+    await dapr.waitForRequest(healthPath);
+
+    const res = await actorPut(appPort, 'DELBAD', 'd1', 'Do', {});
+    assert.equal(res.status, 500, res.text);
+    assert.deepEqual(JSON.parse(res.text), {
+      error: { code: 'INVALID_MESSAGE', message: 'rejected' },
+    });
+    assert.equal(commitCalls, 0, 'an invalid deleteState/nextState combination must never commit');
+  }
+);
+
 test(
   'a fail reply produces a 500 with the flow-supplied error and no save',
   { timeout: 30000 },

@@ -84,14 +84,16 @@ export:
   sinks as sensitive data too. The returned value is part of the flow message:
   do not send it to Debug or application logs.
 
-- **Actors** — one JSON `record` per actor, read and replaced whole. A method
-  node registers an actor type/method and emits the caller's argument plus the
-  loaded record; a reply node proposes the response and, optionally, the
-  replacement record (the reply node never touches storage itself — the
-  request handler commits after the reply is accepted); a call node invokes a
-  method on any actor through the local sidecar; a schedule node sets, gets,
-  or deletes a reminder, and a method node with its Trigger set to Reminder
-  receives every reminder of its actor type. Needs a Dapr Placement service
+- **Actors** — one JSON `record` per actor, read and replaced whole, or
+  deleted entirely. A method node registers an actor type/method and emits
+  the caller's argument plus the loaded record; a reply node proposes the
+  response and, optionally, a replacement record or a delete (the reply node
+  never touches storage itself — the request handler commits after the
+  reply is accepted); a call node invokes a method on any actor through the
+  local sidecar; a schedule node sets, gets, or deletes a reminder, and a
+  method node with its Trigger set to Reminder receives every reminder of its
+  actor type. Deleting the record does not affect its reminders, and a later
+  reminder callback can recreate the record. Needs a Dapr Placement service
   and a state-store component configured with `actorStateStore: "true"`;
   reminders additionally need a Dapr Scheduler service. Timers are not
   supported. See `examples/actor-demo.json`.
@@ -190,8 +192,8 @@ quickstart. The example flows are in `examples/`:
 - `output-binding.json` — invoke an output binding and inspect its response.
 - `secret-get.json` — read one scoped secret into a message property.
 - `actor-demo.json` — two actor types modelled on Dapr's own SDK samples:
-  `DemoActor` (`SetMyData` / `GetMyData`) and `DemoActorCounter` (`count` /
-  `countBy` / `getCounter`).
+  `DemoActor` (`SetMyData` / `GetMyData` / `ClearMyData`) and
+  `DemoActorCounter` (`count` / `countBy` / `getCounter`).
 
 `examples/nats-jetstream-pubsub-component.yaml` is the beginner pub/sub
 component. `examples/memorydb-pubsub-component.yaml` is for AWS MemoryDB
@@ -283,14 +285,20 @@ See `docs/security.md` for the full picture.
 
 An actor method flow starts at a `dapr-actor-method` node and ends at a
 `dapr-actor-reply` node. The reply proposes the response and, optionally, the
-actor's replacement `record`; the connection saves it and only then answers
-daprd. See `examples/actor-demo.json` and "Run the actor example" in
-`examples/README.md`.
+actor's replacement `record` or its deletion; the connection commits that and
+only then answers daprd. See `examples/actor-demo.json` and "Run the actor
+example" in `examples/README.md`.
 
 - **Setup:** run a Dapr Placement service and give daprd one state-store
   component with `actorStateStore: "true"`. Reminders additionally need a
   Dapr Scheduler service (`--scheduler-host-address`); method calls and state
   do not need it.
+- **Deleting state:** set `msg.dapr.actor.deleteState = true` on a Complete
+  reply, with `msg.dapr.actor.nextState` absent, to delete the actor's entire
+  record. The next invocation then reports `stateExists: false`. Deletion
+  does not touch registrations or reminders; a later reminder callback can
+  recreate the record. `deleteState: true` is never valid on a Fail reply, or
+  together with a present `nextState`.
 - **Restart daprd after adding or removing an actor type.** daprd reads
   `/dapr/config` once at startup; the connection shows `restart sidecar` when
   its advertised types changed. Adding a method to an existing type needs no
