@@ -90,6 +90,38 @@ A successful acknowledgement deliberately sets no badge at all: that would publi
 one status event per delivery to every connected editor. The rare
 missing-connection and stale-id diagnostics remain.
 
+## Actors
+
+**Only the actor request handler writes actor state, and only after the
+reply.** The reply node validates and serializes a proposal; `lib/actor-host.js`
+commits it. A reply node or branch that wrote directly could commit after the
+caller had already seen a timeout, or two branches could both write.
+
+**The per-actor gate and daprd's request stay open until the commit settles.**
+daprd releases an actor's turn when the app's request ends. Answering before
+the commit settles, whether on a caller disconnect, a redeploy or a shutdown,
+would let the next turn for that actor run while the old write is still
+landing. The commit never receives the caller's abort signal, and the
+connection's close awaits started commits, bounded by the drain timeout.
+
+**One deadline covers the whole turn.** The state read and the flow wait end at
+the request deadline minus a commit reserve; the commit gets the reserve minus
+a margin. This reserves time to answer before the app-channel watchdog;
+event-loop stalls or forced close can still interrupt the response with an
+unknown commit outcome.
+
+**Removed actor registrations answer 503, never 404.** daprd treats an actor
+404 as a permanent "method not found". A method or type dropped even for the
+moment between two nodes' closes during a redeploy is tombstoned, like a
+removed delivery route.
+
+**Actor discovery exists only when actors do.** `/dapr/config` and the
+`/actors` namespace are claimed only while an actor method is registered, so
+existing service routes and connections without actors behave exactly as
+before, and "no actors" never raises a restart warning. The one exception is a
+tombstoned actor type: its own paths keep answering 503 after its last method
+is removed; every other `/actors` path falls through to service routes.
+
 ## Security
 
 **App API token.** Enforce it (configured credential, else `APP_API_TOKEN`) on

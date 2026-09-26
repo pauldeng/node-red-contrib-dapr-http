@@ -5,8 +5,6 @@ const { validateActorSegment } = require('../lib/actor-messages');
 const { DaprError, ErrorCodes } = require('../lib/errors');
 const { requireConnection, openSidecarSession } = require('../lib/sidecar-session');
 
-const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
-
 // Invokes an actor method through the local sidecar (lib/actor-client.js) and
 // replaces msg.payload with the result. Each property PRESENT on
 // msg.dapr.actorCall overrides the configured target; a present-but-invalid
@@ -43,15 +41,15 @@ module.exports = function registerDaprActorCall(RED) {
       let body;
       try {
         actorType = validateActorSegment(
-          hasOwn(override, 'type') ? override.type : config.actorType,
+          Object.hasOwn(override, 'type') ? override.type : config.actorType,
           'actorType'
         );
         actorId = validateActorSegment(
-          hasOwn(override, 'id') ? override.id : config.actorId,
+          Object.hasOwn(override, 'id') ? override.id : config.actorId,
           'actorId'
         );
         method = validateActorSegment(
-          hasOwn(override, 'method') ? override.method : config.method,
+          Object.hasOwn(override, 'method') ? override.method : config.method,
           'method'
         );
         if (msg.payload !== undefined) {

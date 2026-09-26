@@ -7,21 +7,27 @@ the same change that ships behavior.
 
 ## Unreleased
 
-### Fixed
-
-- Provide an actor-enabled state-store example and setup instructions for the generic actor demo.
-- Preserve all own JSON fields in the demo’s SetMyData method without changing object prototypes.
-
 ### Added
 
 - Actor mode: `dapr-actor-method`, `dapr-actor-reply`, and `dapr-actor-call`
-  nodes, plus an example flow (`examples/actor-demo.json`) with two actor
-  types modelled on Dapr's own SDK samples. One JSON `record` per actor; needs
-  a Dapr Placement service and a state store configured with
-  `actorStateStore: "true"`. Actor proposals enforce response and state byte
-  limits; expired or draining invocations cannot start new flow work. Call
-  failures retain bounded Dapr diagnostics for Catch; the example catches
-  complete-reply validation failures without looping through its fail reply.
+  nodes host Dapr actors in flows and call actors hosted elsewhere, over the
+  existing app channel and sidecar HTTP client. One JSON `record` per actor;
+  needs a Dapr Placement service and a state store configured with
+  `actorStateStore: "true"`. Reminders, timers and reentrancy are not
+  supported.
+- The request handler, not the reply node, commits actor state, and only
+  after the reply. Calls to one actor take turns; its gate and daprd's request
+  stay open until the commit settles, including across a redeploy or
+  shutdown, bounded by the drain timeout. A commit whose outcome cannot be confirmed fails as
+  `ACTOR_COMMIT_UNKNOWN`, never as success.
+- Removed actor methods and types answer a retryable 503, never a 404,
+  including the gap before a deferred routing update, because daprd treats
+  an actor 404 as permanent.
+- Call failures keep bounded Dapr diagnostics on `msg.error.cause` for Catch.
+- `examples/actor-demo.json` adapts Dapr's own SDK samples (Python
+  `DemoActor`, JavaScript `DemoActorCounter`; attribution in
+  `examples/DAPR-SAMPLES.md`), with an actor-enabled Redis component example
+  and setup steps in `examples/README.md`.
 
 ### Changed
 
