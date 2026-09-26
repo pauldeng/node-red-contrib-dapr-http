@@ -13,8 +13,14 @@ the same change that ships behavior.
   nodes host Dapr actors in flows and call actors hosted elsewhere, over the
   existing app channel and sidecar HTTP client. One JSON `record` per actor;
   needs a Dapr Placement service and a state store configured with
-  `actorStateStore: "true"`. Reminders, timers and reentrancy are not
-  supported.
+  `actorStateStore: "true"`. Reentrancy is not supported.
+- Actor reminders: a `dapr-actor-schedule` node sets, gets, or deletes a
+  reminder; a `dapr-actor-method` node with Trigger set to Reminder receives
+  every reminder of its actor type through the same gate/deadline/commit path
+  as an ordinary method call, named on each firing by
+  `msg.dapr.actor.trigger.name`. Needs a Dapr Scheduler service
+  (`--scheduler-host-address`); reminders survive a Node-RED and daprd
+  restart. Timers are not supported.
 - The request handler, not the reply node, commits actor state, and only
   after the reply. Calls to one actor take turns; its gate and daprd's request
   stay open until the commit settles, including across a redeploy or
@@ -25,11 +31,19 @@ the same change that ships behavior.
   an actor 404 as permanent.
 - Call failures keep bounded Dapr diagnostics on `msg.error.cause` for Catch.
 - `examples/actor-demo.json` adapts Dapr's own SDK samples (Python
-  `DemoActor`, JavaScript `DemoActorCounter`; attribution in
-  `examples/DAPR-SAMPLES.md`), with an actor-enabled Redis component example
-  and setup steps in `examples/README.md`.
+  `DemoActor`, including its reminder methods, and JavaScript
+  `DemoActorCounter`; attribution in `examples/DAPR-SAMPLES.md`), with an
+  actor-enabled Redis component example and setup steps (including a Dapr
+  Scheduler container for the reminder Injects) in `examples/README.md`.
 
 ### Changed
+
+- Reminder callbacks reject mesh caller headers. Schedule validation rejects
+  non-boolean overwrite values and bounds a snapshot of the data, including
+  Unicode escaping in the callback. Malformed get responses fail instead of
+  looking like a missing reminder; editor schedule validation matches runtime.
+- Closing an outbound node prevents a pending health probe from starting a
+  new sidecar call. The actor demo tolerates user-supplied reminder count fields.
 
 - Pin the Dapr integration runtime and deployment examples to 1.18.4 by
   image digest. The full real-daprd integration suite passes on 1.18.4, and

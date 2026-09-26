@@ -10,6 +10,7 @@ const { acquireListener } = require('../../lib/app-channel');
 const { httpRequest } = require('../helpers/http');
 const { freePort } = require('../helpers/node-red');
 const { FIXED_LIMITS } = require('../../lib/options');
+const { REMINDER_METHOD } = require('../../lib/actor-messages');
 
 const BIND = '127.0.0.1';
 const url = (port, path) => `http://127.0.0.1:${port}${path}`;
@@ -475,4 +476,287 @@ test('with no actor methods left, a service route under /actors is served, not c
     method: 'PUT',
   });
   assert.equal(tombstoned.status, 503, 'the tombstoned type is still retryable');
+});
+
+// ---- milestone 4: actor REMINDERS ------------------------------------------
+
+test('reminder callbacks reject a mesh caller before invoking the actor host', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port, token: 'app-token' });
+  let invoked = false;
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: REMINDER_METHOD }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => {
+      invoked = true;
+      return { status: 200 };
+    },
+  });
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/remind/demo_reminder'), {
+    method: 'PUT',
+    headers: { 'dapr-api-token': 'app-token', 'dapr-caller-app-id': 'other-app' },
+    body: '{"data":1,"dueTime":"","period":""}',
+  });
+  assert.equal(res.status, 403);
+  assert.equal(invoked, false);
+});
+
+test('PUT /actors/{type}/{id}/method/remind/{name} dispatches to the reminder handler with a trigger', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  let seen;
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: REMINDER_METHOD }],
+    getActorHandler: (type, method) =>
+      type === 'DemoActor' && method === REMINDER_METHOD ? () => {} : undefined,
+    actorInvoke: async ({ actorType, actorId, method, ctx, trigger }) => {
+      seen = { actorType, actorId, method, trigger, callerAppId: ctx.callerAppId };
+      return { status: 200 };
+    },
+  });
+  const res = await httpRequest(
+    url(port, '/actors/DemoActor/demo%20one/method/remind/demo_reminder'),
+    { method: 'PUT', body: '{"data":1,"dueTime":"","period":""}' }
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen, {
+    actorType: 'DemoActor',
+    actorId: 'demo one',
+    method: REMINDER_METHOD,
+    trigger: { kind: 'reminder', name: 'demo_reminder' },
+    callerAppId: null,
+  });
+});
+
+test('an encoded reminder name is decoded exactly once', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  let seenName;
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: REMINDER_METHOD }],
+    getActorHandler: () => () => {},
+    actorInvoke: async ({ trigger }) => {
+      seenName = trigger.name;
+      return { status: 200 };
+    },
+  });
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/remind/demo%20reminder'), {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 200);
+  assert.equal(seenName, 'demo reminder');
+});
+
+test('an invalid (encoded traversal) reminder name is a 400', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: REMINDER_METHOD }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  const res = await rawPathRequest(port, '/actors/DemoActor/a/method/remind/%2e%2e', {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 400);
+});
+
+test('the timer callback shape (method/timer/{name}) still 404s -- timers are deferred', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: REMINDER_METHOD }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => assert.fail('a timer path must never reach actorInvoke'),
+  });
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/timer/t1'), {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 404);
+});
+
+test('a method-path with more than 4 segments other than .../method/remind/{name} is still 404', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({ actorConfig: actorConfig() });
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/M/extra'), {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 404);
+});
+
+test('a non-PUT verb on the reminder shape is 405 with Allow: PUT', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: REMINDER_METHOD }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/remind/r1'), {
+    method: 'GET',
+  });
+  assert.equal(res.status, 405);
+  assert.equal(res.headers.allow, 'PUT');
+});
+
+test('an unregistered reminder on a hosted type is a plain 404', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'GetMyData' }],
+    getActorHandler: (type, method) =>
+      type === 'DemoActor' && method === 'GetMyData' ? () => {} : undefined,
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/remind/r1'), {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 404);
+});
+
+test('a dropped reminder registration is tombstoned retryable, never 404, like a method pair', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: REMINDER_METHOD }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  // The reminder registration is removed (e.g. its dapr-actor-method node
+  // closed) but the type itself is still registered via another method.
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'GetMyData' }],
+    getActorHandler: (type, method) =>
+      type === 'DemoActor' && method === 'GetMyData' ? () => {} : undefined,
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  const dropped = await httpRequest(url(port, '/actors/DemoActor/a/method/remind/r1'), {
+    method: 'PUT',
+  });
+  assert.equal(dropped.status, 503, 'a dropped reminder registration must be retryable, never 404');
+
+  // Re-registering wins the tombstone back.
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: REMINDER_METHOD }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  const restored = await httpRequest(url(port, '/actors/DemoActor/a/method/remind/r1'), {
+    method: 'PUT',
+  });
+  assert.equal(restored.status, 200);
+});
+
+test('a duplicate reminder registration for the same actor type is rejected by the connection registry', () => {
+  const { createConnectionRegistry } = require('../../lib/connection-registry');
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'r1', actorType: 'DemoActor', reminder: true }, () => {});
+  assert.throws(
+    () =>
+      registry.addActorMethod({ nodeId: 'r2', actorType: 'DemoActor', reminder: true }, () => {}),
+    /duplicate actor method DemoActor\/remind\//
+  );
+});
+
+test('a type with only a reminder registration is still advertised in /dapr/config', () => {
+  const { createConnectionRegistry } = require('../../lib/connection-registry');
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'r1', actorType: 'DemoActor', reminder: true }, () => {});
+  const activation = registry.activation();
+  assert.deepEqual(activation.actorConfig.entities, ['DemoActor']);
+  assert.deepEqual(activation.actorMethodPairs, [
+    { actorType: 'DemoActor', method: REMINDER_METHOD },
+  ]);
+});
+
+// ---- fix: REMINDER_METHOD must be unrepresentable as a real method name ---
+
+test('a method literally named "reminder" and a reminder registration coexist on one actor type', () => {
+  const { createConnectionRegistry } = require('../../lib/connection-registry');
+  const registry = createConnectionRegistry();
+  const methodHandler = () => {};
+  const reminderHandler = () => {};
+  registry.addActorMethod(
+    { nodeId: 'm1', actorType: 'DemoActor', method: 'reminder' },
+    methodHandler
+  );
+  registry.addActorMethod(
+    { nodeId: 'r1', actorType: 'DemoActor', reminder: true },
+    reminderHandler
+  );
+  assert.equal(registry.actorHandlerFor('DemoActor', 'reminder'), methodHandler);
+  assert.equal(registry.actorHandlerFor('DemoActor', REMINDER_METHOD), reminderHandler);
+});
+
+test('the reserved reminder registry key can never be registered as an ordinary method name', () => {
+  const { createConnectionRegistry } = require('../../lib/connection-registry');
+  const registry = createConnectionRegistry();
+  assert.throws(
+    () =>
+      registry.addActorMethod(
+        { nodeId: 'm1', actorType: 'DemoActor', method: REMINDER_METHOD },
+        () => {}
+      ),
+    (err) => {
+      assert.equal(err.code, 'INVALID_OPTIONS');
+      return true;
+    }
+  );
+});
+
+test('PUT .../method/reminder reaches the ordinary method node, and PUT .../method/remind/x reaches the reminder node, on one actor type', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  let methodSeen = false;
+  let reminderSeen = null;
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [
+      { actorType: 'DemoActor', method: 'reminder' },
+      { actorType: 'DemoActor', method: REMINDER_METHOD },
+    ],
+    getActorHandler: (type, method) => {
+      if (type !== 'DemoActor') return undefined;
+      if (method === 'reminder') return () => {};
+      if (method === REMINDER_METHOD) return () => {};
+      return undefined;
+    },
+    actorInvoke: async ({ method, trigger }) => {
+      if (trigger) {
+        reminderSeen = trigger.name;
+      } else {
+        methodSeen = true;
+        assert.equal(
+          method,
+          'reminder',
+          'the ordinary method path must resolve the literal method name'
+        );
+      }
+      return { status: 200 };
+    },
+  });
+
+  const methodRes = await httpRequest(url(port, '/actors/DemoActor/a/method/reminder'), {
+    method: 'PUT',
+  });
+  assert.equal(methodRes.status, 200);
+  assert.equal(methodSeen, true, 'the ordinary method call must reach the method handler');
+  assert.equal(reminderSeen, null, 'the ordinary method call must not reach the reminder handler');
+
+  const reminderRes = await httpRequest(url(port, '/actors/DemoActor/a/method/remind/x'), {
+    method: 'PUT',
+  });
+  assert.equal(reminderRes.status, 200);
+  assert.equal(reminderSeen, 'x', 'the reminder callback must reach the reminder handler');
 });

@@ -198,3 +198,31 @@ test('close removes the health listener so a shared connection does not leak lis
   node.emit('close', false, () => {});
   assert.equal(connection.listeners.size, 0);
 });
+
+test('close during the first health probe prevents a later outbound call', async () => {
+  const node = fakeNode();
+  const probe = Promise.withResolvers();
+  const connection = { ...fakeConnection(), whenHealthKnown: () => probe.promise };
+  const session = openSidecarSession(node, connection);
+  const ready = session.isReady();
+  node.emit('close', false, () => {});
+  probe.resolve();
+  assert.equal(await ready, false);
+});
+
+test('close after readiness prevents a new sidecar operation', async () => {
+  const node = fakeNode();
+  const session = openSidecarSession(node, fakeConnection());
+  assert.equal(await session.isReady(), true);
+  node.emit('close', false, () => {});
+  let called = false;
+  await assert.rejects(
+    session.call(async () => {
+      called = true;
+    }),
+    {
+      code: ErrorCodes.SIDECAR_UNAVAILABLE,
+    }
+  );
+  assert.equal(called, false);
+});

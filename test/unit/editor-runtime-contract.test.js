@@ -20,7 +20,7 @@ const {
 const { normalisePropertyExpression } = require('@node-red/util').util;
 const { buildSubscription } = require('../../lib/subscriptions');
 const { parseRequestHeaders } = require('../../lib/http-headers');
-const { validateActorSegment } = require('../../lib/actor-messages');
+const { validateActorSegment, validateScheduleTime } = require('../../lib/actor-messages');
 
 // Editor code and runtime code are separate environments — the browser cannot
 // require lib/, and the runtime has no DOM — so a predicate needed on both sides
@@ -523,6 +523,51 @@ test('actor type/id/method: editor validation matches lib/actor-messages.js vali
       editor: loadEditorValidator(file, property),
       runtime: (value) => validateActorSegment(value, property),
       cases: ACTOR_SEGMENTS,
+      mode: 'exact',
+    });
+  }
+});
+
+test('actor schedule type/id/name: editor validation matches lib/actor-messages.js validateActorSegment', () => {
+  const pairs = [
+    ['actorType', 'dapr-actor-schedule.html'],
+    ['actorId', 'dapr-actor-schedule.html'],
+    ['scheduleName', 'dapr-actor-schedule.html'],
+  ];
+  for (const [property, file] of pairs) {
+    assertContract({
+      label: `${file} ${property}`,
+      editor: loadEditorValidator(file, property),
+      runtime: (value) => validateActorSegment(value, property),
+      cases: ACTOR_SEGMENTS,
+      mode: 'exact',
+    });
+  }
+});
+
+const SCHEDULE_TIMES = [
+  undefined,
+  null,
+  42,
+  false,
+  {},
+  [],
+  '',
+  '   ',
+  '10s',
+  '1m',
+  'x'.repeat(128),
+  'x'.repeat(129),
+];
+
+test('actor schedule dueTime/period/ttl: editor validation matches lib/actor-messages.js validateScheduleTime', () => {
+  const pairs = ['dueTime', 'period', 'ttl'];
+  for (const property of pairs) {
+    assertContract({
+      label: `dapr-actor-schedule.html ${property}`,
+      editor: loadEditorValidator('dapr-actor-schedule.html', property),
+      runtime: (value) => validateScheduleTime(value, property),
+      cases: SCHEDULE_TIMES,
       mode: 'exact',
     });
   }

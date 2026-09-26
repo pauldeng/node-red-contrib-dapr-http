@@ -23,6 +23,7 @@ const PALETTE_NODE_TYPES = [
   'dapr-actor-method',
   'dapr-actor-reply',
   'dapr-actor-call',
+  'dapr-actor-schedule',
 ];
 
 test('every declared node type registers with the editor', async ({ page, nr }) => {

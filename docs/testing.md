@@ -31,7 +31,7 @@ npm run test:e2e         # Playwright tests against the real Node-RED editor
 npm run test:integration:nats      # NATS JetStream-backed tests only (test/integration/nats-*.test.js)
 npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown, output bindings, secrets, metadata)
 npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish, state management, dynamic configuration
-npm run test:integration:actors    # Placement + actor-flagged Redis store: wire probe and the actor-demo example
+npm run test:integration:actors    # Placement + Scheduler + actor-flagged Redis store: wire probes, the actor-demo example, and reminders end to end
 npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
 
@@ -42,8 +42,9 @@ bucket — `telemetry.test.js`'s broker-free trace/log correlation test and
 sub-invocation stays fully serialized, so the chain as a whole is too; running
 a focused script on its own during local iteration is faster and just as
 serialized. `npm run test:integration` (only) first runs `pretest:integration`
-(`test/helpers/pull-images.js`), which pre-pulls all six pinned images,
-including the Placement service the actor integration tier needs. A
+(`test/helpers/pull-images.js`), which pre-pulls all seven pinned images,
+including the Placement and Scheduler services the actor integration tier
+needs. A
 cold pull can take minutes on a fresh runner — far longer than a single
 integration test's own timeout, which includes its setup — so pulling happens
 once, up front, outside any individual test's clock, not lazily on whichever
@@ -241,13 +242,23 @@ Actor behavior is split by the cheapest tier that can prove each point:
   deploys, an unavailable store, and a bounded shutdown.
 - **Real daprd** (`npm run test:integration:actors`): `actors-probe.test.js`
   pins daprd's actor wire behavior with a raw `node:http` host (see
-  `docs/architecture.md`, "Actor wire behavior"); `actors.test.js` runs the
-  shipped `examples/actor-demo.json` through Placement and an actor-flagged
-  Redis store, including an unchanged-flow redeploy without restarting daprd,
-  a failing call through the call node with `msg.error.cause`, concurrent
-  same-actor updates with no lost update, and a Node-RED plus daprd restart
-  that reads the stored state back.
-- **E2E**: the three actor dialogs, their validators, and importing and
+  `docs/architecture.md`, "Actor wire behavior"); `actors-schedule-probe.test.js`
+  pins the reminder/timer wire protocol the same way (envelope shape,
+  overwrite/schedule-reset semantics, non-hosted 403, retry cadence, TTL
+  expiry, idle-deactivation survival — see "Actor reminders"); `actors.test.js`
+  runs the shipped `examples/actor-demo.json` through Placement and an
+  actor-flagged Redis store, including an unchanged-flow redeploy without
+  restarting daprd, a failing call through the call node with
+  `msg.error.cause`, concurrent same-actor updates with no lost update, and a
+  Node-RED plus daprd restart that reads the stored state back;
+  `actors-reminders.test.js` proves the shipped `dapr-actor-schedule` and
+  reminder-trigger `dapr-actor-method` nodes end to end against a real
+  Scheduler — set/one-shot/delete, survival across a Node-RED plus daprd
+  restart, and a bounded retry count for an always-failing reminder flow;
+  `actors-replicas-probe.test.js` runs two replicas of one app and proves a
+  reminder forwarded to the replica hosting its actor never carries
+  `dapr-caller-app-id`, which the reminder route rejects.
+- **E2E**: the four actor dialogs, their validators, and importing and
   deploying the example.
 
 Overload beyond the fixed 1,000-handler admission budget is proved at the unit

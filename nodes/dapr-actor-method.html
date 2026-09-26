@@ -30,10 +30,19 @@
         required: true,
         validate: isValidActorSegment,
       },
+      trigger: { value: 'method' },
       method: {
         value: '',
-        required: true,
-        validate: isValidActorSegment,
+        // Not required in 'reminder' mode: the node receives every reminder
+        // of its actor type instead of one named method. `this.trigger` is
+        // undefined for a legacy (pre-reminder) node -- treated as 'method'
+        // like the runtime does.
+        validate: function (value) {
+          if ((this.trigger || 'method') === 'reminder') {
+            return true;
+          }
+          return isValidActorSegment(value);
+        },
       },
     },
     inputs: 0,
@@ -41,7 +50,27 @@
     icon: 'font-awesome/fa-sign-in',
     paletteLabel: 'actor method',
     label: function () {
-      return this.name || `${this.actorType || 'actor'}/${this.method || 'method'}`;
+      if (this.name) return this.name;
+      if (this.trigger === 'reminder') return `${this.actorType || 'actor'}/reminders`;
+      return `${this.actorType || 'actor'}/${this.method || 'method'}`;
+    },
+    oneditprepare: function () {
+      // A flow imported/hand-authored before the reminder trigger existed has
+      // no `trigger` key at all, which Node-RED's own editor leaves as `""`
+      // on the select (no option matches, so nothing shows selected) rather
+      // than backfilling defaults.trigger.value -- the same import gap
+      // dialogs.spec.js documents for other fields. Force it back to the
+      // node's own runtime default ('method', per registerDaprActorMethod)
+      // so the dialog never opens on a blank trigger.
+      if (!['method', 'reminder'].includes(this.trigger)) {
+        $('#node-input-trigger').val('method');
+      }
+      const updateVisibility = () => {
+        const isReminder = $('#node-input-trigger').val() === 'reminder';
+        $('#node-actor-method-field').toggle(!isReminder);
+      };
+      $('#node-input-trigger').on('change', updateVisibility);
+      updateVisibility();
     },
   });
 </script>
@@ -60,6 +89,13 @@
     <input type="text" id="node-input-actorType" placeholder="DemoActor" />
   </div>
   <div class="form-row">
+    <label for="node-input-trigger"><i class="fa fa-bolt"></i> Trigger</label>
+    <select id="node-input-trigger" style="width:70%">
+      <option value="method">Method call</option>
+      <option value="reminder">Reminder</option>
+    </select>
+  </div>
+  <div class="form-row" id="node-actor-method-field">
     <label for="node-input-method"><i class="fa fa-code-fork"></i> Method</label>
     <input type="text" id="node-input-method" placeholder="GetMyData" />
   </div>
@@ -104,6 +140,31 @@
       the flow; it is scoped to this connection and expires if no reply arrives in time.
     </dd>
   </dl>
+
+  <h3>Reminder trigger</h3>
+  <p>
+    Setting <b>Trigger</b> to <code>Reminder</code> registers this node for every reminder of its
+    actor type instead of one method (the <b>Method</b> field is unused); the reminder's own name
+    arrives as <code>msg.dapr.actor.trigger.name</code> (also mirrored onto
+    <code>msg.dapr.actor.method</code>). Its data becomes <code>msg.payload</code> (<code
+      >undefined</code
+    >
+    when no data was scheduled). Only one reminder registration is allowed per actor type on a
+    connection. Schedule reminders with a <code>dapr actor schedule</code> node.
+  </p>
+  <p>
+    A reminder callback is an ordinary actor turn: the same per-actor gate, deadline, and
+    reply/commit rules as a method call apply unchanged, and <code>dapr.actor.stateExists</code>/
+    <code>dapr.actor.state</code> are populated the same way. It carries no caller app id, and only
+    sometimes a <code>traceparent</code>. A <b>Fail</b> reply, a missed deadline, or a commit whose
+    outcome is unknown makes daprd retry that same occurrence &mdash; up to 3 more times about 1
+    second apart &mdash; before it gives up and waits for the reminder's next occurrence: write
+    reminder flows to be safe to run more than once for the same firing. Nothing disables a reminder
+    that keeps failing; stop it with a <code>dapr actor schedule</code> delete (idempotent even if
+    it does not exist), which a reminder flow may call on itself. There is no reply outcome that
+    cancels a reminder: Dapr 1.18.4 recognizes a cancel response but does not act on it, so a
+    reminder keeps firing on schedule regardless of how its flow replies.
+  </p>
 
   <h3>Details</h3>
   <p>

@@ -5,7 +5,15 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { once } = require('node:events');
 
-const { buildActorPath, invoke, readRecord, saveRecord } = require('../../lib/actor-client');
+const {
+  buildActorPath,
+  invoke,
+  readRecord,
+  saveRecord,
+  setReminder,
+  getReminder,
+  deleteReminder,
+} = require('../../lib/actor-client');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 
 async function fakeSidecar(handler) {
@@ -231,6 +239,213 @@ test('saveRecord throws SIDECAR_UNAVAILABLE on a transport failure (unknown outc
       { baseUrl: 'http://127.0.0.1:1' },
       { actorType: 'T', actorId: 'a', valueJson: 'null', timeoutMs: 1000 }
     ),
+    (err) => {
+      assert.equal(err.code, ErrorCodes.SIDECAR_UNAVAILABLE);
+      return true;
+    }
+  );
+});
+
+// ---- setReminder / getReminder / deleteReminder ----------------------------
+
+test('setReminder posts to /v1.0/actors/{type}/{id}/reminders/{name} with every field sent explicitly when present', async (t) => {
+  const sidecar = await recordingSidecar(204, '');
+  t.after(sidecar.stop);
+  const result = await setReminder(
+    { baseUrl: sidecar.baseUrl, token: 'tok' },
+    {
+      actorType: 'T',
+      actorId: 'a b',
+      name: 'demo_reminder',
+      dueTime: '1s',
+      period: '2s',
+      ttl: '10s',
+      overwrite: false,
+      hasData: true,
+      data: { x: 1 },
+    }
+  );
+  assert.equal(result.status, 204);
+  const req = sidecar.requests[0];
+  assert.equal(req.method, 'POST');
+  assert.equal(req.path, '/v1.0/actors/T/a%20b/reminders/demo_reminder');
+  assert.equal(req.headers['dapr-api-token'], 'tok');
+  assert.deepEqual(JSON.parse(req.body), {
+    dueTime: '1s',
+    period: '2s',
+    ttl: '10s',
+    data: { x: 1 },
+    overwrite: false,
+  });
+});
+
+test('setReminder omits absent dueTime/period/ttl/data but always sends overwrite explicitly', async (t) => {
+  const sidecar = await recordingSidecar(204, '');
+  t.after(sidecar.stop);
+  await setReminder(
+    { baseUrl: sidecar.baseUrl },
+    { actorType: 'T', actorId: 'a', name: 'r', hasData: false, overwrite: true }
+  );
+  assert.deepEqual(JSON.parse(sidecar.requests[0].body), { overwrite: true });
+});
+
+test('setReminder sends an explicit null data distinctly from absent data', async (t) => {
+  const sidecar = await recordingSidecar(204, '');
+  t.after(sidecar.stop);
+  await setReminder(
+    { baseUrl: sidecar.baseUrl },
+    { actorType: 'T', actorId: 'a', name: 'r', hasData: true, data: null, overwrite: true }
+  );
+  assert.deepEqual(JSON.parse(sidecar.requests[0].body), { data: null, overwrite: true });
+});
+
+test('setReminder throws ACTOR_SCHEDULE_FAILED with bounded cause on a confirmed non-2xx (e.g. overwrite:false conflict)', async (t) => {
+  const sidecar = await recordingSidecar(
+    409,
+    JSON.stringify({ errorCode: 'ERR_ACTOR_REMINDER_ALREADY_EXISTS', message: 'exists' })
+  );
+  t.after(sidecar.stop);
+  await assert.rejects(
+    setReminder(
+      { baseUrl: sidecar.baseUrl },
+      { actorType: 'T', actorId: 'a', name: 'r', hasData: false, overwrite: false }
+    ),
+    (err) => {
+      assert.ok(err instanceof DaprError);
+      assert.equal(err.code, ErrorCodes.ACTOR_SCHEDULE_FAILED);
+      assert.deepEqual(err.cause, {
+        statusCode: 409,
+        errorCode: 'ERR_ACTOR_REMINDER_ALREADY_EXISTS',
+        message: 'exists',
+      });
+      return true;
+    }
+  );
+});
+
+test('setReminder throws SIDECAR_UNAVAILABLE on a transport failure', async () => {
+  await assert.rejects(
+    setReminder(
+      { baseUrl: 'http://127.0.0.1:1' },
+      { actorType: 'T', actorId: 'a', name: 'r', hasData: false, overwrite: true }
+    ),
+    (err) => {
+      assert.equal(err.code, ErrorCodes.SIDECAR_UNAVAILABLE);
+      return true;
+    }
+  );
+});
+
+test('getReminder GETs the reminder path and resolves { found: true, reminder } on 2xx', async (t) => {
+  const body = {
+    actorID: 'a',
+    actorType: 'T',
+    data: { x: 1 },
+    dueTime: '10s',
+    period: '@every 10s',
+  };
+  const sidecar = await recordingSidecar(200, JSON.stringify(body));
+  t.after(sidecar.stop);
+  const result = await getReminder(
+    { baseUrl: sidecar.baseUrl },
+    { actorType: 'T', actorId: 'a', name: 'r' }
+  );
+  assert.deepEqual(result, { found: true, reminder: body });
+  assert.equal(sidecar.requests[0].method, 'GET');
+  assert.equal(sidecar.requests[0].path, '/v1.0/actors/T/a/reminders/r');
+});
+
+test('getReminder resolves { found: false } ONLY for a 404 with errorCode ERR_ACTOR_REMINDER_NOT_FOUND', async (t) => {
+  const sidecar = await recordingSidecar(
+    404,
+    JSON.stringify({ errorCode: 'ERR_ACTOR_REMINDER_NOT_FOUND', message: 'not found' })
+  );
+  t.after(sidecar.stop);
+  const result = await getReminder(
+    { baseUrl: sidecar.baseUrl },
+    { actorType: 'T', actorId: 'a', name: 'r' }
+  );
+  assert.deepEqual(result, { found: false });
+});
+
+test('getReminder rejects malformed success bodies instead of reporting a missing or invalid reminder', async (t) => {
+  for (const body of ['', 'null', '[]', 'false', '"text"']) {
+    const sidecar = await recordingSidecar(200, body);
+    t.after(sidecar.stop);
+    await assert.rejects(
+      getReminder(
+        { baseUrl: sidecar.baseUrl },
+        { actorType: 'DemoActor', actorId: 'a', name: 'demo_reminder' }
+      ),
+      { code: ErrorCodes.ACTOR_SCHEDULE_FAILED }
+    );
+  }
+});
+
+test('getReminder throws ACTOR_SCHEDULE_FAILED for a 404 WITHOUT that errorCode -- not treated as "missing"', async (t) => {
+  const sidecar = await recordingSidecar(
+    404,
+    JSON.stringify({ errorCode: 'ERR_ACTOR_REMINDER_NON_HOSTED' })
+  );
+  t.after(sidecar.stop);
+  await assert.rejects(
+    getReminder({ baseUrl: sidecar.baseUrl }, { actorType: 'T', actorId: 'a', name: 'r' }),
+    (err) => {
+      assert.equal(err.code, ErrorCodes.ACTOR_SCHEDULE_FAILED);
+      return true;
+    }
+  );
+});
+
+test('getReminder throws ACTOR_SCHEDULE_FAILED on a 500', async (t) => {
+  const sidecar = await recordingSidecar(500, '');
+  t.after(sidecar.stop);
+  await assert.rejects(
+    getReminder({ baseUrl: sidecar.baseUrl }, { actorType: 'T', actorId: 'a', name: 'r' }),
+    (err) => {
+      assert.equal(err.code, ErrorCodes.ACTOR_SCHEDULE_FAILED);
+      return true;
+    }
+  );
+});
+
+test('getReminder throws SIDECAR_UNAVAILABLE on a transport failure', async () => {
+  await assert.rejects(
+    getReminder({ baseUrl: 'http://127.0.0.1:1' }, { actorType: 'T', actorId: 'a', name: 'r' }),
+    (err) => {
+      assert.equal(err.code, ErrorCodes.SIDECAR_UNAVAILABLE);
+      return true;
+    }
+  );
+});
+
+test('deleteReminder DELETEs the reminder path and resolves on 2xx', async (t) => {
+  const sidecar = await recordingSidecar(204, '');
+  t.after(sidecar.stop);
+  const result = await deleteReminder(
+    { baseUrl: sidecar.baseUrl },
+    { actorType: 'T', actorId: 'a', name: 'r' }
+  );
+  assert.equal(result.status, 204);
+  assert.equal(sidecar.requests[0].method, 'DELETE');
+  assert.equal(sidecar.requests[0].path, '/v1.0/actors/T/a/reminders/r');
+});
+
+test('deleteReminder throws ACTOR_SCHEDULE_FAILED on a confirmed non-2xx', async (t) => {
+  const sidecar = await recordingSidecar(500, '');
+  t.after(sidecar.stop);
+  await assert.rejects(
+    deleteReminder({ baseUrl: sidecar.baseUrl }, { actorType: 'T', actorId: 'a', name: 'r' }),
+    (err) => {
+      assert.equal(err.code, ErrorCodes.ACTOR_SCHEDULE_FAILED);
+      return true;
+    }
+  );
+});
+
+test('deleteReminder throws SIDECAR_UNAVAILABLE on a transport failure', async () => {
+  await assert.rejects(
+    deleteReminder({ baseUrl: 'http://127.0.0.1:1' }, { actorType: 'T', actorId: 'a', name: 'r' }),
     (err) => {
       assert.equal(err.code, ErrorCodes.SIDECAR_UNAVAILABLE);
       return true;

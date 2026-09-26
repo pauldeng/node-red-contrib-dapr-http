@@ -320,6 +320,20 @@ function fullFlow({ appPort, daprPort }) {
       y: 880,
       wires: [[]],
     },
+    {
+      id: 'e2e-actor-schedule',
+      type: 'dapr-actor-schedule',
+      z: 'e2e-tab',
+      name: 'schedule reminder',
+      connection: 'e2e-conn',
+      operation: 'set',
+      actorType: 'DemoActor',
+      actorId: 'demo-1',
+      scheduleName: 'demo_reminder',
+      x: 160,
+      y: 960,
+      wires: [[]],
+    },
   ];
 }
 

@@ -676,3 +676,198 @@ test('an existing record cannot be aliased across requests: client.readRecord (l
   host.settleActorReply(r2, { outcome: 'complete', responseJson: '2' });
   await p2;
 });
+
+// ---- milestone 4: reminder-triggered invocations ---------------------------
+
+test('a reminder trigger emits msg.dapr.actor with trigger identity from the route, method as the reminder name', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  let received;
+  const ctx = makeCtx({
+    deadlineAt: Date.now() + 100000,
+    body: Buffer.from('{"data":{"greeting":"hi"},"dueTime":"","period":""}'),
+  });
+  const promise = host.invoke({
+    actorType: 'T',
+    actorId: 'a',
+    method: 'reminder',
+    trigger: { kind: 'reminder', name: 'demo_reminder' },
+    ctx,
+    emit: (msg) => {
+      received = msg;
+      host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' });
+    },
+  });
+  const result = await promise;
+  assert.equal(result.status, 200);
+  assert.deepEqual(received.payload, { greeting: 'hi' });
+  assert.equal(received.dapr.actor.method, 'demo_reminder');
+  assert.deepEqual(received.dapr.actor.trigger, { kind: 'reminder', name: 'demo_reminder' });
+  assert.equal(received.dapr.actor.type, 'T');
+  assert.equal(received.dapr.actor.id, 'a');
+});
+
+test('a reminder envelope with no "data" key emits msg.payload undefined', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  let received;
+  const ctx = makeCtx({
+    deadlineAt: Date.now() + 100000,
+    body: Buffer.from('{"dueTime":"","period":""}'),
+  });
+  const promise = host.invoke({
+    actorType: 'T',
+    actorId: 'a',
+    method: 'reminder',
+    trigger: { kind: 'reminder', name: 'r1' },
+    ctx,
+    emit: (msg) => {
+      received = msg;
+      host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' });
+    },
+  });
+  await promise;
+  assert.equal('payload' in received, true);
+  assert.equal(received.payload, undefined);
+});
+
+test('a reminder envelope with data: null preserves null, distinct from absent', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  let received;
+  const ctx = makeCtx({
+    deadlineAt: Date.now() + 100000,
+    body: Buffer.from('{"data":null,"dueTime":"","period":""}'),
+  });
+  const promise = host.invoke({
+    actorType: 'T',
+    actorId: 'a',
+    method: 'reminder',
+    trigger: { kind: 'reminder', name: 'r1' },
+    ctx,
+    emit: (msg) => {
+      received = msg;
+      host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' });
+    },
+  });
+  await promise;
+  assert.equal(received.payload, null);
+});
+
+test('a reminder envelope with falsy data (0, false, "") is preserved, not treated as absent', async () => {
+  for (const [wire, expected] of [
+    ['{"data":0,"dueTime":"","period":""}', 0],
+    ['{"data":false,"dueTime":"","period":""}', false],
+    ['{"data":"","dueTime":"","period":""}', ''],
+  ]) {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    let received;
+    const ctx = makeCtx({ deadlineAt: Date.now() + 100000, body: Buffer.from(wire) });
+    const promise = host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'reminder',
+      trigger: { kind: 'reminder', name: 'r1' },
+      ctx,
+      emit: (msg) => {
+        received = msg;
+        host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' });
+      },
+    });
+    await promise;
+    assert.equal(received.payload, expected, `wire=${wire}`);
+  }
+});
+
+test('a malformed reminder envelope (bad JSON) is a 400 before emission', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  const ctx = makeCtx({ deadlineAt: Date.now() + 100000, body: Buffer.from('not json') });
+  const result = await host.invoke({
+    actorType: 'T',
+    actorId: 'a',
+    method: 'reminder',
+    trigger: { kind: 'reminder', name: 'r1' },
+    ctx,
+    emit: () => assert.fail('must not emit for a malformed envelope'),
+  });
+  assert.equal(result.status, 400);
+  assert.equal(JSON.parse(result.body).error.code, ErrorCodes.INVALID_MESSAGE);
+});
+
+test('a reminder envelope that is an array or a JSON scalar (not an object) is a 400 before emission', async () => {
+  for (const wire of ['[1,2,3]', '"a string"', '42', 'null']) {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const ctx = makeCtx({ deadlineAt: Date.now() + 100000, body: Buffer.from(wire) });
+    const result = await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'reminder',
+      trigger: { kind: 'reminder', name: 'r1' },
+      ctx,
+      emit: () => assert.fail('must not emit for a non-object envelope'),
+    });
+    assert.equal(result.status, 400, `wire=${wire}`);
+  }
+});
+
+test('an absent reminder body is treated as an empty envelope, not a parse failure', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  let received;
+  const ctx = makeCtx({ deadlineAt: Date.now() + 100000, body: Buffer.alloc(0) });
+  const promise = host.invoke({
+    actorType: 'T',
+    actorId: 'a',
+    method: 'reminder',
+    trigger: { kind: 'reminder', name: 'r1' },
+    ctx,
+    emit: (msg) => {
+      received = msg;
+      host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' });
+    },
+  });
+  const result = await promise;
+  assert.equal(result.status, 200);
+  assert.equal(received.payload, undefined);
+});
+
+test('trigger identity is never taken from the body, even if the body forges one', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  let received;
+  const ctx = makeCtx({
+    deadlineAt: Date.now() + 100000,
+    body: Buffer.from(
+      '{"data":1,"dueTime":"","period":"","trigger":{"kind":"reminder","name":"forged"}}'
+    ),
+  });
+  const promise = host.invoke({
+    actorType: 'T',
+    actorId: 'a',
+    method: 'reminder',
+    trigger: { kind: 'reminder', name: 'real-name' },
+    ctx,
+    emit: (msg) => {
+      received = msg;
+      host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' });
+    },
+  });
+  await promise;
+  assert.equal(received.dapr.actor.trigger.name, 'real-name');
+  assert.equal(received.dapr.actor.method, 'real-name');
+});
+
+test('an ordinary (non-reminder) method invocation parses its body as the raw argument, unaffected by trigger handling', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  let received;
+  const ctx = makeCtx({ deadlineAt: Date.now() + 100000, body: Buffer.from('[1,2,3]') });
+  const promise = host.invoke({
+    actorType: 'T',
+    actorId: 'a',
+    method: 'GetMyData',
+    ctx,
+    emit: (msg) => {
+      received = msg;
+      host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' });
+    },
+  });
+  await promise;
+  assert.deepEqual(received.payload, [1, 2, 3]);
+  assert.equal(received.dapr.actor.method, 'GetMyData');
+  assert.equal('trigger' in received.dapr.actor, false);
+});

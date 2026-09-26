@@ -4,14 +4,14 @@
     "type": "tab",
     "label": "Dapr: actor demo",
     "disabled": false,
-    "info": "Two generic actor types, each backed by a single JSON `record`. Actor hosting needs a Dapr Placement service and an actor-flagged state store (metadata actorStateStore: \"true\") -- see docs/deployment.md and redis-statestore-component.yaml. Set the connection node's Dapr host/port and app port before deploying. Click the caller-side Inject nodes in order (SetMyData before GetMyData, count/countBy before getCounter) and watch the debug sidebar."
+    "info": "Two generic actor types, each backed by a single JSON `record`. Actor hosting needs a Dapr Placement service and an actor-flagged state store (metadata actorStateStore: \"true\") -- see docs/deployment.md and redis-actorstore-component.yaml. Set the connection node's Dapr host/port and app port before deploying. Click the caller-side Inject nodes in order (SetMyData before GetMyData, count/countBy before getCounter) and watch the debug sidebar. The reminder Inject nodes additionally need a Dapr Scheduler service -- see \"Run the actor example\" in examples/README.md; firing one wakes the reminder-trigger method node even if DemoActor has gone idle."
   },
   {
     "id": "ex-actor-comment",
     "type": "comment",
     "z": "ex-actor-tab",
     "name": "An actor is one object with its own saved state, addressed by an actor type and an ID",
-    "info": "Dapr runs calls to the same actor one at a time; calls to different actors run concurrently.\n\nThis example has two actor types, each modelled on one of Dapr's own SDK samples and each persisting its state as this package's single `record` per actor:\n\n- `DemoActor` (GetMyData / SetMyData) mirrors dapr/python-sdk's demo_actor.py: https://github.com/dapr/python-sdk/blob/c44c28d83f0648052094af6e7dfaa5a362fcf118/examples/demo_actor/demo_actor/demo_actor.py -- SetMyData copies the given object and adds a `ts` timestamp, the way the sample does. The sample also has a `clear_my_data` that deletes state; this package's v1 has no delete, so that method is omitted here.\n- `DemoActorCounter` (count / countBy / getCounter) mirrors dapr/js-sdk's DemoActorCounterImpl.ts: https://github.com/dapr/js-sdk/blob/2395a2103cb3e7474e628012189867bfe836ac78/test/actor/DemoActorCounterImpl.ts -- the sample keeps its counter in memory; this example persists `{ counter }` in the actor's record instead, so the count survives a restart.\n\nAdapted from the Dapr Authors' Apache-2.0 samples. See examples/DAPR-SAMPLES.md and examples/LICENSE-DAPR-2.0.txt. Unlike the JavaScript SDK sample, count/countBy return the new count and countBy accepts one JSON object argument.",
+    "info": "Dapr runs calls to the same actor one at a time; calls to different actors run concurrently.\n\nThis example has two actor types, each modelled on one of Dapr's own SDK samples and each persisting its state as this package's single `record` per actor:\n\n- `DemoActor` (GetMyData / SetMyData) mirrors dapr/python-sdk's demo_actor.py: https://github.com/dapr/python-sdk/blob/c44c28d83f0648052094af6e7dfaa5a362fcf118/examples/demo_actor/demo_actor/demo_actor.py -- SetMyData copies the given object and adds a `ts` timestamp, the way the sample does. The sample also has a `clear_my_data` that deletes state; this package's v1 has no delete, so that method is omitted here. The same sample's `set_reminder`/`receive_reminder` are also adapted: a `dapr-actor-schedule` node sets/deletes `demo_reminder`, and one `dapr-actor-method` node with Trigger set to Reminder receives every reminder DemoActor gets, recording the last one into the record. Upstream timers remain unsupported by this package.\n- `DemoActorCounter` (count / countBy / getCounter) mirrors dapr/js-sdk's DemoActorCounterImpl.ts: https://github.com/dapr/js-sdk/blob/2395a2103cb3e7474e628012189867bfe836ac78/test/actor/DemoActorCounterImpl.ts -- the sample keeps its counter in memory; this example persists `{ counter }` in the actor's record instead, so the count survives a restart.\n\nAdapted from the Dapr Authors' Apache-2.0 samples. See examples/DAPR-SAMPLES.md and examples/LICENSE-DAPR-2.0.txt. Unlike the JavaScript SDK sample, count/countBy return the new count and countBy accepts one JSON object argument.",
     "x": 200,
     "y": 40,
     "wires": []
@@ -168,6 +168,35 @@
     "wires": [["ex-actor-reply-complete"], ["ex-actor-reply-fail"]]
   },
   {
+    "id": "ex-actor-reminder-method",
+    "type": "dapr-actor-method",
+    "z": "ex-actor-tab",
+    "name": "reminder",
+    "connection": "ex-actor-conn",
+    "actorType": "DemoActor",
+    "trigger": "reminder",
+    "method": "",
+    "x": 190,
+    "y": 540,
+    "wires": [["ex-actor-reminder-fn"]]
+  },
+  {
+    "id": "ex-actor-reminder-fn",
+    "type": "function",
+    "z": "ex-actor-tab",
+    "name": "reminder: record last reminder",
+    "func": "// Records the most recently fired reminder into DemoActor's own record,\n// without disturbing whatever SetMyData already stored -- mirrors\n// demo_actor.py's receive_reminder, adapted to this package's single-record\n// model. One dapr-actor-method node with Trigger set to Reminder receives\n// EVERY reminder of this actor type; the reminder's own name arrives as\n// msg.dapr.actor.trigger.name, never inferred from msg.payload. daprd\n// retries a failing occurrence up to 3 more times about 1s apart before\n// moving on to the next occurrence, so `count` can over-count one logical\n// occurrence if an earlier attempt's reply or commit failed after all --\n// this flow does not attempt exactly-once counting.\nconst name = msg.dapr.actor.trigger.name;\nconst data = msg.payload === undefined ? null : msg.payload;\nconst state =\n    msg.dapr.actor.stateExists &&\n    msg.dapr.actor.state &&\n    typeof msg.dapr.actor.state === 'object' &&\n    !Array.isArray(msg.dapr.actor.state)\n        ? msg.dapr.actor.state\n        : {};\nconst previousCount =\n    state.lastReminder && state.lastReminder.name === name &&\n    Number.isSafeInteger(state.lastReminder.count) && state.lastReminder.count >= 0 &&\n    state.lastReminder.count < Number.MAX_SAFE_INTEGER ? state.lastReminder.count : 0;\nmsg.dapr.actor.nextState = { ...state, lastReminder: { name, data, count: previousCount + 1 } };\nmsg.payload = null;\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 540,
+    "wires": [["ex-actor-reply-complete"], ["ex-actor-reply-fail"]]
+  },
+  {
     "id": "ex-actor-catch",
     "type": "catch",
     "z": "ex-actor-tab",
@@ -178,6 +207,7 @@
       "ex-actor-count-fn",
       "ex-actor-countby-fn",
       "ex-actor-getcounter-fn",
+      "ex-actor-reminder-fn",
       "ex-actor-reply-complete"
     ],
     "uncaught": false,
@@ -369,6 +399,111 @@
     "x": 210,
     "y": 1000,
     "wires": [["ex-actor-call"]]
+  },
+  {
+    "id": "ex-actor-inject-schedule-set",
+    "type": "inject",
+    "z": "ex-actor-tab",
+    "name": "set reminder: demo_reminder every 5s (data: reminder_state)",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "dapr.actorSchedule",
+        "v": "{\"operation\":\"set\",\"actorType\":\"DemoActor\",\"actorId\":\"demo-1\",\"scheduleName\":\"demo_reminder\",\"dueTime\":\"5s\",\"period\":\"5s\",\"overwrite\":true}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"message\":\"reminder_state\"}",
+    "payloadType": "json",
+    "x": 220,
+    "y": 1060,
+    "wires": [["ex-actor-schedule"]]
+  },
+  {
+    "id": "ex-actor-inject-schedule-once",
+    "type": "inject",
+    "z": "ex-actor-tab",
+    "name": "set one-shot reminder: demo_reminder_once at an RFC 3339 time (fires promptly once that time is past)",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "dapr.actorSchedule",
+        "v": "{\"operation\":\"set\",\"actorType\":\"DemoActor\",\"actorId\":\"demo-1\",\"scheduleName\":\"demo_reminder_once\",\"dueTime\":\"2026-10-01T08:00:00Z\",\"period\":\"\",\"overwrite\":true}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"message\":\"reminder_state\"}",
+    "payloadType": "json",
+    "x": 250,
+    "y": 1120,
+    "wires": [["ex-actor-schedule"]]
+  },
+  {
+    "id": "ex-actor-inject-schedule-delete",
+    "type": "inject",
+    "z": "ex-actor-tab",
+    "name": "delete reminder: demo_reminder",
+    "props": [
+      {
+        "p": "dapr.actorSchedule",
+        "v": "{\"operation\":\"delete\",\"actorType\":\"DemoActor\",\"actorId\":\"demo-1\",\"scheduleName\":\"demo_reminder\"}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 190,
+    "y": 1180,
+    "wires": [["ex-actor-schedule"]]
+  },
+  {
+    "id": "ex-actor-schedule",
+    "type": "dapr-actor-schedule",
+    "z": "ex-actor-tab",
+    "name": "schedule reminder",
+    "connection": "ex-actor-conn",
+    "operation": "set",
+    "actorType": "DemoActor",
+    "actorId": "demo-1",
+    "scheduleName": "demo_reminder",
+    "dueTime": "5s",
+    "period": "5s",
+    "ttl": "",
+    "overwrite": true,
+    "x": 650,
+    "y": 1120,
+    "wires": [["ex-actor-schedule-debug"]]
+  },
+  {
+    "id": "ex-actor-schedule-debug",
+    "type": "debug",
+    "z": "ex-actor-tab",
+    "name": "schedule response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "x": 870,
+    "y": 1120
   },
   {
     "id": "ex-actor-call",
