@@ -117,3 +117,144 @@ test('the fingerprint tracks the subscription set only, not routes', () => {
   registry.addSubscription(subscription('n2', 'shipments'), handler);
   assert.notEqual(registry.activation().fingerprint, withSubscription);
 });
+
+// ---- Actor methods ----
+
+test('actorConfig and actorFingerprint are null when no actor method is registered', () => {
+  const registry = createConnectionRegistry();
+  const { actorConfig, actorFingerprint } = registry.activation();
+  assert.equal(actorConfig, null);
+  assert.equal(actorFingerprint, null);
+});
+
+test('an actor method contributes its type to actorConfig.entities, sorted and deduplicated', () => {
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'Zeta', method: 'A' }, handler);
+  registry.addActorMethod({ nodeId: 'm2', actorType: 'Alpha', method: 'B' }, handler);
+  registry.addActorMethod({ nodeId: 'm3', actorType: 'Alpha', method: 'C' }, handler);
+  const { actorConfig, actorFingerprint } = registry.activation();
+  assert.deepEqual(actorConfig.entities, ['Alpha', 'Zeta']);
+  assert.deepEqual(actorConfig.reentrancy, { enabled: false });
+  assert.equal(actorConfig.drainRebalancedActors, true);
+  assert.ok(actorFingerprint);
+});
+
+test('drainOngoingCallTimeout reflects the connection request timeout, in seconds', () => {
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'M' }, handler);
+  const { actorConfig } = registry.activation({ requestTimeoutMs: 45000 });
+  assert.equal(actorConfig.drainOngoingCallTimeout, '45s');
+});
+
+test('actorHandlerFor resolves the registered emit function for (type, method)', () => {
+  const registry = createConnectionRegistry();
+  const emit = () => {};
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, emit);
+  assert.equal(registry.actorHandlerFor('T', 'Do'), emit);
+  assert.equal(registry.actorHandlerFor('T', 'Other'), undefined);
+  assert.equal(registry.actorHandlerFor('Other', 'Do'), undefined);
+});
+
+test('adding a method to an already-registered type does not change the fingerprint', () => {
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'A' }, handler);
+  const before = registry.activation().actorFingerprint;
+  registry.addActorMethod({ nodeId: 'm2', actorType: 'T', method: 'B' }, handler);
+  assert.equal(registry.activation().actorFingerprint, before);
+});
+
+test('a new actor type changes the actor fingerprint', () => {
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'A' }, handler);
+  const before = registry.activation().actorFingerprint;
+  registry.addActorMethod({ nodeId: 'm2', actorType: 'Other', method: 'A' }, handler);
+  assert.notEqual(registry.activation().actorFingerprint, before);
+});
+
+test('a duplicate (actorType, method) owned by another node is rejected', () => {
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, handler);
+  assert.throws(
+    () => registry.addActorMethod({ nodeId: 'm2', actorType: 'T', method: 'Do' }, handler),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_OPTIONS
+  );
+});
+
+test('re-registering the same nodeId is not a duplicate (redeploy)', () => {
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, handler);
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, handler);
+  assert.equal(registry.activation().actorConfig.entities.length, 1);
+});
+
+test('an invalid, empty, or unsafe actorType or method is rejected as INVALID_OPTIONS', () => {
+  const registry = createConnectionRegistry();
+  for (const bad of [
+    { actorType: '', method: 'M' },
+    { actorType: 'T', method: '' },
+    { actorType: '..', method: 'M' },
+    { actorType: 'a/b', method: 'M' },
+  ]) {
+    assert.throws(
+      () => registry.addActorMethod({ nodeId: 'x', ...bad }, handler),
+      (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_OPTIONS
+    );
+  }
+});
+
+test('removing an actor method drops its type from actorConfig, and clears actorConfig entirely when none remain', () => {
+  const registry = createConnectionRegistry();
+  const remove = registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, handler);
+  remove();
+  assert.equal(registry.activation().actorConfig, null);
+});
+
+test('an actor method collides with an existing service route under /actors (actor registered second)', () => {
+  const registry = createConnectionRegistry();
+  registry.addRoute(
+    'service',
+    buildService({ nodeId: 's1', verb: 'GET', path: '/actors/legacy' }),
+    handler
+  );
+  assert.throws(
+    () => registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, handler),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_OPTIONS
+  );
+});
+
+test('a service route under /actors collides with an existing actor method (service registered second)', () => {
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, handler);
+  assert.throws(
+    () =>
+      registry.addRoute(
+        'service',
+        buildService({ nodeId: 's1', verb: 'GET', path: '/actors' }),
+        handler
+      ),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_OPTIONS
+  );
+  assert.throws(
+    () =>
+      registry.addRoute(
+        'service',
+        buildService({ nodeId: 's2', verb: 'GET', path: '/actors/x' }),
+        handler
+      ),
+    (err) => err instanceof DaprError && err.code === ErrorCodes.INVALID_OPTIONS
+  );
+});
+
+test('a service route elsewhere is unaffected by actor registration', () => {
+  const registry = createConnectionRegistry();
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, handler);
+  registry.addRoute(
+    'service',
+    buildService({ nodeId: 's1', verb: 'GET', path: '/orders' }),
+    handler
+  );
+  assert.equal(
+    registry.activation().routes.some((r) => r.path === '/orders'),
+    true
+  );
+});

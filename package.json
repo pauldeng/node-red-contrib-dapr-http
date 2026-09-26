@@ -73,7 +73,10 @@
       "dapr-config-get": "nodes/dapr-config-get.js",
       "dapr-config-subscribe": "nodes/dapr-config-subscribe.js",
       "dapr-binding-out": "nodes/dapr-binding-out.js",
-      "dapr-secret-get": "nodes/dapr-secret-get.js"
+      "dapr-secret-get": "nodes/dapr-secret-get.js",
+      "dapr-actor-method": "nodes/dapr-actor-method.js",
+      "dapr-actor-reply": "nodes/dapr-actor-reply.js",
+      "dapr-actor-call": "nodes/dapr-actor-call.js"
     }
   },
   "scripts": {
@@ -86,7 +89,7 @@
     "test:integration:nats": "node --test --test-concurrency=1 \"test/integration/nats-*.test.js\"",
     "test:integration:dapr": "node --test --test-concurrency=1 test/integration/acl.test.js test/integration/invoke.test.js test/integration/invoke-matrix.test.js test/integration/shutdown.test.js test/integration/binding-out.test.js test/integration/secret-get.test.js test/integration/metadata.test.js",
     "test:integration:redis": "node --test --test-concurrency=1 test/integration/pubsub.test.js test/integration/retry.test.js test/integration/dead-letter.test.js test/integration/token.test.js test/integration/state.test.js test/integration/configuration.test.js",
-    "test:integration:actors": "node --test --test-concurrency=1 test/integration/actors-probe.test.js",
+    "test:integration:actors": "node --test --test-concurrency=1 test/integration/actors-probe.test.js test/integration/actors.test.js",
     "test:integration:memorydb": "node --test test/integration/memorydb-pubsub.test.js",
     "test:e2e": "playwright test",
     "validate": "npx --yes node-red-dev@latest validate",

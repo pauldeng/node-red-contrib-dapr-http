@@ -41,6 +41,9 @@ own dialog rather than dragged from the palette.
 | `dapr-config-subscribe` | Watch configuration keys and emit a message whenever any of them change.                 |
 | `dapr-binding-out`      | Invoke an output binding with a component-specific operation.                            |
 | `dapr-secret-get`       | Read one scoped secret from a secret store.                                              |
+| `dapr-actor-method`     | Register an actor method; emits its argument and loaded state.                           |
+| `dapr-actor-reply`      | Settle an actor method's response and optional next state.                               |
+| `dapr-actor-call`       | Invoke an actor method through the local sidecar.                                        |
 
 ## Scope
 
@@ -80,8 +83,18 @@ export:
   sinks as sensitive data too. The returned value is part of the flow message:
   do not send it to Debug or application logs.
 
-Deliberately **not** covered: input bindings, bulk secrets, actors,
-workflows, distributed lock, jobs, the conversation API, and gRPC transport.
+- **Actors** — one JSON `record` per actor, read and replaced whole. A method
+  node registers an actor type/method and emits the caller's argument plus the
+  loaded record; a reply node proposes the response and, optionally, the
+  replacement record (the reply node never touches storage itself — the
+  request handler commits after the reply is accepted); a call node invokes a
+  method on any actor through the local sidecar. Needs a Dapr Placement
+  service and a state-store component configured with
+  `actorStateStore: "true"`. See `examples/actor-demo.json`.
+
+Deliberately **not** covered: input bindings, bulk secrets, actor reminders,
+timers, and reentrancy, workflows, distributed lock, jobs, the conversation
+API, and gRPC transport.
 A flow that needs one of those can reach it with a `dapr-invoke` node or a
 core `http request` node against the sidecar's own API in the meantime.
 
@@ -172,6 +185,9 @@ quickstart. The example flows are in `examples/`:
 - `dynamic-configuration.json` — read and watch a dynamic configuration value.
 - `output-binding.json` — invoke an output binding and inspect its response.
 - `secret-get.json` — read one scoped secret into a message property.
+- `actor-demo.json` — two actor types modelled on Dapr's own SDK samples:
+  `DemoActor` (`SetMyData` / `GetMyData`) and `DemoActorCounter` (`count` /
+  `countBy` / `getCounter`).
 
 `examples/nats-jetstream-pubsub-component.yaml` is the beginner pub/sub
 component. `examples/memorydb-pubsub-component.yaml` is for AWS MemoryDB

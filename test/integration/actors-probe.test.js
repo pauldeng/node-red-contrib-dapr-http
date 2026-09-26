@@ -1,15 +1,15 @@
 'use strict';
 
-// Milestone 1 protocol probe (docs/actor-mode-design-and-plan.md sections 1,
-// 4 and 7): no actor runtime code exists in lib/ or nodes/ yet. This proves
-// real daprd 1.18.4 + Placement wire behavior against a tiny raw node:http
-// "app" this test controls directly -- NOT Node-RED, NOT the package's own
-// app-channel listener -- so a future lib/actor-host.js has a ground-truth
-// contract to match instead of trusting the design doc's source citations
-// alone. Every assertion here is a regression trip-wire: a future Dapr pin
-// bump that changes any of this wire behavior should fail this file first.
+// Real-wire protocol probe: proves real daprd 1.18.4 + Placement wire
+// behavior against a tiny raw node:http "app" this test controls directly --
+// NOT Node-RED, NOT the package's own app-channel listener -- so
+// lib/actor-host.js (see docs/architecture.md's "Actor request ownership"
+// section) has a ground-truth contract to match instead of trusting a
+// comment's source citations alone. Every assertion here is a regression
+// trip-wire: a future Dapr pin bump that changes any of this wire behavior
+// should fail this file first.
 //
-// Observed and recorded here for the design doc (see its milestone-1 row):
+// Observed and recorded here:
 //  a. /dapr/config carries the app API token but never dapr-caller-app-id;
 //     an actor method callback carries both, with dapr-caller-app-id equal
 //     to daprd's own --app-id (a same-process actor call has no other
@@ -58,10 +58,10 @@ const APP_ID = 'it-actors-probe-app';
 const APP_API_TOKEN = 'actors-probe-app-token';
 
 // A tiny actor-host "app" this test fully controls: daprd's real HTTP actor
-// transport talks to it exactly as it would talk to a future
-// lib/actor-host.js. Every request is recorded (method, path, sorted header
-// names, and the two headers this probe cares about) so the assertions below
-// can inspect exactly what daprd sent, not what the design doc predicted.
+// transport talks to it exactly as it would talk to lib/actor-host.js. Every
+// request is recorded (method, path, sorted header names, and the two
+// headers this probe cares about) so the assertions below can inspect
+// exactly what daprd sent, not what a comment predicted.
 function createProbeApp() {
   const events = new EventEmitter();
   const requests = [];
@@ -414,7 +414,7 @@ test(
 
     const saveAfterDeactivate = await saveRecord(daprd.baseUrl, deactivateId, { lateSave: true });
     // The orchestrator expects this to fail; assert what daprd actually
-    // does rather than a stronger guarantee this design doc disclaims.
+    // does rather than assume a stronger guarantee.
     assert.equal(saveAfterDeactivate.status, 400, saveAfterDeactivate.text);
     assert.equal(JSON.parse(saveAfterDeactivate.text).errorCode, 'ERR_ACTOR_INSTANCE_MISSING');
 

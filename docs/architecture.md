@@ -311,3 +311,25 @@ fixture now runs both a traces and a logs pipeline (two file exporters,
 directly — a real `node.warn()` call inside a real traced flow span, exported
 to the real collector, whose log record carries that exact span's trace and
 span IDs.
+
+## Actor request ownership
+
+`lib/actor-host.js` owns each invocation from state read through commit. The
+reply node submits a serialized proposal; only the handler writes the actor's
+`record`. State reads and flow work share an absolute deadline, leaving a
+bounded commit reserve. Expiry or drain prevents new flow work, and every
+exit removes the pending reply and captured identity. An already-started
+commit retains its per-actor gate until the local HTTP operation settles.
+
+A commit timeout does not prove that storage rejected the write. The response
+margin is a budget, not a guarantee against event-loop stalls or forced close.
+Actor-aware listener draining and ownership across redeploy remain unfinished
+lifecycle work; the current generic listener can terminate the app request
+before a started commit settles. Actor mode is not yet release-qualified.
+
+Actor-call errors retain the stable `ACTOR_INVOKE_FAILED` code and generic
+message. For non-2xx responses, `Error.cause` carries `statusCode` and any
+string `errorCode`/`message` from Dapr, capped at 128/2048 characters. Node-RED
+5's Catch preserves this as `msg.error.cause`. Dapr's message can contain an
+actor fail envelope, but its wording is remote diagnostic text, not a stable
+business-error protocol; it is never automatically echoed by the actor host.
