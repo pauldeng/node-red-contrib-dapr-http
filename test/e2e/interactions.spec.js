@@ -67,6 +67,42 @@ function interactionsFlow({ appPort, daprPort }) {
       y: 280,
       wires: [[]],
     },
+    {
+      id: 'actorMethod',
+      type: 'dapr-actor-method',
+      z: 'tab',
+      name: 'get data',
+      connection: 'conn',
+      actorType: 'DemoActor',
+      method: 'GetMyData',
+      x: 200,
+      y: 360,
+      wires: [[]],
+    },
+    {
+      id: 'actorReply',
+      type: 'dapr-actor-reply',
+      z: 'tab',
+      name: 'reply',
+      connection: 'conn',
+      outcome: 'complete',
+      x: 200,
+      y: 440,
+      wires: [],
+    },
+    {
+      id: 'actorCall',
+      type: 'dapr-actor-call',
+      z: 'tab',
+      name: 'call actor',
+      connection: 'conn',
+      actorType: 'DemoActor',
+      actorId: 'demo-1',
+      method: 'GetMyData',
+      x: 200,
+      y: 520,
+      wires: [[]],
+    },
   ];
 }
 
@@ -455,4 +491,127 @@ test('the bind-address warning appears only when the value stops being loopback'
 
   await closeDialog(page, { save: false, config: true });
   await closeDialog(page, { save: false });
+});
+
+test('actor method fields persist across save/reopen and empty actorType or method marks the node invalid', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'actorMethod');
+  await page.fill('#node-input-actorType', 'OtherActor');
+  await page.fill('#node-input-method', 'OtherMethod');
+  await closeDialog(page, { save: true });
+
+  await openNodeDialog(page, 'actorMethod');
+  await expect(page.locator('#node-input-actorType')).toHaveValue('OtherActor');
+  await expect(page.locator('#node-input-method')).toHaveValue('OtherMethod');
+
+  const actorType = page.locator('#node-input-actorType');
+  await actorType.fill('');
+  await actorType.blur();
+  await expect(actorType).toHaveClass(/input-error/);
+  await actorType.fill('OtherActor');
+  await actorType.blur();
+  await expect(actorType).not.toHaveClass(/input-error/);
+
+  const method = page.locator('#node-input-method');
+  await method.fill('');
+  await method.blur();
+  await expect(method).toHaveClass(/input-error/);
+  await closeDialog(page, { save: true });
+
+  expect(await page.evaluate(() => RED.nodes.node('actorMethod').valid)).toBe(false);
+});
+
+test('actor reply outcome select offers complete and fail and persists the choice', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'actorReply');
+  const outcome = page.locator('#node-input-outcome');
+  const optionValues = await outcome
+    .locator('option')
+    .evaluateAll((options) => options.map((option) => option.value));
+  expect(optionValues).toEqual(['complete', 'fail']);
+  await expect(outcome).toHaveValue('complete');
+
+  await outcome.selectOption('fail');
+  await closeDialog(page, { save: true });
+
+  await openNodeDialog(page, 'actorReply');
+  await expect(page.locator('#node-input-outcome')).toHaveValue('fail');
+});
+
+test('actor call fields persist across save/reopen and empty actorType, actorId, or method marks the node invalid', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'actorCall');
+  await page.fill('#node-input-actorType', 'OtherActor');
+  await page.fill('#node-input-actorId', 'other-1');
+  await page.fill('#node-input-method', 'OtherMethod');
+  await closeDialog(page, { save: true });
+
+  await openNodeDialog(page, 'actorCall');
+  await expect(page.locator('#node-input-actorType')).toHaveValue('OtherActor');
+  await expect(page.locator('#node-input-actorId')).toHaveValue('other-1');
+  await expect(page.locator('#node-input-method')).toHaveValue('OtherMethod');
+
+  const actorType = page.locator('#node-input-actorType');
+  await actorType.fill('');
+  await actorType.blur();
+  await expect(actorType).toHaveClass(/input-error/);
+  await actorType.fill('OtherActor');
+  await actorType.blur();
+
+  const actorId = page.locator('#node-input-actorId');
+  await actorId.fill('');
+  await actorId.blur();
+  await expect(actorId).toHaveClass(/input-error/);
+  await actorId.fill('other-1');
+  await actorId.blur();
+
+  const method = page.locator('#node-input-method');
+  await method.fill('');
+  await method.blur();
+  await expect(method).toHaveClass(/input-error/);
+  await closeDialog(page, { save: true });
+
+  expect(await page.evaluate(() => RED.nodes.node('actorCall').valid)).toBe(false);
+});
+
+test('actor call rejects an actor type containing a slash', async ({
+  page,
+  nr,
+  appPort,
+  daprPort,
+}) => {
+  await nr.deploy(interactionsFlow({ appPort, daprPort }));
+  await gotoEditor(page, nr);
+
+  await openNodeDialog(page, 'actorCall');
+  const actorType = page.locator('#node-input-actorType');
+  await actorType.fill('Demo/Actor');
+  await actorType.blur();
+  await expect(actorType).toHaveClass(/input-error/);
+
+  const actorId = page.locator('#node-input-actorId');
+  await actorId.fill('demo/1');
+  await actorId.blur();
+  await expect(actorId).toHaveClass(/input-error/);
 });

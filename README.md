@@ -275,6 +275,30 @@ configured by this package's nodes:
 
 See `docs/security.md` for the full picture.
 
+## Actors
+
+An actor method flow starts at a `dapr-actor-method` node and ends at a
+`dapr-actor-reply` node. The reply proposes the response and, optionally, the
+actor's replacement `record`; the connection saves it and only then answers
+daprd. See `examples/actor-demo.json` and "Run the actor example" in
+`examples/README.md`.
+
+- **Setup:** run a Dapr Placement service and give daprd one state-store
+  component with `actorStateStore: "true"`. Scheduler is not needed.
+- **Restart daprd after adding or removing an actor type.** daprd reads
+  `/dapr/config` once at startup; the connection shows `restart sidecar` when
+  its advertised types changed. Adding a method to an existing type needs no
+  restart.
+- **Method errors are wrapped by daprd.** daprd returns a 500
+  `ERR_ACTOR_INVOKE_METHOD` for any non-200 answer, with the details inside
+  its message; in a flow, read `msg.error.cause` after a `dapr-actor-call`.
+  Local validation and transport errors retain their own error codes.
+- **A timeout is not proof nothing was saved.** Treat `ACTOR_COMMIT_UNKNOWN`
+  and caller timeouts as "unknown" and read the record again.
+- **Keep method flows short.** They must reply within the connection's request
+  timeout minus a commit reserve. Put Delay nodes, schedules and retries
+  outside the method flow. Actor reminders and timers are not supported.
+
 ## More documentation
 
 - `docs/invariants.md` — the rules this package will not break, and why.

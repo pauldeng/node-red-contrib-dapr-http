@@ -84,6 +84,10 @@ there is the justification, so do not relax one because it looks incidental.
   state over HTTP.
 - Editor-support endpoints live on `RED.httpAdmin` behind the narrowest
   `RED.auth.needsPermission`, and return only bounded, curated fields.
+- Only the actor request handler writes actor state, after the reply. Keep the
+  per-actor gate and daprd's request open until that commit settles, including
+  across close.
+- Removed actor registrations answer 503, never 404.
 
 ## Workflow
 

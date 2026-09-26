@@ -3,10 +3,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const { once } = require('node:events');
+const { text: readBody } = require('node:stream/consumers');
 
 const { acquireListener } = require('../../lib/app-channel');
 const { httpRequest } = require('../helpers/http');
 const { freePort } = require('../helpers/node-red');
+const { FIXED_LIMITS } = require('../../lib/options');
 
 const BIND = '127.0.0.1';
 const url = (port, path) => `http://127.0.0.1:${port}${path}`;
@@ -17,37 +20,29 @@ const url = (port, path) => `http://127.0.0.1:${port}${path}`;
 // (e.g. "%2e%2e" -> ".." -> collapsed), which would silently defeat exactly
 // the traversal cases this file tests before the request ever reached the
 // server.
-function rawPathRequest(port, rawPath, { method = 'GET', headers = {} } = {}) {
-  return /* allow-promise: bridges node:http's callback API */ new Promise((resolve, reject) => {
-    const req = http.request(
-      { hostname: '127.0.0.1', port, path: rawPath, method, headers, agent: false },
-      (res) => {
-        const chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () =>
-          resolve({
-            status: res.statusCode,
-            headers: res.headers,
-            text: Buffer.concat(chunks).toString(),
-          })
-        );
-      }
-    );
-    req.on('error', reject);
-    req.end();
+async function rawPathRequest(port, rawPath, { method = 'GET', headers = {} } = {}) {
+  const req = http.request({
+    hostname: '127.0.0.1',
+    port,
+    path: rawPath,
+    method,
+    headers,
+    agent: false,
   });
+  req.end();
+  const [res] = await once(req, 'response');
+  const text = await readBody(res);
+  return { status: res.statusCode, headers: res.headers, text };
 }
 
 function limits(over = {}) {
   return {
+    ...FIXED_LIMITS,
     bodyLimitBytes: 4096,
     requestTimeoutMs: 30000,
-    headerLimitBytes: 16 * 1024,
-    headerCountLimit: 100,
     headersTimeoutMs: 5000,
     drainTimeoutMs: 50,
     leaseGraceMs: 200,
-    maxPending: 1000,
     ...over,
   };
 }
@@ -265,6 +260,178 @@ test('a non-GET verb on /dapr/config is 405', async (t) => {
   assert.equal(res.status, 405);
 });
 
+// ---- milestone 3: actor tombstones ------------------------------------------
+//
+// daprd treats a 404 from an actor method PUT as a permanent "method not
+// found" and never retries it -- unlike an ordinary route (staleRoutes,
+// above), where 503 vs 404 only matters for a pub/sub delivery redelivery.
+// A registration that drops out across a redeploy (a method removed, or its
+// whole actor type left with none) must therefore keep answering retryable,
+// never 404, exactly like staleRoutes: bounded by registrations ever made,
+// cleared only when a real registration wins it back.
+
+test('an unregistered method is retryable before the deferred activation installs its tombstone', async (t) => {
+  const { createConnectionRegistry } = require('../../lib/connection-registry');
+  const registry = createConnectionRegistry();
+  const remove = registry.addActorMethod(
+    { nodeId: 'method', actorType: 'DemoActor', method: 'GetMyData' },
+    () => assert.fail('the removed method must never emit')
+  );
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    ...registry.activation(),
+    getActorHandler: (type, method) => registry.actorHandlerFor(type, method),
+    actorInvoke: async () => assert.fail('the removed method must never be invoked'),
+  });
+
+  // registerActorMethod's close callback removes synchronously but coalesces
+  // applyActivation with setImmediate. Model a request in that gap.
+  remove();
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/GetMyData'), {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 503);
+  const unknown = await httpRequest(url(port, '/actors/DemoActor/a/method/NeverRegistered'), {
+    method: 'PUT',
+  });
+  assert.equal(unknown.status, 404);
+});
+
+test('a method removed from an otherwise still-registered actor type stays retryable, not 404 -- the sibling method is unaffected', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  const getHandler = () => {};
+  const setHandler = () => {};
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [
+      { actorType: 'DemoActor', method: 'GetMyData' },
+      { actorType: 'DemoActor', method: 'SetMyData' },
+    ],
+    getActorHandler: (type, method) =>
+      type === 'DemoActor' && method === 'GetMyData'
+        ? getHandler
+        : type === 'DemoActor' && method === 'SetMyData'
+          ? setHandler
+          : undefined,
+    actorInvoke: async () => ({ status: 200 }),
+  });
+
+  // GetMyData dropped; SetMyData (and the type) stay registered.
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'SetMyData' }],
+    getActorHandler: (type, method) =>
+      type === 'DemoActor' && method === 'SetMyData' ? setHandler : undefined,
+    actorInvoke: async () => ({ status: 200 }),
+  });
+
+  const dropped = await httpRequest(url(port, '/actors/DemoActor/a/method/GetMyData'), {
+    method: 'PUT',
+  });
+  assert.equal(dropped.status, 503, 'a dropped method must be retryable, never 404');
+
+  const stillThere = await httpRequest(url(port, '/actors/DemoActor/a/method/SetMyData'), {
+    method: 'PUT',
+  });
+  assert.equal(stillThere.status, 200, 'a sibling method on the same type is unaffected');
+});
+
+test('a whole actor type left with no method stays retryable even once actorConfig goes null', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'GetMyData' }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+
+  // Every DemoActor method node removed: actorConfig now advertises nothing.
+  lease.activate({ actorConfig: null, actorMethodPairs: [], getActorHandler: () => undefined });
+
+  const put = await httpRequest(url(port, '/actors/DemoActor/a/method/GetMyData'), {
+    method: 'PUT',
+  });
+  assert.equal(put.status, 503, 'the whole tombstoned type must be retryable, never 404');
+
+  // DELETE still answers 200 unconditionally -- it is a no-op ack, tombstoned
+  // type or not.
+  const del = await httpRequest(url(port, '/actors/DemoActor/a'), { method: 'DELETE' });
+  assert.equal(del.status, 200);
+
+  // An unrelated, never-registered type is still a plain 404, tombstone or
+  // not -- only a type/pair that actually dropped out is retryable.
+  const other = await httpRequest(url(port, '/actors/OtherType/a/method/X'), { method: 'PUT' });
+  assert.equal(other.status, 404);
+});
+
+test('a real registration wins its tombstone back', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'GetMyData' }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  lease.activate({ actorConfig: null, actorMethodPairs: [], getActorHandler: () => undefined });
+  assert.equal(
+    (await httpRequest(url(port, '/actors/DemoActor/a/method/GetMyData'), { method: 'PUT' }))
+      .status,
+    503
+  );
+
+  // Re-registered (e.g. the method node re-added on the next redeploy).
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'GetMyData' }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/GetMyData'), {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 200, 'a real registration must win the tombstone back');
+});
+
+test('a tombstone survives a reacquire (redeploy), same as staleRoutes', async (t) => {
+  const port = await freePort();
+  const l1 = await acquireListener({
+    bindAddress: BIND,
+    port,
+    token: undefined,
+    limits: limits({ leaseGraceMs: 1000 }),
+  });
+  l1.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'GetMyData' }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  // The method node is gone on the next generation.
+  l1.activate({ actorConfig: null, actorMethodPairs: [], getActorHandler: () => undefined });
+  l1.release({ graceMs: 1000 });
+
+  const l2 = await acquireListener({
+    bindAddress: BIND,
+    port,
+    token: undefined,
+    limits: limits({ leaseGraceMs: 1000 }),
+  });
+  t.after(async () => {
+    l2.release({ graceMs: 0 });
+    await l2.whenClosed();
+  });
+  l2.activate({ actorConfig: null, actorMethodPairs: [], getActorHandler: () => undefined });
+
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/GetMyData'), {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 503, 'the tombstone persists across reacquire');
+});
+
 test('a token is required on actor routes exactly as on any other route', async (t) => {
   const port = await freePort();
   const lease = await acquire(t, { port, token: 'secret' });
@@ -275,4 +442,37 @@ test('a token is required on actor routes exactly as on any other route', async 
   });
   const res = await httpRequest(url(port, '/actors/DemoActor/a/method/M'), { method: 'PUT' });
   assert.equal(res.status, 401);
+});
+
+test('with no actor methods left, a service route under /actors is served, not claimed by a tombstone', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'GetMyData' }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+
+  // Every actor method removed, then a service node registered under /actors.
+  lease.activate({
+    actorConfig: null,
+    actorMethodPairs: [],
+    getActorHandler: () => undefined,
+    routes: [
+      { method: 'GET', path: '/actors/x', kind: 'service', handler: async () => ({ status: 200 }) },
+    ],
+  });
+
+  const service = await httpRequest(url(port, '/actors/x'), { method: 'GET' });
+  assert.equal(
+    service.status,
+    200,
+    'a non-tombstoned /actors path falls through to service routes'
+  );
+
+  const tombstoned = await httpRequest(url(port, '/actors/DemoActor/a/method/GetMyData'), {
+    method: 'PUT',
+  });
+  assert.equal(tombstoned.status, 503, 'the tombstoned type is still retryable');
 });

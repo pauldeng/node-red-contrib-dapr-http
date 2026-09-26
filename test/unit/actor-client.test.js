@@ -3,20 +3,22 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const { once } = require('node:events');
 
 const { buildActorPath, invoke, readRecord, saveRecord } = require('../../lib/actor-client');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 
 async function fakeSidecar(handler) {
   const server = http.createServer(handler);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); // allow-promise: one-shot listen callback
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
   return {
     baseUrl: `http://127.0.0.1:${server.address().port}`,
-    stop: () =>
-      /* allow-promise: one-shot close callback */ new Promise((resolve) => {
-        server.closeAllConnections();
-        server.close(resolve);
-      }),
+    stop: async () => {
+      server.closeAllConnections();
+      server.close();
+      await once(server, 'close');
+    },
   };
 }
 

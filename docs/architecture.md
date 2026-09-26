@@ -26,6 +26,10 @@ A `dapr-connection` node manages two things that never share a listener:
   - Internal `dapr-config-subscribe` callback routes
     (`POST /configuration/<store>/<key>`, one per watched key). These use
     `kind: 'internal'`, so a mesh service caller cannot address them.
+  - With actor methods registered: `GET /dapr/config`,
+    `PUT /actors/<type>/<id>/method/<method>`, and the deactivation callback
+    `DELETE /actors/<type>/<id>`. Removed registrations remain retryable;
+    see "Actor request ownership" below.
   - Everything else: 404. A registered path called with the wrong verb: 405
     with an `Allow` header.
 
@@ -90,6 +94,12 @@ nodes/dapr-config-get.js   configuration get wrapper (message-triggered)
 nodes/dapr-config-subscribe.js  configuration subscribe wrapper (deploy-time, long-lived)
 nodes/dapr-binding-out.js  output-binding invoke wrapper (message-triggered)
 nodes/dapr-secret-get.js   scoped single-secret retrieval wrapper (message-triggered)
+nodes/dapr-actor-method.js inbound actor method registration
+nodes/dapr-actor-reply.js  validates and settles an actor reply proposal
+nodes/dapr-actor-call.js   outbound actor invocation wrapper
+lib/actor-host.js          actor turn ownership, state read, reply wait and commit
+lib/actor-client.js        sidecar actor invocation and record storage APIs
+lib/actor-messages.js      actor identity and reply proposal validation
 lib/options.js             config/env precedence and validation
 lib/messages.js            content-type inference and CloudEvent conversion
 lib/state-messages.js      per-message state request validation and shaping
@@ -323,9 +333,70 @@ commit retains its per-actor gate until the local HTTP operation settles.
 
 A commit timeout does not prove that storage rejected the write. The response
 margin is a budget, not a guarantee against event-loop stalls or forced close.
-Actor-aware listener draining and ownership across redeploy remain unfinished
-lifecycle work; the current generic listener can terminate the app request
-before a started commit settles. Actor mode is not yet release-qualified.
+`dapr-connection`'s close handler awaits `actorHost.whenCommitsSettled()`
+(after `drain()`, before releasing the app-channel lease), so a caller whose
+commit had already started gets its real outcome -- 200, or a definite/
+`ACTOR_COMMIT_UNKNOWN` failure -- rather than the release path's generic
+"connection restarting" 503, on both a redeploy and a full shutdown. That wait
+is itself bounded by `limits.drainTimeoutMs` as a backstop: a commit that
+never settles (a stalled sidecar call past its own timeout, an event-loop
+stall, or a forced close) still cannot hold the redeploy/shutdown open
+indefinitely, and in that case the caller does get the release path's generic
+503 with its commit's true outcome unknown.
+
+`lib/app-channel.js` tombstones a dropped (actorType, method) pair, and a
+whole actor type left with no method at all, the same way it already
+tombstones a removed pub/sub delivery path (`staleRoutes`): daprd treats a
+404 from an actor method PUT as a permanent "not found" and never retries
+it, so a registration this connection drops -- even only for the moment
+between one node's own close and the connection's own reactivation during a
+redeploy -- must answer retryable (503), never 404. A tombstone is bounded by
+registrations ever made (never by actor ids), persists for this listener's
+whole life across reacquire, and is cleared only when a real registration
+wins it back.
+
+The live method registry removes a closing node before the next coalesced
+activation. During that gap, a missing handler for a previously installed
+pair also answers 503; waiting for the tombstone alone would briefly return
+a permanent 404.
+
+A daprd replay (only under a declared actor retry policy) that overlaps a live
+handler for the same actor gets `ACTOR_BUSY` and starts no second read or
+commit. One that arrives after the handler finished is an ordinary new turn,
+so application methods must tolerate a repeated call.
+
+### Actor wire behavior
+
+Observed against real daprd 1.18.4 by `test/integration/actors-probe.test.js`,
+which asserts each point so a pin bump that changes one fails:
+
+- `/dapr/config` is served only while an actor method is registered, so
+  connections without actors are unchanged. Actor-type changes need a sidecar
+  restart and surface a `restart sidecar` status; "no actors" never warns.
+- Method callbacks (`PUT /actors/{type}/{id}/method/{method}`) carry
+  `dapr-caller-app-id` and are accepted with it; `/dapr/config` and the
+  deactivation `DELETE /actors/{type}/{id}` do not carry it and keep the
+  internal-route rule that rejects it. The header is not exposed to flows and
+  is not caller authorization.
+- daprd treats only 200 as method success. An app 500, 503 or 404 reaches the
+  caller as a 500 `ERR_ACTOR_INVOKE_METHOD`, with the app status only inside
+  the message text, and is not retried by default.
+- An absent `record` reads as 204; a stored `null` reads as 200 `null`, which
+  is how `stateExists` tells them apart.
+- A save through a sidecar that no longer hosts the actor fails with 400
+  `ERR_ACTOR_INSTANCE_MISSING`. Method calls and state need Placement but not
+  the Scheduler service.
+
+### Actor limits
+
+- There is no storage-level fence. The actor HTTP API does not expose the
+  store's ETag, so a write already accepted by the store can still land after
+  its turn ended during rebalance or forced close. Dapr's hosted-instance check
+  and the local gate reduce this window; they do not close it.
+- A caller-side timeout or `ACTOR_COMMIT_UNKNOWN` does not prove the write did
+  not happen. The next call reads the authoritative record.
+- A method flow must finish within the connection's request timeout minus the
+  commit reserve. Delays, reminders and timers belong outside the method flow.
 
 Actor-call errors retain the stable `ACTOR_INVOKE_FAILED` code and generic
 message. For non-2xx responses, `Error.cause` carries `statusCode` and any

@@ -126,10 +126,10 @@ function createProbeApp() {
       path: req.url,
       at: Date.now(),
       headerNames,
-      callerAppId: Object.prototype.hasOwnProperty.call(req.headers, 'dapr-caller-app-id')
+      callerAppId: Object.hasOwn(req.headers, 'dapr-caller-app-id')
         ? req.headers['dapr-caller-app-id']
         : undefined,
-      hasAppToken: Object.prototype.hasOwnProperty.call(req.headers, 'dapr-api-token'),
+      hasAppToken: Object.hasOwn(req.headers, 'dapr-api-token'),
     };
     requests.push(record);
     try {

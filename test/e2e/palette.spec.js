@@ -20,6 +20,9 @@ const PALETTE_NODE_TYPES = [
   'dapr-config-subscribe',
   'dapr-binding-out',
   'dapr-secret-get',
+  'dapr-actor-method',
+  'dapr-actor-reply',
+  'dapr-actor-call',
 ];
 
 test('every declared node type registers with the editor', async ({ page, nr }) => {

@@ -87,9 +87,10 @@
     <code>ACTOR_REPLY_EXPIRED</code> and settles nothing. A caller-visible failure is not proof that
     no state was written &mdash; and receiving no response at all (a timeout) is not proof that
     nothing committed either; Dapr does not retry by default. The commit budget reserves time for a
-    response before the request watchdog. Event-loop stalls, forced close, or redeploy can still
-    interrupt that response while the write's outcome is unknown. There is no automatic retry of a
-    failed reply or a failed commit.
+    response before the request watchdog. A redeploy or shutdown waits for an already-started commit
+    to finish, up to a fixed bound, rather than cutting it off &mdash; but an event-loop stall, a
+    forced close, or that bound being reached can still interrupt the response while the write's
+    outcome is unknown. There is no automatic retry of a failed reply or a failed commit.
   </p>
   <p>
     The handler rechecks the flow deadline after accepting every proposal, including read-only and

@@ -2,13 +2,15 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { setImmediate: tick } = require('node:timers/promises');
+const { setImmediate: tick, setTimeout: delay } = require('node:timers/promises');
 
 const { createActorHost } = require('../../lib/actor-host');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
+const { FIXED_LIMITS } = require('../../lib/options');
 
 function limits(over = {}) {
   return {
+    ...FIXED_LIMITS,
     maxPending: 10,
     requestTimeoutMs: 100000,
     drainTimeoutMs: 100000,
@@ -486,15 +488,191 @@ test('drain() unblocks a handler still awaiting a reply with a 503, and no write
   assert.equal(saveCalls, 0);
 });
 
-test('an existing record is passed as a private deep copy, distinguishing stored null from absent', async () => {
-  const stored = { value: { revision: 1 } };
-  const client = fakeClient({ readRecord: async () => ({ exists: true, value: stored.value }) });
+// ---- milestone 3: commit-aware close (whenCommitsSettled) -----------------
+
+test('whenCommitsSettled resolves only after a started commit actually settles', async () => {
+  const saveGate = Promise.withResolvers();
+  let saveCalls = 0;
+  const host = createActorHost({
+    limits: limits({ drainTimeoutMs: 5000 }),
+    client: fakeClient({
+      saveRecord: async () => {
+        saveCalls += 1;
+        await saveGate.promise;
+        return { status: 204 };
+      },
+    }),
+  });
+  const { promise, requestId } = await invokeAndCaptureRequest(host);
+  host.settleActorReply(requestId, {
+    outcome: 'complete',
+    responseJson: '"ok"',
+    nextStateJson: '{}',
+  });
+  await tick(); // reach and call client.saveRecord, which now blocks on saveGate
+  host.drain(); // a concurrent close/redeploy starts draining
+  const settled = host.whenCommitsSettled();
+  const race = await Promise.race([settled, delay(50, 'not-yet')]); // allow-timer: bounded negative -- the commit must still be in flight
+  assert.equal(race, 'not-yet', 'whenCommitsSettled must not resolve before the commit does');
+  assert.equal(saveCalls, 1);
+  saveGate.resolve();
+  await settled; // now resolves promptly once the commit settles
+  const result = await promise;
+  assert.equal(result.status, 200);
+  assert.equal(result.body, '"ok"');
+});
+
+test('a handler still waiting for a proposal at drain gets 503 and never commits; whenCommitsSettled needs no wait for it', async () => {
+  let saveCalls = 0;
+  const host = createActorHost({
+    limits: limits(),
+    client: fakeClient({
+      saveRecord: async () => {
+        saveCalls += 1;
+        return { status: 204 };
+      },
+    }),
+  });
+  const { promise } = await invokeAndCaptureRequest(host);
+  host.drain();
+  const result = await promise;
+  assert.equal(result.status, 503);
+  assert.equal(saveCalls, 0);
+  await host.whenCommitsSettled(); // nothing committing -- must resolve immediately, not wait out drainTimeoutMs
+});
+
+test('an invocation admitted after drain() is rejected without evaluating, and never commits', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  host.drain();
+  const result = await host.invoke({
+    actorType: 'T',
+    actorId: 'late',
+    method: 'M',
+    emit: () => assert.fail('must not evaluate a call admitted after drain'),
+    ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
+  });
+  assert.equal(result.status, 503);
+  await host.whenCommitsSettled();
+});
+
+test('a replayed request for an already-active actor is rejected busy with no second read and no second commit', async () => {
+  let reads = 0;
+  let saves = 0;
+  const host = createActorHost({
+    limits: limits(),
+    client: fakeClient({
+      readRecord: async () => {
+        reads += 1;
+        return { exists: false };
+      },
+      saveRecord: async () => {
+        saves += 1;
+        return { status: 204 };
+      },
+    }),
+  });
+  const { promise: p1, requestId } = await invokeAndCaptureRequest(host);
+  const replay = await host.invoke({
+    actorType: 'T',
+    actorId: 'a',
+    method: 'M',
+    emit: () => assert.fail('a replay overlapping an active handler must not re-read state'),
+    ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
+  });
+  assert.equal(replay.status, 503);
+  assert.equal(JSON.parse(replay.body).error.code, ErrorCodes.ACTOR_BUSY);
+  assert.equal(reads, 1, 'the replay must not trigger a second state read');
+  host.settleActorReply(requestId, {
+    outcome: 'complete',
+    responseJson: '1',
+    nextStateJson: '{}',
+  });
+  assert.equal((await p1).status, 200);
+  assert.equal(saves, 1, 'exactly one commit for the original handler, none for the replay');
+});
+
+test('a new call for the same actor after the first handler finished is a fresh turn with its own read', async () => {
+  let reads = 0;
+  const host = createActorHost({
+    limits: limits(),
+    client: fakeClient({
+      readRecord: async () => {
+        reads += 1;
+        return { exists: false };
+      },
+    }),
+  });
+  const { promise: p1, requestId: r1 } = await invokeAndCaptureRequest(host);
+  host.settleActorReply(r1, { outcome: 'complete', responseJson: '1' });
+  assert.equal((await p1).status, 200);
+
+  const { promise: p2, requestId: r2 } = await invokeAndCaptureRequest(host);
+  assert.notEqual(r1, r2);
+  host.settleActorReply(r2, { outcome: 'complete', responseJson: '2' });
+  assert.equal((await p2).status, 200);
+  assert.equal(reads, 2);
+});
+
+test('whenCommitsSettled is bounded by drainTimeoutMs when a commit never settles', async () => {
+  const stuck = Promise.withResolvers();
+  let saveStarted = false;
+  const host = createActorHost({
+    // Must exceed the 250ms commit margin or no commit can start at all.
+    limits: limits({ drainTimeoutMs: 500 }),
+    client: fakeClient({
+      saveRecord: () => {
+        saveStarted = true;
+        return stuck.promise;
+      },
+    }),
+  });
+  const { requestId, promise } = await invokeAndCaptureRequest(host);
+  host.settleActorReply(requestId, {
+    outcome: 'complete',
+    responseJson: '"ok"',
+    nextStateJson: '{}',
+  });
+  await tick();
+  assert.equal(saveStarted, true, 'the test must actually enter a commit');
+  host.drain();
+  const start = Date.now();
+  const deadline = new AbortController();
+  try {
+    // Keep the isolated test alive while the host's unref'ed backstop runs,
+    // and fail if that backstop is removed. Cancel the losing deadline.
+    const result = await Promise.race([
+      host.whenCommitsSettled(),
+      delay(2000, 'timed-out', { signal: deadline.signal }),
+    ]);
+    assert.notEqual(result, 'timed-out', 'must not wait indefinitely for a stalled commit');
+    assert.ok(Date.now() - start >= 450, 'must wait for the drain backstop');
+  } finally {
+    deadline.abort();
+    stuck.resolve();
+    await promise;
+  }
+});
+
+test('an existing record cannot be aliased across requests: client.readRecord (lib/actor-client.js) parses fresh JSON per request, so mutating one flow copy never affects the next', async () => {
+  const storedJson = JSON.stringify({ revision: 1 });
+  const client = fakeClient({
+    readRecord: async () => ({ exists: true, value: JSON.parse(storedJson) }),
+  });
   const host = createActorHost({ limits: limits(), client });
-  const { promise, message, requestId } = await invokeAndCaptureRequest(host);
-  assert.equal(message.dapr.actor.stateExists, true);
-  assert.deepEqual(message.dapr.actor.state, { revision: 1 });
-  message.dapr.actor.state.revision = 999; // mutate the flow's copy
-  assert.equal(stored.value.revision, 1); // the original is untouched
-  host.settleActorReply(requestId, { outcome: 'complete', responseJson: '1' });
-  await promise;
+
+  const { promise: p1, message: m1, requestId: r1 } = await invokeAndCaptureRequest(host);
+  assert.equal(m1.dapr.actor.stateExists, true);
+  assert.deepEqual(m1.dapr.actor.state, { revision: 1 });
+  m1.dapr.actor.state.revision = 999; // mutate the first request's own copy
+  host.settleActorReply(r1, { outcome: 'complete', responseJson: '1' });
+  await p1;
+
+  const { promise: p2, message: m2, requestId: r2 } = await invokeAndCaptureRequest(host);
+  assert.deepEqual(
+    m2.dapr.actor.state,
+    { revision: 1 },
+    "a fresh read is unaffected by the previous request's mutation"
+  );
+  host.settleActorReply(r2, { outcome: 'complete', responseJson: '2' });
+  await p2;
 });

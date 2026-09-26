@@ -31,7 +31,7 @@ npm run test:e2e         # Playwright tests against the real Node-RED editor
 npm run test:integration:nats      # NATS JetStream-backed tests only (test/integration/nats-*.test.js)
 npm run test:integration:dapr      # real daprd, no broker at all (service invocation, ACL, shutdown, output bindings, secrets, metadata)
 npm run test:integration:redis     # Redis compatibility: pub/sub, retry, dead letter, API-token publish, state management, dynamic configuration
-npm run test:integration:actors    # Placement + actor-flagged Redis store probe (actors-probe.test.js)
+npm run test:integration:actors    # Placement + actor-flagged Redis store: wire probe and the actor-demo example
 npm run test:integration:memorydb  # optional; skips unless credentials are set
 ```
 
@@ -226,6 +226,32 @@ includes `/data/node_modules`), and bind-mounts this workspace read-only at
 its own absolute host path so a symlink written into that `userDir` — pointing
 at the workspace, exactly like the host-process harness's package-discovery
 trick — resolves inside the container too.
+
+## Actor tests
+
+Actor behavior is split by the cheapest tier that can prove each point:
+
+- **Unit** (`actor-host`, `actor-messages`, `actor-client`, `app-channel-actors`):
+  one gate per actor, first reply wins, no write after expiry or pre-commit
+  disconnect, commit unknown vs definite failure, close awaiting started
+  commits, tombstones, path parsing and the proposal validation matrix.
+- **Runtime** (`test/runtime/actors.test.js`, fake sidecar with the save held
+  on a deferred): no 200 before the save, a full redeploy mid-commit still
+  answers the real outcome with exactly one save, method-only and reply-only
+  deploys, an unavailable store, and a bounded shutdown.
+- **Real daprd** (`npm run test:integration:actors`): `actors-probe.test.js`
+  pins daprd's actor wire behavior with a raw `node:http` host (see
+  `docs/architecture.md`, "Actor wire behavior"); `actors.test.js` runs the
+  shipped `examples/actor-demo.json` through Placement and an actor-flagged
+  Redis store, including an unchanged-flow redeploy without restarting daprd,
+  a failing call through the call node with `msg.error.cause`, concurrent
+  same-actor updates with no lost update, and a Node-RED plus daprd restart
+  that reads the stored state back.
+- **E2E**: the three actor dialogs, their validators, and importing and
+  deploying the example.
+
+Overload beyond the fixed 1,000-handler admission budget is proved at the unit
+tier only; a runtime test at that scale would not be representative.
 
 ## Conventions and diagnosis
 

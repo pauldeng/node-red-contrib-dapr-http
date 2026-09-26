@@ -859,3 +859,533 @@ test(
     );
   }
 );
+
+// ---- milestone 3: commit-aware close ---------------------------------------
+
+test(
+  'full redeploy mid-commit: the in-flight caller gets its real outcome, no second save starts, and a concurrent call during the drain window is rejected rather than silently waiting',
+  { timeout: 30000 },
+  async (t) => {
+    const saveGate = Promise.withResolvers();
+    let saveCalls = 0;
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        ['GET', stateReadPath('MC', 'd1'), (_req, res) => res.writeHead(204).end()],
+        [
+          'POST',
+          stateSavePath('MC', 'd1'),
+          async (_req, res) => {
+            saveCalls += 1;
+            await saveGate.promise;
+            res.writeHead(204).end();
+          },
+        ],
+        // A different actor id, so a probe sent during the drain window has
+        // somewhere to succeed IF it is not rejected -- proving the rejection
+        // is really about the connection closing, not a missing responder.
+        ['GET', stateReadPath('MC', 'd2'), (_req, res) => res.writeHead(204).end()],
+        ['POST', stateSavePath('MC', 'd2'), (_req, res) => res.writeHead(204).end()],
+      ],
+    });
+
+    const flow = [
+      { id: 'tab', type: 'tab', label: 'mc' },
+      // A generous request timeout so the commit's own client-side budget
+      // (min(drainTimeoutMs, requestTimeoutMs/2) - COMMIT_MARGIN_MS, capped
+      // at ~4.75s by the fixed 5s drainTimeoutMs regardless of how large this
+      // is set) comfortably outlasts this test's own probe-then-release
+      // choreography below -- otherwise the commit's own client-side timeout
+      // (see lib/sidecar-http.js) would settle it first, independently of
+      // whether the close path waits correctly at all.
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '30' }),
+      {
+        id: 'm1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'MC',
+        method: 'Do',
+        wires: [['fn1']],
+      },
+      {
+        id: 'fn1',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = { ok: true };\nmsg.dapr.actor.nextState = { n: 1 };\nreturn msg;',
+        outputs: 1,
+        wires: [['reply1']],
+      },
+      {
+        id: 'reply1',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+    ];
+    await nr.deploy(flow);
+    await dapr.waitForRequest(healthPath);
+
+    const pending = actorPut(appPort, 'MC', 'd1', 'Do', {});
+    await dapr.waitForRequest((r) => r.method === 'POST' && r.path === stateSavePath('MC', 'd1'));
+    assert.equal(saveCalls, 1);
+
+    // Redeploy the identical flow (a full deploy stops and restarts every
+    // node regardless of config change) WITHOUT awaiting it -- the old
+    // connection's close handler is now blocked on the held commit.
+    const redeployPromise = nr.deploy(flow);
+
+    // A fresh call to an unrelated actor, sent while the old generation is
+    // still closing, must be rejected promptly with a retryable 503 -- never
+    // silently served, and never a 404. Node-RED stops every node in the flow
+    // concurrently, so the actor-method node's own close can unregister and
+    // re-activate the (shared, module-scoped) app-channel entry with an empty
+    // actor registry before the connection node's own close finishes waiting
+    // on whenCommitsSettled(); without lib/app-channel.js's actor tombstones
+    // that briefly 404s (daprd treats an actor-method 404 as a permanent
+    // "not found", so an ordinary redeploy would drop the call rather than
+    // let it retry) -- the tombstone makes it retryable instead.
+    const duringDrain = await waitForFast(async () => {
+      const r = await actorPut(appPort, 'MC', 'd2', 'Do', {});
+      return r.status === 503 ? r : null;
+    });
+    assert.equal(duringDrain.status, 503, duringDrain.text);
+
+    // The original caller must still be waiting -- not answered by the
+    // release path's generic 503 while its commit is genuinely in flight.
+    const race = await notYetSettled(pending, 200);
+    assert.equal(race, NOT_YET, 'the caller must not see a response before the save resolves');
+
+    saveGate.resolve();
+    const res = await pending;
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(JSON.parse(res.text), { ok: true });
+    assert.equal(saveCalls, 1, 'no second save must have started for that actor');
+
+    await redeployPromise;
+
+    // The new generation keeps serving afterward.
+    const afterRedeploy = await waitForFast(async () => {
+      const r = await actorPut(appPort, 'MC', 'd1', 'Do', {});
+      return r.status === 200 ? r : null;
+    });
+    assert.equal(afterRedeploy.status, 200, afterRedeploy.text);
+  }
+);
+
+test(
+  'a modified deploy touching only the method node keeps the connection serving actor calls',
+  { timeout: 30000 },
+  async (t) => {
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        ['GET', stateReadPath('MM', 'd1'), (_req, res) => res.writeHead(204).end()],
+        ['POST', stateSavePath('MM', 'd1'), (_req, res) => res.writeHead(204).end()],
+      ],
+    });
+    const methodNode = (name) => ({
+      id: 'm1',
+      type: 'dapr-actor-method',
+      z: 'tab',
+      name,
+      connection: 'c1',
+      actorType: 'MM',
+      method: 'Do',
+      wires: [['fn1']],
+    });
+    const flow = (name) => [
+      { id: 'tab', type: 'tab', label: 'mm' },
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '5' }),
+      methodNode(name),
+      {
+        id: 'fn1',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = { ok: true };\nmsg.dapr.actor.nextState = { n: 1 };\nreturn msg;',
+        outputs: 1,
+        wires: [['reply1']],
+      },
+      {
+        id: 'reply1',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+    ];
+    await nr.deploy(flow(undefined));
+    await dapr.waitForRequest(healthPath);
+
+    const before = await actorPut(appPort, 'MM', 'd1', 'Do', {});
+    assert.equal(before.status, 200, before.text);
+
+    // Only m1's own config differs (its `name`) -- a 'nodes' deploy restarts
+    // only that node (and, transitively, any config node it references, but
+    // not this connection, whose own config is byte-identical).
+    await nr.deploy(flow('renamed'), { deploymentType: 'nodes' });
+
+    const after = await waitForFast(async () => {
+      const r = await actorPut(appPort, 'MM', 'd1', 'Do', {});
+      return r.status === 200 ? r : null;
+    });
+    assert.equal(after.status, 200, after.text);
+  }
+);
+
+test(
+  'a modified deploy touching only the reply node keeps the connection serving actor calls, and a proposal already queued in an unchanged upstream node still completes normally through the new instance',
+  { timeout: 30000 },
+  async (t) => {
+    let saveCalls = 0;
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        ['GET', stateReadPath('MR', 'd1'), (_req, res) => res.writeHead(204).end()],
+        [
+          'POST',
+          stateSavePath('MR', 'd1'),
+          (_req, res) => {
+            saveCalls += 1;
+            res.writeHead(204).end();
+          },
+        ],
+        ['GET', stateReadPath('MR', 'd2'), (_req, res) => res.writeHead(204).end()],
+        ['POST', stateSavePath('MR', 'd2'), (_req, res) => res.writeHead(204).end()],
+      ],
+    });
+    const replyNode = (name) => ({
+      id: 'reply1',
+      type: 'dapr-actor-reply',
+      z: 'tab',
+      name,
+      connection: 'c1',
+      outcome: 'complete',
+      wires: [],
+    });
+    const flow = (name) => [
+      { id: 'tab', type: 'tab', label: 'mr' },
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '5' }),
+      {
+        id: 'm1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'MR',
+        method: 'Do',
+        wires: [['dly']],
+      },
+      // Holds the message so the reply node can be modified mid-flight. A
+      // delay node's own config never changes across these two deploys, so
+      // its queue survives a redeploy that only touches reply1.
+      {
+        id: 'dly',
+        type: 'delay',
+        z: 'tab',
+        pauseType: 'delay',
+        timeout: '500',
+        timeoutUnits: 'milliseconds',
+        wires: [['fn1']],
+      },
+      {
+        id: 'fn1',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = { ok: true };\nmsg.dapr.actor.nextState = { n: 1 };\nreturn msg;',
+        outputs: 1,
+        wires: [['reply1']],
+      },
+      replyNode(name),
+    ];
+    await nr.deploy(flow(undefined));
+    await dapr.waitForRequest(healthPath);
+
+    const pending = actorPut(appPort, 'MR', 'd1', 'Do', {});
+    // No wait needed before redeploying: `dly`'s own config is unchanged, so
+    // this 'nodes' deploy (which only touches reply1) never stops/recreates
+    // it regardless of exactly when the in-flight message reaches its queue
+    // -- the queue survives by construction, not by timing luck.
+    await nr.deploy(flow('renamed'), { deploymentType: 'nodes' });
+
+    const res = await pending;
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(JSON.parse(res.text), { ok: true });
+    assert.equal(saveCalls, 1, 'the queued proposal must still commit exactly once');
+
+    // The connection keeps serving afterward.
+    const after = await actorPut(appPort, 'MR', 'd2', 'Do', {});
+    assert.equal(after.status, 200, after.text);
+  }
+);
+
+test(
+  'a modified deploy that replaces the node actually holding an in-flight proposal drops it: the caller gets a 503 with no save',
+  { timeout: 30000 },
+  async (t) => {
+    let saveCalls = 0;
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        ['GET', stateReadPath('MD', 'd1'), (_req, res) => res.writeHead(204).end()],
+        [
+          'POST',
+          stateSavePath('MD', 'd1'),
+          (_req, res) => {
+            saveCalls += 1;
+            res.writeHead(204).end();
+          },
+        ],
+      ],
+    });
+    const delayNode = (timeout) => ({
+      id: 'dly',
+      type: 'delay',
+      z: 'tab',
+      pauseType: 'delay',
+      timeout,
+      timeoutUnits: 'milliseconds',
+      wires: [['fn1']],
+    });
+    const flow = (timeout) => [
+      { id: 'tab', type: 'tab', label: 'md' },
+      // A short request timeout keeps this test's reserve/expiry window
+      // small once the queued message is dropped.
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '2' }),
+      {
+        id: 'm1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'MD',
+        method: 'Do',
+        wires: [['probe']],
+      },
+      // Logs immediately before handing the message to `dly`, so the test
+      // below can wait for a real signal that the message has reached the
+      // delay node's queue instead of guessing a fixed duration.
+      {
+        id: 'probe',
+        type: 'function',
+        z: 'tab',
+        func: "node.warn('probe: MD/d1 queued');\nreturn msg;",
+        outputs: 1,
+        wires: [['dly']],
+      },
+      delayNode(timeout),
+      // A second, delay-free method on the same actor type, used only to
+      // prove the connection keeps serving afterward -- the dropped
+      // proposal's own path (m1 -> dly) still points at a 60s-timeout delay
+      // node after the redeploy, so re-using it here would just repeat the
+      // same drop rather than proving recovery.
+      {
+        id: 'm2',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'MD',
+        method: 'Fast',
+        wires: [['fn1']],
+      },
+      {
+        id: 'fn1',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = { ok: true };\nmsg.dapr.actor.nextState = { n: 1 };\nreturn msg;',
+        outputs: 1,
+        wires: [['reply1']],
+      },
+      {
+        id: 'reply1',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+    ];
+    await nr.deploy(flow('60000'));
+    await dapr.waitForRequest(healthPath);
+
+    const pending = actorPut(appPort, 'MD', 'd1', 'Do', {});
+    // The delay node itself IS torn down and recreated below, so (unlike the
+    // previous test) this redeploy's correctness genuinely depends on the
+    // message already sitting in its queue -- wait for the probe's real log
+    // line instead of guessing a fixed duration.
+    await nr.waitForLog(/probe: MD\/d1 queued/, { timeoutMs: 5000 });
+
+    // The delay node's own config (its timeout) changes -- it is stopped and
+    // recreated, dropping its queued message, even though the reply node
+    // downstream is untouched.
+    await nr.deploy(flow('60001'), { deploymentType: 'nodes' });
+
+    const res = await pending;
+    assert.equal(res.status, 503, res.text);
+    assert.equal(saveCalls, 0, 'a dropped proposal must never commit');
+
+    // The connection (and this actor id, via the unaffected fast path) keep
+    // serving afterward.
+    const after = await actorPut(appPort, 'MD', 'd1', 'Fast', {});
+    assert.equal(after.status, 200, after.text);
+  }
+);
+
+test(
+  'an unavailable state store answers a sanitized 500, distinguishing a definite read/save failure from an unknown commit outcome',
+  { timeout: 30000 },
+  async (t) => {
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        [
+          'GET',
+          stateReadPath('US', 'r1'),
+          (_req, res) => res.writeHead(500, { 'content-type': 'application/json' }).end('boom'),
+        ],
+        ['GET', stateReadPath('US', 'r2'), (_req, res) => res.writeHead(204).end()],
+        [
+          'POST',
+          stateSavePath('US', 'r2'),
+          (_req, res) => res.writeHead(500, { 'content-type': 'application/json' }).end('boom'),
+        ],
+        ['GET', stateReadPath('US', 'r3'), (_req, res) => res.writeHead(204).end()],
+        ['POST', stateSavePath('US', 'r3'), (req) => req.socket.destroy()],
+      ],
+    });
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'us' },
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '5' }),
+      {
+        id: 'm1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'US',
+        method: 'Do',
+        wires: [['fn1']],
+      },
+      {
+        id: 'fn1',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = { ok: true };\nmsg.dapr.actor.nextState = { n: 1 };\nreturn msg;',
+        outputs: 1,
+        wires: [['reply1']],
+      },
+      {
+        id: 'reply1',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+    ]);
+    await dapr.waitForRequest(healthPath);
+
+    // A read failure never reaches the flow, and is never echoed verbatim.
+    const readFail = await actorPut(appPort, 'US', 'r1', 'Do', {});
+    assert.equal(readFail.status, 500, readFail.text);
+    assert.equal(JSON.parse(readFail.text).error.code, 'STATE_OPERATION_FAILED');
+    assert.ok(!readFail.text.includes('boom'));
+
+    // A confirmed non-2xx save failure is a definite failure.
+    const saveFail = await actorPut(appPort, 'US', 'r2', 'Do', {});
+    assert.equal(saveFail.status, 500, saveFail.text);
+    assert.equal(JSON.parse(saveFail.text).error.code, 'STATE_OPERATION_FAILED');
+    assert.ok(!saveFail.text.includes('boom'));
+
+    // A transport failure mid-commit (connection reset) leaves the write's
+    // outcome genuinely unknown -- distinct from the confirmed failure above.
+    const saveUnknown = await actorPut(appPort, 'US', 'r3', 'Do', {});
+    assert.equal(saveUnknown.status, 500, saveUnknown.text);
+    assert.equal(JSON.parse(saveUnknown.text).error.code, 'ACTOR_COMMIT_UNKNOWN');
+  }
+);
+
+test(
+  'Node-RED shutdown during a held commit completes once the commit resolves, well under the drain backstop',
+  { timeout: 30000 },
+  async (t) => {
+    let saveCalls = 0;
+    const saveGate = Promise.withResolvers();
+    const { dapr, nr, appPort } = await startHarness(t, {
+      respondents: [
+        ['GET', stateReadPath('SD', 'd1'), (_req, res) => res.writeHead(204).end()],
+        [
+          'POST',
+          stateSavePath('SD', 'd1'),
+          async (_req, res) => {
+            saveCalls += 1;
+            await saveGate.promise; // held until the test releases it below
+            res.writeHead(204).end();
+          },
+        ],
+      ],
+    });
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'sd' },
+      connectionNode(appPort, dapr.port, { requestTimeoutSec: '30' }),
+      {
+        id: 'm1',
+        type: 'dapr-actor-method',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'SD',
+        method: 'Do',
+        wires: [['fn1']],
+      },
+      {
+        id: 'fn1',
+        type: 'function',
+        z: 'tab',
+        func: 'msg.payload = { ok: true };\nmsg.dapr.actor.nextState = { n: 1 };\nreturn msg;',
+        outputs: 1,
+        wires: [['reply1']],
+      },
+      {
+        id: 'reply1',
+        type: 'dapr-actor-reply',
+        z: 'tab',
+        connection: 'c1',
+        outcome: 'complete',
+        wires: [],
+      },
+    ]);
+    await dapr.waitForRequest(healthPath);
+
+    const pending = actorPut(appPort, 'SD', 'd1', 'Do', {});
+    await dapr.waitForRequest((r) => r.method === 'POST' && r.path === stateSavePath('SD', 'd1'));
+    assert.equal(saveCalls, 1);
+
+    const start = Date.now();
+    const stopPromise = nr.stop(); // SIGINT; the connection's close blocks on whenCommitsSettled()
+    // Wait until Node-RED has actually begun stopping. Releasing immediately
+    // after sending SIGINT could let the write finish before close even ran.
+    await nr.waitForLog(/Stopping flows/, { timeoutMs: 5000 });
+    assert.equal(await notYetSettled(stopPromise, 200), NOT_YET);
+    assert.equal(
+      await notYetSettled(pending, 200),
+      NOT_YET,
+      'shutdown must not replace an in-flight commit response with 503'
+    );
+    saveGate.resolve();
+    const response = await pending;
+    assert.equal(response.status, 200, response.text);
+    assert.deepEqual(JSON.parse(response.text), { ok: true });
+    await stopPromise;
+    const stoppedMs = Date.now() - start;
+    // Bounded well under the 5s drainTimeoutMs backstop (already proven at
+    // unit tier in test/unit/actor-host.test.js) -- this proves the real,
+    // event-driven path: shutdown completing as soon as the commit resolves,
+    // not the backstop itself firing.
+    assert.ok(
+      stoppedMs < 3000,
+      `Node-RED took ${stoppedMs}ms to stop after the held commit resolved`
+    );
+    assert.equal(
+      /unhandledRejection|UnhandledPromiseRejection|uncaughtException/i.test(nr.logText()),
+      false,
+      'no crash artifact from the held commit during shutdown'
+    );
+
+    assert.equal(nr.proc.signalCode, null, 'shutdown must not require SIGKILL');
+  }
+);

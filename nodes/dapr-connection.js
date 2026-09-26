@@ -438,6 +438,15 @@ module.exports = function registerDaprConnection(RED) {
         // native promise form.
         await new Promise((resolve) => setImmediate(resolve)); // allow-promise: one tick, no event to await
       }
+      // A handler that had already started committing state before drain()
+      // ran gets to finish and hand its caller the real outcome (200, or a
+      // definite/ACTOR_COMMIT_UNKNOWN failure) instead of the release below's
+      // generic 503 -- see lib/actor-host.js's whenCommitsSettled(), bounded
+      // by limits.drainTimeoutMs as its own backstop. A settled commit still
+      // needs one more tick before its handler's `respond()` call reaches the
+      // socket, same reason as the tick above.
+      await actorHost.whenCommitsSettled();
+      await new Promise((resolve) => setImmediate(resolve)); // allow-promise: one tick, no event to await
       if (node.lease) {
         // On a redeploy (removed === false) hold the listener through a short
         // grace window so the replacement node reacquires it; on delete keep
