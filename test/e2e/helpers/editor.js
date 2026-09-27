@@ -419,6 +419,10 @@ const HELP_LABELS = {
   'dapr-config-subscribe': 'dapr config subscribe',
   'dapr-binding-out': 'dapr binding out',
   'dapr-secret-get': 'dapr secret get',
+  'dapr-actor-method': 'actor method',
+  'dapr-actor-reply': 'actor reply',
+  'dapr-actor-call': 'actor call',
+  'dapr-actor-schedule': 'actor schedule',
 };
 
 // Opens the Help sidebar and navigates straight to one node type's own

@@ -121,66 +121,6 @@ test('invoke: fails fast while the sidecar is unhealthy', { timeout: 60000 }, as
   );
 });
 
-test('invoke: a per-message timeout override bounds a slow call', { timeout: 60000 }, async (t) => {
-  const dapr = await createFakeDaprStarted();
-  t.after(() => dapr.stop());
-  dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
-  // Sidecar never replies within the override window.
-  dapr.respond('POST', '/v1.0/invoke/slow/method/wait', (_req, res) => {
-    setTimeout(() => res.writeHead(204).end(), 5000).unref();
-  });
-
-  const appPort = await freePort();
-  const nr = new NodeRed();
-  await nr.start();
-  t.after(() => nr.stop());
-  // Connection default is 30s; the message override must win at ~1s.
-  await nr.deploy([
-    { id: 'tab', type: 'tab', label: 'to' },
-    connectionNode(appPort, dapr.port, { requestTimeoutSec: '30' }),
-    { id: 'in', type: 'http in', z: 'tab', url: '/call', method: 'post', wires: [['set']] },
-    {
-      id: 'set',
-      type: 'function',
-      z: 'tab',
-      func: "msg.dapr = { appId: 'slow', method: 'wait', verb: 'POST', timeoutSec: 1 }; return msg;",
-      outputs: 1,
-      wires: [['inv']],
-    },
-    {
-      id: 'inv',
-      type: 'dapr-invoke',
-      z: 'tab',
-      connection: 'c1',
-      appId: 'slow',
-      method: 'wait',
-      verb: 'POST',
-      wires: [['res']],
-    },
-    { id: 'res', type: 'http response', z: 'tab' },
-    { id: 'cat', type: 'catch', z: 'tab', scope: ['inv'], wires: [['err']] },
-    {
-      id: 'err',
-      type: 'function',
-      z: 'tab',
-      func: "msg.statusCode = 504; msg.payload = 'timeout'; return msg;",
-      outputs: 1,
-      wires: [['res']],
-    },
-  ]);
-
-  const started = await waitFor(async () => {
-    const t0 = Date.now();
-    const r = await httpRequest(nr.nodeUrl('/call'), { method: 'POST', body: '', timeoutMs: 4000 });
-    return r.status === 504 ? { r, elapsed: Date.now() - t0 } : null;
-  });
-  assert.equal(started.r.text, 'timeout');
-  assert.ok(
-    started.elapsed < 3000,
-    `override deadline should fire well before 5s (was ${started.elapsed}ms)`
-  );
-});
-
 test(
   'invoke: preserves a nested method path, query string, and a non-2xx response',
   { timeout: 60000 },

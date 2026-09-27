@@ -78,27 +78,31 @@ updates. Finally, it exercises `v1.0` and `v1.0-alpha1` unsubscribe against two
 independently live subscriptions and mutates Redis afterward, proving both
 prefixes stop delivery rather than merely returning HTTP 200.
 
-`test/integration/binding-out.test.js` lives in the no-broker bucket beside
-`acl.test.js`/`invoke-matrix.test.js`/`shutdown.test.js`, not the Redis bucket:
-output bindings need no store or broker at all — `bindings.http`'s own `url`
-metadata points directly at a plain HTTP target
-(`test/helpers/integration.js`'s `bindingComponentYaml`), here this suite's
-own `startCapture()` server. It proves a real `dapr-binding-out` invoke
-reaches that target as a genuine POST (asserted from the capture server's
-own independently-observed received body, not this package's code) and that
-the component's real response round-trips back through `msg.payload`/
-`msg.dapr`, plus that an unconfigured binding name produces a real
-`500`/`ERR_INVOKE_OUTPUT_BINDING` from real daprd 1.18.2 — confirming the
-source-level finding that daprd gives no dedicated not-found status for
-this endpoint (see `nodes/dapr-binding-out.html`).
-
-`test/integration/secret-get.test.js` lives in the same no-broker bucket:
-secrets need no store or broker at all beyond a real
+`test/integration/dapr-building-blocks.test.js` is the no-broker bucket beside
+`acl.test.js`/`shutdown.test.js`: service invocation, output bindings,
+secrets, and Test Connection metadata all need no store or broker at all, so
+they share one `ContainerNodeRed` + one daprd session and run as sequential
+subtests instead of four separate container sessions (merged from the former
+`invoke-matrix.test.js`, `binding-out.test.js`, `secret-get.test.js`, and
+`metadata.test.js`). Its invoke subtest proves the full invocation matrix —
+every supported verb, query strings, headers, a byte-exact binary
+request/response, a non-2xx response forwarded verbatim, an outbound
+per-message timeout override against a genuinely slow real service, and an
+unknown method's real 404. Its binding subtest proves a real
+`dapr-binding-out` invoke reaches a plain HTTP target (`bindings.http`'s own
+`url` metadata, pointed at this suite's `startCapture()` server) as a genuine
+POST (asserted from the capture server's own independently-observed received
+body, not this package's code), that the component's real response
+round-trips back through `msg.payload`/`msg.dapr`, and that an unconfigured
+binding name produces a real `500`/`ERR_INVOKE_OUTPUT_BINDING` from real
+daprd 1.18.2 — confirming the source-level finding that daprd gives no
+dedicated not-found status for this endpoint (see
+`nodes/dapr-binding-out.html`). Its secrets subtest proves the three real,
+distinct outcomes daprd 1.18.2 actually produces against a real
 `secretstores.local.file` component pointed at a static test fixture
 (`test/integration/fixtures/secrets.json`), plus a real Dapr Configuration
 resource (`test/integration/fixtures/secret-scopes.yaml`) exercising real
-secret-scoping (`spec.secrets.scopes`). It proves the three real, distinct
-outcomes daprd 1.18.2 actually produces -- allowed-and-present (`200`),
+secret-scoping (`spec.secrets.scopes`) -- allowed-and-present (`200`),
 allowed-but-absent (`500`/`SECRET_OPERATION_FAILED`), and denied-by-scope
 (`403`/`SECRET_ACCESS_DENIED`, which happens before the component is ever
 called and so never overlaps with "absent") -- and asserts that daprd's own
@@ -107,12 +111,13 @@ flow's own HTTP response. That assertion is this node's whole reason to
 exist: `nodes/dapr-secret-get.html` documents the same guarantee against a
 fake sidecar at the unit and runtime tiers, but only a real daprd response
 proves the sanitization holds against the actual wire text, not an assumed
-shape.
-
-`test/integration/metadata.test.js` also needs no broker. It starts real daprd
-1.18.2 with the existing local-file secret component and verifies that Test
-Connection reports the real app id, runtime version, component name/type, and
-counts while exposing none of daprd's other metadata fields.
+shape. Its metadata subtest verifies that Test Connection reports the real
+app id, runtime version, and counts while exposing none of daprd's other
+metadata fields; because this daprd registers both the secret store AND the
+output-binding component (the other two subtests each need one), the
+expected component list is the combined pair, sorted by name for the
+assertion since real daprd's own metadata component order is not a
+documented contract this package pins a test to.
 
 ## The optional MemoryDB tier
 
@@ -324,6 +329,35 @@ another case. Browser runs with three workers fell from 42 cases / 2.2 min to
 not performance thresholds. Library coverage remained 98.33% lines, 95.43%
 branches and 98.53% functions.
 
+A later consolidation pass removed ten more runtime-tier fake-sidecar cases
+(`state.test.js`, `secret-get.test.js`, `binding-out.test.js`,
+`config-get.test.js`, `invoke.test.js`) whose happy-path assertions are
+already proven, more strongly, against a real daprd container elsewhere
+(state/secrets/bindings/configuration's own real-daprd files, and
+`invoke-matrix.test.js`'s timeout override) — every "fails fast," in-flight
+abort, validation, size-bound, and Admin-API-isolation case stayed. One
+candidate, `invoke.test.js`'s outbound binary-body round trip, was
+deliberately kept: the real-daprd invocation matrix only exercises binary
+content through the INBOUND `dapr-service` direction, never through the
+OUTBOUND `dapr-invoke` node, so no real-daprd counterpart actually covers it
+yet. The same pass merged four groups of real-daprd integration files down to
+one Docker session each, run as sequential subtests, with no assertion
+dropped: the Redis pub/sub and dead-letter scenarios into `pubsub.test.js`
+(the dead-letter scenario's topics renamed `dlt-orders`/`dlt-orders-dlq` so
+the two can never collide); the no-broker bucket's `invoke-matrix.test.js`,
+`binding-out.test.js`, `secret-get.test.js`, and `metadata.test.js` into
+`dapr-building-blocks.test.js` (metadata's expected component list grew to
+the combined secret-store + output-binding pair this shared daprd now
+registers); and `nats-publish-client.test.js`'s three already-distinct-topic
+scenarios into one session. `nats-redeploy.test.js`'s three scenarios share
+one NATS container and one Node-RED container but keep independent daprd
+instances — each scenario turns on exactly what daprd's own one-time
+`/dapr/subscribe` fetch captured at ITS OWN startup (one of them changes a
+subscription after startup and then restarts daprd itself), which a shared
+daprd could not represent for all three at once — and each uses its own
+disjoint topic name(s) so the shared NATS stream never lets one scenario's
+backlog leak into another's.
+
 ## Conventions and diagnosis
 
 - Fresh temporary Node-RED profiles log warnings for disabled Projects,
@@ -450,7 +484,8 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
   doesn't ship or maintain, and is worth reporting upstream as a reproducer
   rather than guessing further here. Not a bug in this package: the
   identical flow shape already works against Redis (Milestone 8's
-  `dead-letter.test.js`). `test/integration/nats-dead-letter.test.js` proves
+  dead-letter scenario, now in `pubsub.test.js`).
+  `test/integration/nats-dead-letter.test.js` proves
   the actual observed behavior (one delivery attempt, no dead-letter
   message) within a bounded wait, not a claim about what happens after it.
 

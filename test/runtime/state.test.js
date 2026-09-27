@@ -14,7 +14,6 @@ const healthPath = '/v1.0/healthz/outbound';
 const STORE = 'orders-store';
 const getPath = (key) => `/v1.0/state/${STORE}/${key}`;
 const savePath = `/v1.0/state/${STORE}`;
-const bulkPath = `/v1.0/state/${STORE}/bulk`;
 const transactionPath = `/v1.0/state/${STORE}/transaction`;
 
 function stateFlow({ appPort, daprPort }) {
@@ -113,41 +112,6 @@ async function startFlow(t, respondents = [], { fresh = false } = {}) {
   return { dapr, nr, appPort };
 }
 
-test('get: a 200 response decodes the value and carries the etag', async (t) => {
-  const { dapr, nr } = await startFlow(t, [
-    [
-      'GET',
-      getPath('order-1'),
-      (_req, res) =>
-        res
-          .writeHead(200, { etag: 'v1', 'content-type': 'application/json' })
-          .end(JSON.stringify({ total: 42 })),
-    ],
-  ]);
-
-  const response = await post(nr, { operation: 'get', key: 'order-1' });
-  assert.equal(response.status, 200);
-  const body = JSON.parse(response.text);
-  assert.deepEqual(body.payload, { total: 42 });
-  assert.equal(body.dapr.etag, 'v1');
-  assert.equal(body.dapr.statusCode, 200);
-
-  const [received] = dapr.requests.filter((r) => r.path === getPath('order-1'));
-  assert.equal(received.method, 'GET');
-});
-
-test('get: a 204 (key not found) resolves a null payload, not a Catch failure', async (t) => {
-  const { nr } = await startFlow(t, [
-    ['GET', getPath('missing'), (_req, res) => res.writeHead(204).end()],
-  ]);
-
-  const response = await post(nr, { operation: 'get', key: 'missing' });
-  assert.equal(response.status, 200);
-  const body = JSON.parse(response.text);
-  assert.equal(body.payload, null);
-  assert.equal(body.dapr.etag, undefined);
-});
-
 test('save: POSTs a single-item array and passes msg through', async (t) => {
   const { dapr, nr } = await startFlow(t, [
     ['POST', savePath, (_req, res) => res.writeHead(204).end()],
@@ -176,68 +140,6 @@ test('delete: sends the etag as an If-Match header, not a query param', async (t
   const [received] = dapr.requests.filter((r) => r.path === getPath('order-3'));
   assert.equal(received.method, 'DELETE');
   assert.equal(received.headers['if-match'], 'v2');
-});
-
-test('delete: a 409 (etag mismatch) reaches a Catch node as STATE_ETAG_MISMATCH', async (t) => {
-  const { nr } = await startFlow(t, [
-    [
-      'DELETE',
-      getPath('order-4'),
-      (_req, res) => res.writeHead(409).end(JSON.stringify({ errorCode: 'ERR_ETAG_MISMATCH' })),
-    ],
-  ]);
-
-  const response = await post(nr, { operation: 'delete', key: 'order-4', etag: 'stale' });
-  assert.equal(response.status, 503);
-  assert.equal(JSON.parse(response.text).code, 'STATE_ETAG_MISMATCH');
-});
-
-test('bulkGet: POSTs the keys array and passes the per-key result through as msg.payload', async (t) => {
-  const { dapr, nr } = await startFlow(t, [
-    [
-      'POST',
-      bulkPath,
-      (_req, res) =>
-        res.writeHead(200, { 'content-type': 'application/json' }).end(
-          JSON.stringify([
-            { key: 'a', data: 1 },
-            { key: 'b', error: 'not found' },
-          ])
-        ),
-    ],
-  ]);
-
-  const response = await post(nr, { operation: 'bulkGet' }, ['a', 'b']);
-  assert.equal(response.status, 200);
-  const body = JSON.parse(response.text);
-  assert.deepEqual(body.payload, [
-    { key: 'a', data: 1 },
-    { key: 'b', error: 'not found' },
-  ]);
-
-  const [received] = dapr.requests.filter((r) => r.path === bulkPath);
-  assert.deepEqual(JSON.parse(received.body.toString()), { keys: ['a', 'b'], metadata: {} });
-});
-
-test('transaction: POSTs the operations array, validated to upsert/delete', async (t) => {
-  const { dapr, nr } = await startFlow(t, [
-    ['POST', transactionPath, (_req, res) => res.writeHead(204).end()],
-  ]);
-
-  const response = await post(nr, { operation: 'transaction' }, [
-    { operation: 'upsert', key: 'a', value: 1 },
-    { operation: 'delete', key: 'b' },
-  ]);
-  assert.equal(response.status, 200);
-
-  const [received] = dapr.requests.filter((r) => r.path === transactionPath);
-  assert.deepEqual(JSON.parse(received.body.toString()), {
-    operations: [
-      { operation: 'upsert', request: { key: 'a', value: 1 } },
-      { operation: 'delete', request: { key: 'b' } },
-    ],
-    metadata: {},
-  });
 });
 
 test('transaction: an operation of "set" (not "upsert"/"delete") is rejected before contacting daprd', async (t) => {

@@ -140,37 +140,6 @@ async function startFlow(t, respondents = [], flowOptions = {}, { fresh = false 
   return { dapr, nr, appPort };
 }
 
-test('a 200 response decodes the component body and carries the data/operation through', async (t) => {
-  const { dapr, nr } = await startFlow(t, [
-    [
-      'POST',
-      invokePath(),
-      (_req, res) =>
-        res
-          .writeHead(200, { 'content-type': 'application/json', 'metadata.statusCode': '201' })
-          .end(JSON.stringify({ id: 'created-1' })),
-    ],
-  ]);
-
-  const response = await post(nr, { payload: { id: 1 } });
-  assert.equal(response.status, 200);
-  const body = JSON.parse(response.text);
-  assert.deepEqual(body.payload, { id: 'created-1' });
-  assert.equal(body.dapr.statusCode, 200);
-  assert.equal(body.dapr.bindingName, BINDING);
-  assert.equal(body.dapr.operation, 'create');
-  // Node's http client lower-cases every incoming header name.
-  assert.equal(body.dapr.metadata.statuscode, '201');
-
-  const [received] = dapr.requests.filter((r) => r.path === invokePath());
-  assert.equal(received.method, 'POST');
-  assert.deepEqual(JSON.parse(received.body), {
-    data: { id: 1 },
-    metadata: {},
-    operation: 'create',
-  });
-});
-
 test('a 204 response resolves a null payload, not a Catch failure', async (t) => {
   const { nr } = await startFlow(t, [
     ['POST', invokePath(), (_req, res) => res.writeHead(204).end()],

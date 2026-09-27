@@ -3,7 +3,7 @@
 // Confirmed limitation: deadLetterTopic stalls with the pubsub.jetstream
 // component in Dapr 1.18.2. This is NOT the Milestone 8/Redis-tier behavior
 // (immediate DLT publish on Resiliency exhaustion, proven working in
-// dead-letter.test.js) — it was the ORIGINAL intent here too, until real
+// pubsub.test.js's dead-letter scenario) — it was the ORIGINAL intent here too, until real
 // daprd debug logs showed otherwise.
 //
 // Reproduced twice, independently: daprd logs "encountered a retriable
@@ -29,7 +29,7 @@
 // client's own internals, which this project doesn't ship or maintain.
 // Worth reporting upstream as a reproducer, not further speculation here.
 // Not a bug in this package: the exact same flow shape already works
-// against Redis (Milestone 8's dead-letter.test.js).
+// against Redis (Milestone 8's dead-letter scenario in pubsub.test.js).
 //
 // This test proves the actual observed behavior with a bounded wait, not an
 // unbounded hang: exactly one delivery attempt, and no dead-letter message,

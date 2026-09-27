@@ -139,30 +139,6 @@ async function startFlow(t, respondents = [], flowOptions = {}, { fresh = false 
   return { dapr, nr, appPort };
 }
 
-test('a 200 response sets the default "payload" property to the store\'s own response', async (t) => {
-  const { dapr, nr } = await startFlow(t, [
-    [
-      'GET',
-      getPath(),
-      (_req, res) =>
-        res
-          .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify({ [KEY]: 'real-value' })),
-    ],
-  ]);
-
-  const response = await post(nr, {});
-  assert.equal(response.status, 200);
-  const body = JSON.parse(response.text);
-  assert.deepEqual(body.payload, { [KEY]: 'real-value' });
-  assert.equal(body.dapr.statusCode, 200);
-  assert.equal(body.dapr.storeName, STORE);
-  assert.equal(body.dapr.key, KEY);
-
-  const [received] = dapr.requests.filter((r) => r.path === getPath());
-  assert.equal(received.method, 'GET');
-});
-
 test('a configured non-default property receives the result instead of msg.payload', async (t) => {
   const { nr } = await startFlow(
     t,

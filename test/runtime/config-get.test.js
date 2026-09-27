@@ -96,29 +96,6 @@ async function startFlow(t, respondents = []) {
   return { dapr, nr };
 }
 
-test("a 200 response resolves the store's own per-key map", async (t) => {
-  const { dapr, nr } = await startFlow(t, [
-    [
-      'GET',
-      getPath(),
-      (_req, res) =>
-        res
-          .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify({ featureFlag: { value: 'true', version: '3' } })),
-    ],
-  ]);
-
-  const response = await post(nr, { keys: ['featureFlag'] });
-  assert.equal(response.status, 200);
-  const body = JSON.parse(response.text);
-  assert.deepEqual(body.payload, { featureFlag: { value: 'true', version: '3' } });
-  assert.equal(body.dapr.statusCode, 200);
-
-  const [received] = dapr.requests.filter((r) => r.path === getPath());
-  assert.equal(received.method, 'GET');
-  assert.deepEqual(received.query, { key: 'featureFlag' });
-});
-
 test('a 204 (no items) resolves an empty object, not a Catch failure', async (t) => {
   const { nr, dapr } = await startFlow(t, [
     ['GET', getPath(), (_req, res) => res.writeHead(204).end()],
