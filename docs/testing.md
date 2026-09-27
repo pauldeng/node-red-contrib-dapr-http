@@ -235,11 +235,25 @@ Actor behavior is split by the cheapest tier that can prove each point:
 - **Unit** (`actor-host`, `actor-messages`, `actor-client`, `app-channel-actors`):
   one gate per actor, first reply wins, no write after expiry or pre-commit
   disconnect, commit unknown vs definite failure, close awaiting started
-  commits, tombstones, path parsing and the proposal validation matrix.
+  commits, tombstones, path parsing and the proposal validation matrix; plus
+  the milestone 6 observability additions in the same files (span parentage,
+  attributes and exactly-once end on every outcome; `watchActive`'s active
+  count including a still-committing handler; the `ACTOR_COMMIT_UNKNOWN`/
+  `ACTOR_TOMBSTONE_HIT` diagnostics and their fail-open contract),
+  `warn-throttle.test.js` (per-code rate limiting and the suppressed count),
+  `status-throttle.test.js` (the generic once-per-interval pusher, including
+  a dropped-to-zero trailing value), and `connection-status.test.js`'s/
+  `metadata-client.test.js`'s actor-readiness warning text and curation.
+  `actor-runtime-monitor.test.js` verifies single-flight polling, stale-result
+  rejection across registration changes, health failure, and close.
 - **Runtime** (`test/runtime/actors.test.js`, fake sidecar with the save held
   on a deferred): no 200 before the save, a full redeploy mid-commit still
   answers the real outcome with exactly one save, method-only and reply-only
-  deploys, an unavailable store, and a bounded shutdown.
+  deploys, an unavailable store and its `ACTOR_COMMIT_UNKNOWN` diagnostic
+  line, and a bounded shutdown; `test/runtime/telemetry.test.js` proves
+  `dapr-actor-call`/`dapr-actor-schedule` inject a real traceparent;
+  `test/runtime/connection-metadata.test.js` proves the piggybacked
+  `actorRuntime` fetch never reaches the "Test Connection" admin route.
 - **Real daprd** (`npm run test:integration:actors`): `actors-probe.test.js`
   pins daprd's actor wire behavior with a raw `node:http` host (see
   `docs/architecture.md`, "Actor wire behavior"); `actors-schedule-probe.test.js`
@@ -257,12 +271,29 @@ Actor behavior is split by the cheapest tier that can prove each point:
   restart, and a bounded retry count for an always-failing reminder flow;
   `actors-replicas-probe.test.js` runs two replicas of one app and proves a
   reminder forwarded to the replica hosting its actor never carries
-  `dapr-caller-app-id`, which the reminder route rejects.
+  `dapr-caller-app-id`, which the reminder route rejects;
+  `actors-telemetry.test.js` proves the actor SERVER span against real daprd:
+  a caller-supplied `traceparent` reaches daprd's own actor-invoke API, daprd
+  forwards it unchanged to the method callback, and the exported span shares
+  that trace ID with the caller's own span as its parent. The Function and
+  reply spans retain that ancestry, and read/commit spans remain direct
+  children of the actor server span.
 - **E2E**: the four actor dialogs, their validators, and importing and
   deploying the example.
 
 Overload beyond the fixed 1,000-handler admission budget is proved at the unit
 tier only; a runtime test at that scale would not be representative.
+
+For a small repeatable overhead observation, run
+`node test/helpers/actor-host-benchmark.js`. It alternates tracing off/on,
+warms each configuration, then executes 4,096 successful read-and-save turns
+at concurrency 32 with fake asynchronous storage. Tracing uses an always-on
+sampler and a bounded in-memory exporter (three spans per turn). On
+2026-09-27 with Node 26.8.1, two measured passes took 51.8–53.0 ms with tracing
+off and 133.4–167.6 ms with tracing on. Integration tests were also running on
+the host. These are handler overhead observations, not end-to-end latency or
+fleet capacity estimates: HTTP, Node-RED, real storage and OTLP export are
+excluded. There is no timing assertion or release threshold.
 
 ## Conventions and diagnosis
 

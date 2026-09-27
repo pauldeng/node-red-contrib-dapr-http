@@ -109,8 +109,12 @@ core `http request` node against the sidecar's own API in the meantime.
 Tracing is disabled by default. Enable **Tracing** on any `dapr-connection` to
 export Dapr publish, subscribe, invoke, service, state, configuration,
 output-binding, and secret-get boundary spans (the secret-get span carries
-only the store name, never the secret's own key) plus spans for the
-Node-RED nodes traversed by each message.
+only the store name, never the secret's own key), a SERVER span per actor
+method or reminder invocation (`dapr.actor.type`/`method`/`trigger`/`outcome`
+attributes, an actor id only as a bounded attribute, never in the span name),
+CLIENT spans for the actor's own state read/commit and for `dapr-actor-call`
+and `dapr-actor-schedule`, plus spans for the Node-RED nodes traversed by each
+message.
 The integration propagates
 W3C `traceparent` and `tracestate` automatically and uses standard `OTEL_*`
 environment variables for service identity, the OTLP/HTTP collector endpoint,
@@ -320,6 +324,16 @@ example" in `examples/README.md`.
   reminder flow is retried a bounded number of times by daprd itself, so
   reminder flows must tolerate being run more than once for the same firing.
   Timers are not supported by this package.
+- **Observability.** `dapr-actor-method` shows `listening · N active` for the
+  number of admitted (including still-committing) handlers, pushed at most
+  once a second. Once any actor method is registered, the connection's
+  existing health poll also checks actor readiness (`GET /v1.0/metadata`'s
+  `actorRuntime`) and shows a yellow `actors: placement disconnected` /
+  `actors: host not ready` warning when it isn't confirmed healthy — missing
+  or unrecognized fields read as unknown, never healthy. A stalled commit
+  (`ACTOR_COMMIT_UNKNOWN`), a call hitting a removed registration, or the
+  close-drain backstop firing each log a bounded, rate-limited warning (actor
+  type and method/trigger only — never an id, payload, or token).
 
 ## More documentation
 

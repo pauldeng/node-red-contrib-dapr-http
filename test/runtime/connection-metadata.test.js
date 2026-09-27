@@ -105,6 +105,65 @@ test('a deployed connection returns the curated metadata shape', async (t) => {
   assert.equal('enabledFeatures' in body, false);
 });
 
+// milestone 6: the connection's own actor-readiness piggyback (fetched off
+// the same health-poll cycle, see nodes/dapr-connection.js's
+// actorRuntimeMonitor) reads the SAME GET /v1.0/metadata response this admin
+// route calls -- but actorRuntime must never leak through the admin route,
+// only through the connection's own status. Registers a real
+// dapr-actor-method node so desiredActorFingerprint is non-null (the
+// piggyback only ever fires once an actor method is registered).
+test('actorRuntime is fetched for connection status but never reaches the admin metadata route', async (t) => {
+  const dapr = await createFakeDaprStarted();
+  t.after(() => dapr.stop());
+  dapr.respond('GET', HEALTH_PATH, (_req, res) => res.writeHead(204).end());
+  dapr.respond('GET', METADATA_PATH, (_req, res) =>
+    res.writeHead(200, { 'content-type': 'application/json' }).end(
+      JSON.stringify({
+        id: 'my-app',
+        actorRuntime: {
+          runtimeStatus: 'RUNNING',
+          hostReady: false,
+          placement: 'placement: connected',
+        },
+      })
+    )
+  );
+
+  const nr = new NodeRed();
+  await nr.start();
+  t.after(() => nr.stop());
+  const appPort = await freePort();
+  await nr.deploy([
+    { id: 'tab', type: 'tab', label: 'actor-status' },
+    {
+      id: 'c1',
+      type: 'dapr-connection',
+      daprHost: '127.0.0.1',
+      daprPort: String(dapr.port),
+      bindAddress: '127.0.0.1',
+      appPort: String(appPort),
+    },
+    {
+      id: 'm1',
+      type: 'dapr-actor-method',
+      z: 'tab',
+      connection: 'c1',
+      actorType: 'Widget',
+      method: 'Ping',
+      wires: [[]],
+    },
+  ]);
+  await dapr.waitForRequest(HEALTH_PATH);
+  // The piggybacked fetch runs off the same health-poll cycle; wait for it to
+  // have actually happened rather than guessing a settle time.
+  await dapr.waitForRequest(METADATA_PATH);
+
+  const response = await adminMetadata(nr);
+  assert.equal(response.status, 200);
+  const body = JSON.parse(response.text);
+  assert.equal('actorRuntime' in body, false, 'actorRuntime must never reach the admin route');
+});
+
 test('an invalid deployed connection is distinct from an unknown id', async (t) => {
   const nr = new NodeRed();
   await nr.start();

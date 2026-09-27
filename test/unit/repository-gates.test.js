@@ -28,6 +28,7 @@ test('durable docs list every test tier and CI enforces cheap completion gates',
     pkg.scripts['test:integration:nats'],
     'node --test --test-concurrency=1 "test/integration/nats-*.test.js"'
   );
+  assert.match(pkg.scripts['test:integration:actors'], /actors-telemetry\.test\.js/);
   const integrationScripts = [
     pkg.scripts['test:integration'],
     pkg.scripts['test:integration:dapr'],

@@ -7,6 +7,8 @@ const { createConnectionRegistry } = require('../lib/connection-registry');
 const { connectionStatus } = require('../lib/connection-status');
 const { createActorHost } = require('../lib/actor-host');
 const actorClient = require('../lib/actor-client');
+const { createActorDiagnosticLogger } = require('../lib/warn-throttle');
+const { createActorRuntimeMonitor } = require('../lib/actor-runtime-monitor');
 const { PendingRegistry } = require('../lib/pending');
 const { sidecarRequest } = require('../lib/sidecar-http');
 const { getMetadata } = require('../lib/metadata-client');
@@ -200,6 +202,9 @@ module.exports = function registerDaprConnection(RED) {
     // coordinate here. The aggregation itself lives in lib/, so this file
     // only wires it to Node-RED's own lifecycle. ----
     const registry = createConnectionRegistry();
+    const warnActorDiagnostic = createActorDiagnosticLogger({
+      warn: (message) => node.warn(message),
+    });
     const actorHost = createActorHost({
       limits: options.limits,
       client: {
@@ -208,6 +213,7 @@ module.exports = function registerDaprConnection(RED) {
         // The whole client module, so a new host operation cannot be left unwired.
         ...actorClient,
       },
+      onDiagnostic: warnActorDiagnostic,
     });
     const pendingAcks = new PendingRegistry({ max: options.limits.maxPending });
     const pendingResponses = new PendingRegistry({ max: options.limits.maxPending });
@@ -216,7 +222,6 @@ module.exports = function registerDaprConnection(RED) {
     let activateScheduled = false;
     let warnedFingerprint = null; // rate-limits the restart warning to once per change
     let warnedActorFingerprint; // undefined means no warning, null means all actors removed
-
     const refreshStatus = () => {
       const { status, restartRequired, actorRestartRequired } = connectionStatus({
         hasLease: Boolean(node.lease),
@@ -226,6 +231,8 @@ module.exports = function registerDaprConnection(RED) {
         subscriptionCount: registry.subscriptionCount,
         servedActorFingerprint: node.lease ? node.lease.servedActorFingerprint() : null,
         desiredActorFingerprint,
+        actorMethodsRegistered: desiredActorFingerprint !== null,
+        actorRuntime: actorRuntimeMonitor.value,
       });
       // Warn once per change, not once per status refresh.
       if (restartRequired) {
@@ -259,11 +266,13 @@ module.exports = function registerDaprConnection(RED) {
       const activation = registry.activation({ requestTimeoutMs: options.limits.requestTimeoutMs });
       desiredFingerprint = activation.fingerprint;
       desiredActorFingerprint = activation.actorFingerprint;
+      actorRuntimeMonitor.setScope(desiredActorFingerprint);
       node.lease.activate({
         ...activation,
         onDiscovery: refreshStatus,
         getActorHandler: (actorType, method) => registry.actorHandlerFor(actorType, method),
         actorInvoke: (args) => actorHost.invoke(args),
+        onActorDiagnostic: warnActorDiagnostic,
       });
       refreshStatus();
     };
@@ -315,6 +324,11 @@ module.exports = function registerDaprConnection(RED) {
     node.settleActorReply = (requestId, proposal) =>
       actorHost.settleActorReply(requestId, proposal);
     node.actorIdentity = (requestId) => actorHost.actorIdentity(requestId);
+    // dapr-actor-method's own throttled "listening · N active" status;
+    // `registryMethod` is whatever key that node already registered under
+    // (REMINDER_METHOD for a reminder registration).
+    node.watchActorActive = (actorType, registryMethod, onChange) =>
+      actorHost.watchActive(actorType, registryMethod, onChange);
     node.addPendingAck = (ackId, ackOptions) => pendingAcks.add(ackId, ackOptions);
     node.settleAck = (ackId, status) => pendingAcks.settle(ackId, status);
     node.addPendingResponse = (id, responseOptions) => pendingResponses.add(id, responseOptions);
@@ -345,6 +359,7 @@ module.exports = function registerDaprConnection(RED) {
         markHealthKnown();
         return;
       }
+      if (!nextHealthy) actorRuntimeMonitor.invalidate();
       setHealthy(nextHealthy);
       markHealthKnown();
       if (healthy) {
@@ -355,8 +370,30 @@ module.exports = function registerDaprConnection(RED) {
         schedule(backoff);
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
       }
+      // Piggyback this same health-poll cycle for actor readiness -- no new
+      // timer or loop. Fire-and-forget: never awaited, so a slow or stalled
+      // metadata call cannot delay this poll's own reschedule, and ordinary
+      // pub/sub/service traffic (which never depends on this) is completely
+      // unaffected either way.
+      if (healthy && desiredActorFingerprint !== null) {
+        void actorRuntimeMonitor.refresh();
+      }
       refreshStatus();
     }
+
+    const actorRuntimeMonitor = createActorRuntimeMonitor({
+      fetch: async (signal) => {
+        const result = await getMetadata({
+          baseUrl: options.outbound.baseUrl,
+          token: options.daprApiToken,
+          timeoutMs: HEALTH_TIMEOUT_MS,
+          signal,
+          maxResponseBytes: options.limits.bodyLimitBytes,
+        });
+        return result.actorRuntime;
+      },
+      onChange: refreshStatus,
+    });
 
     let closing = false;
     node.status({ fill: 'grey', shape: 'ring', text: 'connecting' });
@@ -415,6 +452,7 @@ module.exports = function registerDaprConnection(RED) {
     node.on('close', async (removed, done) => {
       closing = true;
       stopped = true;
+      actorRuntimeMonitor.close();
       setHealthy(false);
       healthListeners.clear();
       markHealthKnown(); // never leave an input handler awaiting a probe that will not run
@@ -445,7 +483,10 @@ module.exports = function registerDaprConnection(RED) {
       // by limits.drainTimeoutMs as its own backstop. A settled commit still
       // needs one more tick before its handler's `respond()` call reaches the
       // socket, same reason as the tick above.
-      await actorHost.whenCommitsSettled();
+      const backstopFired = await actorHost.whenCommitsSettled();
+      if (backstopFired) {
+        warnActorDiagnostic('ACTOR_DRAIN_BACKSTOP');
+      }
       await new Promise((resolve) => setImmediate(resolve)); // allow-promise: one tick, no event to await
       if (node.lease) {
         // On a redeploy (removed === false) hold the listener through a short

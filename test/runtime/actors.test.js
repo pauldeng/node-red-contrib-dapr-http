@@ -1466,6 +1466,11 @@ test(
     const saveUnknown = await actorPut(appPort, 'US', 'r3', 'Do', {});
     assert.equal(saveUnknown.status, 500, saveUnknown.text);
     assert.equal(JSON.parse(saveUnknown.text).error.code, 'ACTOR_COMMIT_UNKNOWN');
+
+    // Bounded diagnostic: actor type and method only, never the actor id,
+    // payload, or a stack trace.
+    await nr.waitForLog(/\[ACTOR_COMMIT_UNKNOWN\] type=US method=Do/, { timeoutMs: 5000 });
+    assert.ok(!nr.logText().includes('r3'), 'the actor id must never appear in the diagnostic');
   }
 );
 
