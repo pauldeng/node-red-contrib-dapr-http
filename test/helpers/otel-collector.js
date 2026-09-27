@@ -20,7 +20,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 
 // Pinned by digest — see test/helpers/integration.js for the re-pin procedure.
 const OTEL_COLLECTOR_IMAGE =
-  'otel/opentelemetry-collector-contrib:0.158.0@sha256:c5918f78992ee73b0d6f0e599423ac5ec52dd5d9726733114d6eca53d5a32ed5';
+  'otel/opentelemetry-collector-contrib:0.161.0@sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1';
 
 function runId() {
   return crypto.randomBytes(4).toString('hex');

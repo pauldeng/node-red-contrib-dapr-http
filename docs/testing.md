@@ -79,7 +79,7 @@ independently live subscriptions and mutates Redis afterward, proving both
 prefixes stop delivery rather than merely returning HTTP 200.
 
 `test/integration/binding-out.test.js` lives in the no-broker bucket beside
-`acl.test.js`/`invoke.test.js`/`shutdown.test.js`, not the Redis bucket:
+`acl.test.js`/`invoke-matrix.test.js`/`shutdown.test.js`, not the Redis bucket:
 output bindings need no store or broker at all — `bindings.http`'s own `url`
 metadata points directly at a plain HTTP target
 (`test/helpers/integration.js`'s `bindingComponentYaml`), here this suite's
@@ -188,13 +188,13 @@ HTTP. A fake Dapr HTTP sidecar (`test/helpers/fake-dapr.js`) stands in for daprd
 The integration harness spins up a fresh, isolated set of pinned containers
 per test file via raw `docker run` (not docker-compose, so files stay
 parallel-safe on dynamically allocated ports): `daprio/daprd:1.18.4`,
-`redis:7.4-alpine` (`test/helpers/integration.js`), `nats:2.14.3-alpine`
+`redis:8.10-alpine` (`test/helpers/integration.js`), `nats:2.15.0-alpine`
 (`test/helpers/nats.js` — JetStream only, started with `-js`; `pubsub.natsstreaming`
 is deprecated and out of scope), Node-RED itself, as the pinned
-`nodered/node-red:5.0.1-24` image (`test/helpers/node-red-container.js`,
+`nodered/node-red:5.0.7-24` image (`test/helpers/node-red-container.js`,
 `ContainerNodeRed`), not the host child process the runtime tier uses
 (`NodeRed`, `test/helpers/node-red.js` — unchanged, and still exactly what the
-runtime tier runs), and `otel/opentelemetry-collector-contrib:0.158.0`
+runtime tier runs), and `otel/opentelemetry-collector-contrib:0.161.0`
 (`test/helpers/otel-collector.js`) for the telemetry integration tests —
 configured with one OTLP/HTTP receiver feeding two file exporters (traces and
 logs, each on its own host-mounted temp file), so those tests assert on the
@@ -295,8 +295,41 @@ the host. These are handler overhead observations, not end-to-end latency or
 fleet capacity estimates: HTTP, Node-RED, real storage and OTLP export are
 excluded. There is no timing assertion or release threshold.
 
+## Test cost and consolidation
+
+CI and release run the complete unit suite once through `test:coverage`;
+`npm test` remains the faster local command without coverage instrumentation.
+The browser dialog loops check validation while capturing the same light/dark,
+three-viewport screenshots, instead of opening every dialog twice. The real
+Dapr invocation matrix covers successful outbound calls as well as inbound
+verbs, preserving the assertions formerly in a second container fixture.
+
+State, binding, secret-get and configuration-get response tables share one
+Node-RED process per file. Each case gets fresh flows and a fresh fake sidecar;
+flows are removed before that sidecar closes. Startup/shutdown, redeploy-abort,
+credentials and global-telemetry cases still own separate processes. HTTP
+callers in abort tests cancel only after observing the sidecar cancellation,
+avoiding an unrelated five-second client timeout. Most trace-propagation tests
+use a local OTLP receiver; one unreachable-exporter case retains that coverage.
+Negative delivery windows, deadline tests, and broker-specific integration
+cases remain: similar assertions at those boundaries catch different failures.
+The container harness binds its editor to loopback on an OS-assigned port and
+reads the bound port from Node-RED's startup log, avoiding the gap between a
+free-port probe and container startup. Dapr app-channel ports remain explicit.
+
+On the review host (Node 26.8.1), the serial runtime tier fell from 239.6 s
+for 152 cases to 183.5 s for 151; the removed case's assertion remains in
+another case. Browser runs with three workers fell from 42 cases / 2.2 min to
+40 / 2.0 min. These are single-run observations under concurrent test load,
+not performance thresholds. Library coverage remained 98.33% lines, 95.43%
+branches and 98.53% functions.
+
 ## Conventions and diagnosis
 
+- Fresh temporary Node-RED profiles log warnings for disabled Projects,
+  system-generated credential keys and a missing encrypted-credentials file.
+  These describe disposable test profiles, not dependency deprecations; keep
+  warnings enabled so unexpected runtime diagnostics remain visible.
 - Test files are named `*.test.js` (unit/runtime/integration) or `*.spec.js`
   (Playwright).
 - Prefer `node:assert/strict`. Use the runner's native mocks and fake timers
@@ -427,10 +460,10 @@ Two-part policy:
 
 - **Package gate:** `npm audit --omit=dev` must report zero vulnerabilities. It
   covers everything the package ships: the official OpenTelemetry packages
-  (`@opentelemetry/api`, `sdk-trace-node`, `exporter-trace-otlp-http`,
-  `resources` — see `AGENTS.md`'s "Stack" for why runtime
-  dependencies are pinned and deliberately minimal here, not zero) and
-  nothing else. Zero vulnerabilities in that tree as of this milestone;
+  (`@opentelemetry/api`, `api-logs`, `exporter-logs-otlp-http`,
+  `exporter-trace-otlp-http`, `resources`, `sdk-logs`, `sdk-trace-node` — see
+  `AGENTS.md`'s "Stack" for why runtime dependencies are pinned and
+  deliberately minimal here, not zero) and nothing else. Zero vulnerabilities in that tree as of this milestone;
   re-verify whenever those versions move, the same as any other pinned
   dependency.
 - **Full audit review:** `npm audit` is reviewed but need not be empty. Only the
@@ -439,44 +472,24 @@ Two-part policy:
   until it is individually assessed and added here. `node-red` is pinned
   deliberately and never shipped.
 
-  Every permitted advisory below is reached only through the dev-only
-  `node-red@5.0.4` tree, so none is installed with the published package. That
-  does **not** mean every advisory is unreachable inside Node-RED: core nodes use
-  `jsonata` and `js-yaml`, so those two ARE reachable from a flow in any Node-RED
-  installation — just not through anything this package's own code or dependency
-  choices control. The rest sit inside the `npm` CLI bundled by
-  `@node-red/registry`; this test suite never asks the editor to install a
-  palette module, so that code path never runs here.
+  Permitted advisories: **none**, last verified 2026-09-27. Both production
+  and full npm audits are clean after the dependency refresh and a scoped
+  `express@4.22.2` → `qs@6.16.0` override in the development tree. Express's
+  `~6.15.1` constraint otherwise retains vulnerable `qs@6.15.3` despite the
+  fix being available in the same major. The upstream advisories are
+  [GHSA-x5fp-wj9c-mxmx](https://github.com/advisories/GHSA-x5fp-wj9c-mxmx) and
+  [GHSA-4mjr-xmp4-gh2g](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g).
+  Runtime HTTP/query tests exercise this override. Remove it when the pinned
+  Node-RED/Express tree resolves a patched version without it.
 
-  Permitted advisories (dev-only), last reviewed 2026-08-15:
-
-  | Advisory                                                                                                                                                                                                                     | Package                 | Reached through                                                                                                                                                        |
-  | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | [GHSA-86vw-mfpg-wwv9](https://github.com/advisories/GHSA-86vw-mfpg-wwv9)                                                                                                                                                     | `jsonata` 2.0.0 - 2.1.1 | `node-red` → `@node-red/util`                                                                                                                                          |
-  | [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg), [GHSA-rgw5-rvv9-x895](https://github.com/advisories/GHSA-rgw5-rvv9-x895)                                                                           | `brace-expansion`       | `node-red` → `@node-red/registry` → bundled `npm` → `minimatch` (ESLint's own copy is patched at `5.0.9`; only npm's bundled `5.0.7` remains vulnerable)               |
-  | [GHSA-r292-9mhp-454m](https://github.com/advisories/GHSA-r292-9mhp-454m)                                                                                                                                                     | `tar`                   | `node-red` → `@node-red/registry` → bundled `npm`                                                                                                                      |
-  | [GHSA-mwp4-54f8-5fhr](https://github.com/advisories/GHSA-mwp4-54f8-5fhr), [GHSA-4xrf-jv44-h6hh](https://github.com/advisories/GHSA-4xrf-jv44-h6hh), [GHSA-22jq-vg5j-6vgg](https://github.com/advisories/GHSA-22jq-vg5j-6vgg) | `ip-address`            | `node-red` → `@node-red/registry` → bundled `npm` → `socks-proxy-agent` → `socks` (the `mqtt` → `socks` path resolves to `10.4.0`, already above the vulnerable range) |
-  | [GHSA-5p4m-2wfm-xmqj](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj)                                                                                                                                                     | `js-yaml` 4.0.0 - 4.3.0 | `node-red` → `@node-red/nodes`                                                                                                                                         |
-  | undici advisories (3, see below)                                                                                                                                                                                             | `undici` <= 6.27.0      | `node-red` → `@node-red/registry` → bundled `npm` → `node-gyp`                                                                                                         |
-
-  `fast-uri`'s two advisories (GHSA-v2hh-gcrm-f6hx, GHSA-7p8r-x3mc-p8w7) and
-  `body-parser`'s (GHSA-v422-hmwv-36x6) and the ten `axios` advisories previously
-  permitted here no longer appear in `npm audit`'s output at all — confirmed by
-  running it fresh against this dependency graph rather than assuming an older
-  table still applied. The safe non-breaking `npm audit fix` is already applied:
-  it moved `fast-uri` to `3.1.5` under both `html-validate`'s and `node-red`'s
-  copies of `ajv`, clearing its advisories entirely. `brace-expansion`,
-  `ip-address`, `tar`, and `undici` are all bundled inside `npm@11.19.0` itself
-  — `npm audit fix` reports it "cannot be fixed automatically" for any of the
-  four, since fixing them means Node-RED's own bundled `npm` moving, which this
-  repository does not control. `js-yaml` and `jsonata` only have a fix via
-  `npm audit fix --force`, which downgrades `node-red` to `2.2.3` — see the note
-  below on why that is refused.
-
-  The `undici` advisories (GHSA-8xcm-r25x-g524, GHSA-m8rv-5g2x-5cg5,
-  GHSA-v3r7-h72x-cjcm) are all reached through `npm`'s own bundled `node-gyp`
-  dependency (`node-red` → `@node-red/registry` → bundled `npm`). Nothing in
-  this repository makes an HTTP request through `undici`, bundled or otherwise.
+  This override governs the repository's root npm install. It does not patch
+  the separately pinned Node-RED container image or consumers' own Node-RED
+  installations, and npm does not apply dependency-package overrides to a
+  consumer's root dependency tree. A read-only probe of the pinned 5.0.7-24
+  image on 2026-09-27 confirmed Express 4.22.2 still resolves `qs` 6.15.3
+  there. The clean npm audit is not a clean audit of that upstream image;
+  the integration editor is loopback-bound, and the image needs an upstream
+  dependency refresh to remove these advisories.
 
 CI runs `npm audit --omit=dev` on every push/PR **and on a weekly schedule**
 (`.github/workflows/ci.yml`), so a newly-disclosed advisory surfaces without
@@ -485,5 +498,4 @@ manual: it is a judgement about reachability, not something a zero-exit check ca
 express.
 
 Do **not** run `npm audit fix --force` — its suggested `node-red` downgrade
-breaks the pin. Revisit the whole list when a Node-RED 5.x with refreshed
-transitives ships.
+breaks the pin. Recheck the scoped override when Node-RED refreshes Express.

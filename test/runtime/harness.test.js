@@ -6,6 +6,7 @@ const net = require('node:net');
 const http = require('node:http');
 
 const { NodeRed } = require('../helpers/node-red');
+const { httpRequest } = require('../helpers/http');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 
 // A minimal fixture built from Node-RED core nodes only: an HTTP endpoint whose
@@ -66,6 +67,38 @@ test(
       until: (x) => x.status === 200 && x.json().marker === 'M2-b',
     });
     assert.equal(r.json().marker, 'M2-b');
+
+    // Characterize Express's qs override through real Node-RED HTTP nodes.
+    await nr.deploy([
+      { id: 'parse-tab', type: 'tab', label: 'parser' },
+      {
+        id: 'parse-in',
+        type: 'http in',
+        z: 'parse-tab',
+        url: '/parse',
+        method: 'post',
+        wires: [['parse-fn']],
+      },
+      {
+        id: 'parse-fn',
+        type: 'function',
+        z: 'parse-tab',
+        outputs: 1,
+        func: 'msg.payload = { query: msg.req.query, body: msg.payload }; return msg;',
+        wires: [['parse-res']],
+      },
+      { id: 'parse-res', type: 'http response', z: 'parse-tab' },
+    ]);
+    const parsed = await httpRequest(nr.nodeUrl('/parse?filter[name]=demo&tags[]=a&tags[]=b'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'enabled=false&count=0',
+    });
+    assert.equal(parsed.status, 200);
+    assert.deepEqual(JSON.parse(parsed.text), {
+      query: { filter: { name: 'demo' }, tags: ['a', 'b'] },
+      body: { enabled: 'false', count: '0' },
+    });
   }
 );
 

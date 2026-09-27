@@ -43,7 +43,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
-      - run: npm test
+      # Coverage executes the complete unit suite once.
       - run: npm run test:coverage
       - run: npm run test:runtime
         timeout-minutes: 10

@@ -43,33 +43,9 @@ const NODES = [
 // blank state real example flows ship with (see nodes/dapr-connection.html
 // and nodes/dapr-response.html). This flow intentionally omits every such
 // optional field to lock the fix in place.
-for (const theme of THEMES) {
-  test(`every node dialog opens with no validation error (${theme} theme)`, async ({
-    page,
-    nr,
-    appPort,
-    daprPort,
-  }) => {
-    await nr.deploy(fullFlow({ appPort, daprPort }));
-    await gotoEditor(page, nr, { theme });
-
-    for (const { id } of NODES) {
-      await openNodeDialog(page, id);
-      await expect(page.locator('.red-ui-tray-content .input-error')).toHaveCount(0);
-      await closeDialog(page, { save: false });
-    }
-
-    await openNodeDialog(page, 'e2e-pub');
-    await openConnectionDialog(page);
-    await expect(page.locator('.red-ui-tray-content .input-error')).toHaveCount(0);
-    await closeDialog(page, { save: false, config: true }); // connection dialog
-    await closeDialog(page, { save: false }); // publish dialog
-  });
-}
-
 // Screenshots for manual visual inspection (light/dark, three viewports),
-// covering every node's dialog including `dapr-connection` and `dapr-publish`. Not a pass/fail assertion
-// beyond "the dialog actually opened" — a human inspects the images for
+// covering every node's dialog including `dapr-connection` and `dapr-publish`.
+// Assertions cover visibility, validation and overflow; a human inspects the images for
 // clipped labels, overflow, overlap, or unreadable status.
 for (const theme of THEMES) {
   for (const viewport of VIEWPORTS) {
@@ -86,6 +62,7 @@ for (const theme of THEMES) {
       for (const { id, type } of NODES) {
         await openNodeDialog(page, id);
         await expect(page.locator('#node-dialog-ok')).toBeVisible();
+        await expect(page.locator('.red-ui-tray-content .input-error')).toHaveCount(0);
         await assertNoHorizontalOverflow(page);
         await page.screenshot({ path: screenshotPath(`${type}-${theme}-${viewport.name}`) });
         await closeDialog(page, { save: false });
@@ -94,6 +71,7 @@ for (const theme of THEMES) {
       await openNodeDialog(page, 'e2e-pub');
       await openConnectionDialog(page);
       await expect(page.locator('#node-config-dialog-ok')).toBeVisible();
+      await expect(page.locator('.red-ui-tray-content .input-error')).toHaveCount(0);
       await assertNoHorizontalOverflow(page);
       await page.screenshot({
         path: screenshotPath(`dapr-connection-${theme}-${viewport.name}`),

@@ -5,13 +5,15 @@ live in `AGENTS.md`; test tiers in `docs/testing.md`.
 
 ## Prerequisites
 
-- Node.js >= 22.13 **to develop**, though the package itself supports >= 22.9.
+- Node.js 22.22+ on the 22.x line, or 24.8+ **to develop**, though the package itself supports >= 22.9.
   `engines.node` is the consumer contract and matches Node-RED 5.0.1's own floor;
-  ESLint 10 is stricter (`^20.19.0 || ^22.13.0 || >=24`), so `npm run lint` needs
-  22.13+. Only contributors on 22.9–22.12 are affected — devDependencies are never
-  installed by consumers, and CI's `node-version: '22'` resolves to the latest
-  22.x. CI runs the unit, coverage, lint, format, and runtime tiers on Node 22,
-  24, and 26.
+  the dev toolchain is stricter than that floor, and `npm run lint` needs the
+  strictest of the two: ESLint 10 declares `^20.19.0 || ^22.13.0 || >=24` and
+  `html-validate` 11 declares `^22.22.0 || >=24.8.0`, so 22.22 is the actual
+  Node 22 floor to lint locally. Contributors on 22.9–22.21, 23.x, or 24.0–24.7 need a supported version —
+  devDependencies are never installed by consumers, and CI's `node-version: '22'`
+  resolves to the latest 22.x (well past both floors). CI runs the unit,
+  coverage, lint, format, and runtime tiers on Node 22, 24, and 26.
 - Docker (only for the integration tier — real daprd + Redis or NATS JetStream).
 
 ## Setup

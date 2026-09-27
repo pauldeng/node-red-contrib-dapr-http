@@ -33,7 +33,7 @@ const listTests = (dir) =>
 const PROVEN_BY_REAL_DAPRD = {
   healthz: 'shutdown.test.js',
   publish: 'nats-pubsub.test.js',
-  invoke: 'invoke.test.js',
+  invoke: 'invoke-matrix.test.js',
   state: 'state.test.js',
   configuration: 'configuration.test.js',
   bindings: 'binding-out.test.js',

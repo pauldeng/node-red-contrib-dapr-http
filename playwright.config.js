@@ -1,5 +1,12 @@
 'use strict';
 
+// Playwright forces FORCE_COLOR=1 in its workers. Preserve a caller's no-colour
+// preference through its supported FORCE_COLOR=0 setting, without conflicting flags.
+if (process.env.NO_COLOR !== undefined) {
+  process.env.FORCE_COLOR = '0';
+  delete process.env.NO_COLOR;
+}
+
 const { defineConfig, devices } = require('@playwright/test');
 
 // Each spec starts its own real Node-RED process (test/helpers/node-red.js)

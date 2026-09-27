@@ -33,7 +33,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const DAPRD_IMAGE =
   'daprio/daprd:1.18.4@sha256:1e218523a15be5be5f36d64aa33a40cbde8fbe963ba6122d42d9c9de5b24a372';
 const REDIS_IMAGE =
-  'redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99';
+  'redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0';
 const PLACEMENT_IMAGE =
   'daprio/placement:1.18.4@sha256:ec614eefbf6dd8153adc8163f67486092debc50c5fe8eedf48cfe2295e9e17e3';
 const SCHEDULER_IMAGE =

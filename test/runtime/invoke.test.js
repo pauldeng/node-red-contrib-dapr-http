@@ -393,18 +393,22 @@ test(
       { id: 'res', type: 'http response', z: 'tab' },
     ];
     await nr.deploy(flow);
-    // Poll-fire /go until one triggers an invoke that reaches the sidecar (the
-    // http-in route goes live a moment after deploy). Each fired request hangs
-    // because the sidecar never replies.
-    await waitFor(async () => {
-      httpRequest(nr.nodeUrl('/go'), { timeoutMs: 6000 }).catch(() => {});
-      await delay(100);
-      return dapr.requests.some((r) => r.path === '/v1.0/invoke/hang/method/wait') ? true : null;
-    });
-    assert.equal(aborted.hasFired, false); // still in flight
-
-    await nr.deploy(flow); // redeploy closes the invoke node → aborts the call
+    await dapr.waitForRequest(healthPath);
+    const caller = new AbortController();
+    t.after(() => caller.abort());
+    const pending = (async () => {
+      try {
+        await httpRequest(nr.nodeUrl('/go'), { timeoutMs: 6000, signal: caller.signal });
+      } catch {
+        // This test owns the caller; the old HTTP response node was removed.
+      }
+    })();
+    await dapr.waitForRequest('/v1.0/invoke/hang/method/wait');
+    assert.equal(aborted.hasFired, false);
+    await nr.deploy(flow);
     await aborted.fired;
+    caller.abort();
+    await pending;
     assert.equal(aborted.hasFired, true);
   }
 );

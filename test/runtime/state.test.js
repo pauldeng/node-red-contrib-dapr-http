@@ -4,10 +4,11 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { NodeRed, freePort } = require('../helpers/node-red');
+const { createRuntimeFixture } = require('../helpers/runtime-fixture');
+const useRuntime = createRuntimeFixture();
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
 const { createSignal } = require('../helpers/signal');
-const { setTimeout: delay } = require('node:timers/promises');
 
 const healthPath = '/v1.0/healthz/outbound';
 const STORE = 'orders-store';
@@ -87,16 +88,18 @@ function stateFlow({ appPort, daprPort }) {
   ];
 }
 
-function post(nr, dapr, payload) {
+function post(nr, dapr, payload, signal) {
   return httpRequest(nr.nodeUrl('/state'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ dapr, payload }),
     timeoutMs: 5000,
+    signal,
   });
 }
 
-async function startFlow(t, respondents = []) {
+async function startFlow(t, respondents = [], { fresh = false } = {}) {
+  const nr = await useRuntime(t, { fresh });
   const dapr = await createFakeDaprStarted();
   t.after(() => dapr.stop());
   dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
@@ -104,13 +107,9 @@ async function startFlow(t, respondents = []) {
     dapr.respond(method, path, responder);
   }
 
-  const nr = new NodeRed();
-  await nr.start();
-  t.after(() => nr.stop());
   const appPort = await freePort();
   await nr.deploy(stateFlow({ appPort, daprPort: dapr.port }));
   await dapr.waitForRequest(healthPath);
-  await delay(50);
   return { dapr, nr, appPort };
 }
 
@@ -297,23 +296,29 @@ test(
   { timeout: 60000 },
   async (t) => {
     const aborted = createSignal();
-    const { dapr, nr, appPort } = await startFlow(t, [
+    const { dapr, nr, appPort } = await startFlow(
+      t,
       [
-        'GET',
-        getPath('hang'),
-        (_req, res) => {
-          res.on('close', () => {
-            if (!res.writableEnded) {
-              aborted.fire();
-            }
-          });
-        },
+        [
+          'GET',
+          getPath('hang'),
+          (_req, res) => {
+            res.on('close', () => {
+              if (!res.writableEnded) {
+                aborted.fire();
+              }
+            });
+          },
+        ],
       ],
-    ]);
+      { fresh: true }
+    );
 
+    const caller = new AbortController();
+    t.after(() => caller.abort());
     const pending = (async () => {
       try {
-        await post(nr, { operation: 'get', key: 'hang' });
+        await post(nr, { operation: 'get', key: 'hang' }, undefined, caller.signal);
       } catch {
         // Redeploy intentionally interrupts this request.
       }
@@ -323,6 +328,8 @@ test(
 
     await nr.deploy(stateFlow({ appPort, daprPort: dapr.port }));
     await aborted.fired;
+    // The node has proved cancellation; the removed HTTP response node cannot answer.
+    caller.abort();
     await pending;
     assert.equal(aborted.hasFired, true);
   }

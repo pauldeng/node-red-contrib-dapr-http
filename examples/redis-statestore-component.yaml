@@ -6,7 +6,7 @@
 #
 # Redis must be running and reachable before daprd starts:
 #
-#   docker run -d -p 6379:6379 redis:7.4-alpine
+#   docker run -d -p 6379:6379 redis:8.10-alpine
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:

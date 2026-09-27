@@ -14,7 +14,10 @@ function closeHttpServer(server) {
 // process alive after tests, and the timer bounds a socket that connects but
 // never replies (a socket-inactivity timeout would reset on a slow trickle).
 // Resolves { status, headers, text }.
-function httpRequest(urlStr, { method = 'GET', headers = {}, body, timeoutMs = 30000 } = {}) {
+function httpRequest(
+  urlStr,
+  { method = 'GET', headers = {}, body, timeoutMs = 30000, signal } = {}
+) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr);
     const req = http.request(
@@ -25,6 +28,7 @@ function httpRequest(urlStr, { method = 'GET', headers = {}, body, timeoutMs = 3
         method,
         headers,
         agent: false,
+        signal,
       },
       (res) => {
         const chunks = [];

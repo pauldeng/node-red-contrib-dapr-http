@@ -205,6 +205,8 @@ test(
   { timeout: 120000 },
   async (t) => {
     const events = new EventEmitter();
+    // Every pending waitForEvent (one per reminder id) adds an 'error' listener.
+    events.setMaxListeners(REMINDER_COUNT);
     const requests = [];
 
     const hostA = await startHost('A', events, requests);

@@ -86,13 +86,13 @@ metadata, dead-letter topic, raw-payload mode, CEL rules, or bulk settings.
   back with a separate `dapr-state` (get) node. It needs
   `redis-statestore-component.yaml` (or another Dapr state-store component
   named `statestore`), started the same way as this quickstart's Redis
-  pub/sub option: `docker run -d -p 6379:6379 redis:7.4-alpine`.
+  pub/sub option: `docker run -d -p 6379:6379 redis:8.10-alpine`.
 - `dynamic-configuration.json` reads and watches `featureFlag` in a Redis
   configuration store named `configstore`. Redis keyspace notifications must
   be enabled for change delivery:
 
   ```bash
-  docker run -d -p 6379:6379 redis:7.4-alpine \
+  docker run -d -p 6379:6379 redis:8.10-alpine \
     redis-server --notify-keyspace-events KEA
   ```
 
@@ -248,7 +248,7 @@ resource directory with exactly one actor state-store component:
 ```bash
 mkdir -p components-actors
 cp examples/redis-actorstore-component.yaml components-actors/actorstore.yaml
-docker run -d --rm --name nrdapr-example-redis -p 127.0.0.1:6379:6379 redis:7.4-alpine
+docker run -d --rm --name nrdapr-example-redis -p 127.0.0.1:6379:6379 redis:8.10-alpine
 docker run -d --rm --name nrdapr-example-placement \
   -p 127.0.0.1:50005:50005 \
   daprio/placement:1.18.4@sha256:ec614eefbf6dd8153adc8163f67486092debc50c5fe8eedf48cfe2295e9e17e3 \

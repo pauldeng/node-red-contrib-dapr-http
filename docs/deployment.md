@@ -33,7 +33,7 @@ namespace so both share `127.0.0.1`:
 ```yaml
 services:
   node-red:
-    image: nodered/node-red:5.0.1-24@sha256:6cb1b27fa5a83deec6a662db62eec8bb32e55ac5412d6b7a653e874ce62055d5
+    image: nodered/node-red:5.0.7-24@sha256:a649dd711d55490151a2c39a8e48ad0c44325488fbc0e66315f2d2e19e5e1ace
     ports:
       - '1880:1880'
   daprd:
