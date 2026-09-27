@@ -33,12 +33,12 @@ const listTests = (dir) =>
 const PROVEN_BY_REAL_DAPRD = {
   healthz: 'shutdown.test.js',
   publish: 'nats-pubsub.test.js',
-  invoke: 'invoke-matrix.test.js',
+  invoke: 'dapr-building-blocks.test.js',
   state: 'state.test.js',
   configuration: 'configuration.test.js',
-  bindings: 'binding-out.test.js',
-  secrets: 'secret-get.test.js',
-  metadata: 'metadata.test.js',
+  bindings: 'dapr-building-blocks.test.js',
+  secrets: 'dapr-building-blocks.test.js',
+  metadata: 'dapr-building-blocks.test.js',
   actors: 'actors.test.js',
 };
 

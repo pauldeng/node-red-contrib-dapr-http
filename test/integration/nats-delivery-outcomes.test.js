@@ -1,8 +1,9 @@
 'use strict';
 
 // Two real-daprd-specific delivery outcomes not covered by
-// nats-pubsub.test.js, retry.test.js, or dead-letter.test.js: an explicit
-// DROP (no redelivery, no dead-letter needed), and our own ack-timeout
+// nats-pubsub.test.js, retry.test.js, or pubsub.test.js's dead-letter
+// scenario: an explicit DROP (no redelivery, no dead-letter needed), and our
+// own ack-timeout
 // firing RETRY without the flow ever calling dapr-ack — both need to
 // observe REAL daprd's redelivery behavior (or absence of it), which a fake
 // sidecar can't prove. Moved from Redis to NATS JetStream per Milestone 3's
@@ -149,7 +150,7 @@ return msg;`,
       streamName: 'nrdapr-it',
     });
     // Without a Resiliency retry policy, real daprd gives a failing delivery
-    // exactly ONE attempt and never redelivers it (matching dead-letter.test.js's
+    // exactly ONE attempt and never redelivers it (matching pubsub.test.js's dead-letter scenario's
     // "no retry policy" finding) — the no-ack scenario below needs the SAME
     // fixture retry.test.js uses, or its own timeout-driven RETRY would just
     // be the message's only attempt. DROP is unaffected: it's a terminal
