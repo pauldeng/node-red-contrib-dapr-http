@@ -481,3 +481,86 @@ string `errorCode`/`message` from Dapr, capped at 128/2048 characters. Node-RED
 5's Catch preserves this as `msg.error.cause`. Dapr's message can contain an
 actor fail envelope, but its wording is remote diagnostic text, not a stable
 business-error protocol; it is never automatically echoed by the actor host.
+
+### Actor observability
+
+**Spans.** `lib/actor-host.js`'s `invoke()` opens exactly one SERVER span per
+handled invocation (method or reminder) — including a busy rejection, so
+every admission decision is observable — parented on a valid extracted
+`traceparent`/`tracestate` from the callback's own headers, or a fresh root
+when that header is missing or malformed (`propagation.extract` against
+`ROOT_CONTEXT`, never the ambient `context.active()`, which an HTTP server
+callback cannot be trusted to have left clean). Named `actor <type>.<method>`
+or `actor <type> reminder` — deliberately never carrying an actor id or a
+reminder name, mirroring the same rule dapr-secret-get's span already
+follows for a secret key. Attributes: `rpc.system`, `dapr.actor.type`,
+`dapr.actor.method` (the reminder's own name for a reminder trigger),
+`dapr.actor.trigger` (`method`/`reminder`), `dapr.actor.outcome` (`OK` or an
+internal code — `ACTOR_BUSY`, `ACTOR_REPLY_EXPIRED`, `ACTOR_COMMIT_UNKNOWN`,
+`ACTOR_REPLY_FAILED`, `ABORTED`, or a client/state error code), and
+`dapr.actor.id` as a bounded attribute only. The state read and the
+save/delete commit each open a child CLIENT span, explicitly parented off the
+server span's captured context. The entire asynchronous handler runs inside
+`context.with(trace.setSpan(parentContext, span), ...)`, including state
+calls and resumption after a detached reply. Flow emission inherits that
+context, so Node-RED flow spans nest under the server span and cannot inherit
+an unrelated ambient request. Both child calls inject their own `traceparent`
+onto the outbound sidecar request. The outer `invoke()` wrapper ends the
+server span on success or failure; an in-flight commit's span, like its request,
+stays open until `whenCommitsSettled()` lets it finish. `dapr-actor-call` and
+`dapr-actor-schedule` open their own CLIENT span the same way
+`dapr-invoke.js` does, named `actor <type>.<method>` / `actor <type>.<set|
+get|delete>` — again never the actor id.
+
+**Diagnostics.** Three bounded, `[EVENT_CODE] ...` `node.warn()` lines — actor
+type and method/trigger only, never an id, payload, or token —
+rate-limited per connection per code by `lib/warn-throttle.js` (one small
+record per code; at most one emission per 60s, the next one reporting how
+many were suppressed in between): `ACTOR_COMMIT_UNKNOWN` (from
+`lib/actor-host.js`, at the exact point a transport failure leaves a commit's
+outcome unknown), `ACTOR_TOMBSTONE_HIT` (from `lib/app-channel.js`, when a
+request actually lands on a tombstoned actor pair/type), and
+`ACTOR_DRAIN_BACKSTOP` (from `nodes/dapr-connection.js`'s close handler, when
+`actorHost.whenCommitsSettled()` — which now returns whether its bounded
+backstop fired, rather than a caller inferring that from elapsed time — says
+so). Every diagnostic callback is invoked inside its own `try`/`catch` at the
+call site, so a throwing or absent logger can never change a request's
+outcome.
+
+**Connection status.** `dapr-actor-method` shows the count of admitted
+(including still-committing) handlers for its own `(actorType, method)`
+registration as `listening · N active`, sourced from `lib/actor-host.js`'s
+`watchActive()` (a bounded per-registration listener set, pushed on every
+admit/settle) and rendered through `lib/status-throttle.js` — a generic
+"push at most once per interval, coalescing bursts to the latest value"
+helper, so a return to zero is never dropped. One owned timer per node,
+cleared on close; an unchanged displayed count is not published again.
+Once (and only once) any actor method is registered, the
+connection's _existing_ health-poll cycle also fetches `GET /v1.0/metadata`
+(`lib/metadata-client.js`, extended to curate `actorRuntime`'s three verified
+fields — `runtimeStatus`, `hostReady`, `placement` — as a field _sibling_ to
+the already-curated `data`, never merged into it, so this detail cannot leak
+through the unrelated `dapr-connection.read` "Test Connection" admin route,
+which only ever spreads `.data`). No new timer, and the fetch is
+fire-and-forget from the poll — it never delays that poll's own reschedule,
+and ordinary pub/sub/service traffic never depends on it either way.
+`lib/connection-status.js`'s `actorRuntimeWarningText()` turns that curated
+reading into `actors: host not ready` / `actors: placement disconnected` /
+`actors: runtime status unknown`, treating a missing or unrecognized field as
+unknown, never healthy; `null` only once `hostReady: true` and a placement
+string actually reporting `connected` are both confirmed. Status precedence
+(each already-returned tier still wins): invalid config or listen failure →
+sidecar unavailable → a subscription or actor-type restart required → the
+actor warning → plain `connected`. The warning is gated on whether any actor
+method is _currently_ registered, so it disappears the moment the last one
+is removed, regardless of whatever stale reading preceded that.
+
+Actor readiness polling is owned by `lib/actor-runtime-monitor.js`. A change
+of advertised actor types or an unhealthy sidecar clears the last reading
+and aborts its fetch. A late response cannot restore that stale reading,
+even if the original types have since been registered again. Close cancels
+the fetch and prevents subsequent status updates. Only the pinned runtime's
+exact Placement connected/disconnected values (from
+[`RuntimeStatus()`](https://github.com/dapr/dapr/blob/v1.18.4/pkg/actors/actors.go#L612))
+establish that state; absent
+or unrecognized values remain unknown.

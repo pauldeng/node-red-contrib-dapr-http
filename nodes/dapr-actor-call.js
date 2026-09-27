@@ -1,9 +1,12 @@
 'use strict';
 
+const { context, propagation, trace, SpanKind } = require('@opentelemetry/api');
+
 const { invoke } = require('../lib/actor-client');
 const { validateActorSegment } = require('../lib/actor-messages');
 const { DaprError, ErrorCodes } = require('../lib/errors');
 const { requireConnection, openSidecarSession } = require('../lib/sidecar-session');
+const { getTracer, endSpan } = require('../lib/telemetry');
 
 // Invokes an actor method through the local sidecar (lib/actor-client.js) and
 // replaces msg.payload with the result. Each property PRESENT on
@@ -86,10 +89,37 @@ module.exports = function registerDaprActorCall(RED) {
         }
       }
 
+      // With tracing disabled the provider returns a no-op span; no branch of
+      // its own here, mirroring nodes/dapr-invoke.js's own client span.
+      const span = getTracer().startSpan(
+        `actor ${actorType}.${method}`,
+        {
+          kind: SpanKind.CLIENT,
+          attributes: { 'rpc.system': 'dapr', 'dapr.actor.type': actorType, 'rpc.method': method },
+        },
+        context.active()
+      );
+      const headers = {};
+      propagation.inject(trace.setSpan(context.active(), span), headers);
+
+      let result;
       try {
-        const result = await session.call((transportOptions) =>
-          invoke(transportOptions, { actorType, actorId, method, body })
+        result = await session.call((transportOptions) =>
+          invoke({ ...transportOptions, headers }, { actorType, actorId, method, body })
         );
+        span.setAttribute('http.response.status_code', result.status);
+        endSpan(span);
+      } catch (err) {
+        endSpan(span, err);
+        done(
+          err instanceof DaprError
+            ? err
+            : new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, err.message, { cause: err })
+        );
+        return;
+      }
+
+      try {
         if (result.body.length === 0) {
           msg.payload = undefined;
         } else {
@@ -109,7 +139,7 @@ module.exports = function registerDaprActorCall(RED) {
         done(
           err instanceof DaprError
             ? err
-            : new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, err.message, { cause: err })
+            : new DaprError(ErrorCodes.INVALID_MESSAGE, err.message, { cause: err })
         );
       }
     });

@@ -368,6 +368,62 @@ test('a whole actor type left with no method stays retryable even once actorConf
   assert.equal(other.status, 404);
 });
 
+// ---- milestone 6: observability -- tombstone-hit diagnostic ---------------
+
+test('a tombstone hit reports ACTOR_TOMBSTONE_HIT through onActorDiagnostic, bounded to type/method', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  const events = [];
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'GetMyData' }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+    onActorDiagnostic: (code, detail) => events.push({ code, detail }),
+  });
+  // Drop the method -- tombstoned -- but keep the same onActorDiagnostic.
+  lease.activate({
+    actorConfig: null,
+    actorMethodPairs: [],
+    getActorHandler: () => undefined,
+    onActorDiagnostic: (code, detail) => events.push({ code, detail }),
+  });
+
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/GetMyData'), {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 503);
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0], {
+    code: 'ACTOR_TOMBSTONE_HIT',
+    detail: { actorType: 'DemoActor', method: 'GetMyData' },
+  });
+});
+
+test('a throwing onActorDiagnostic never changes the tombstoned response', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    actorConfig: actorConfig(),
+    actorMethodPairs: [{ actorType: 'DemoActor', method: 'GetMyData' }],
+    getActorHandler: () => () => {},
+    actorInvoke: async () => ({ status: 200 }),
+  });
+  lease.activate({
+    actorConfig: null,
+    actorMethodPairs: [],
+    getActorHandler: () => undefined,
+    onActorDiagnostic: () => {
+      throw new Error('logger exploded');
+    },
+  });
+
+  const res = await httpRequest(url(port, '/actors/DemoActor/a/method/GetMyData'), {
+    method: 'PUT',
+  });
+  assert.equal(res.status, 503, 'a throwing diagnostic must never change the response');
+});
+
 test('a real registration wins its tombstone back', async (t) => {
   const port = await freePort();
   const lease = await acquire(t, { port });

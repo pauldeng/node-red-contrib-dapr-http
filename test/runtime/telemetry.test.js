@@ -461,3 +461,123 @@ test(
     );
   }
 );
+
+test(
+  'dapr-actor-call injects a real W3C traceparent once a connection enables tracing',
+  { timeout: 60000 },
+  async (t) => {
+    const dapr = await createFakeDaprStarted();
+    t.after(() => dapr.stop());
+    dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
+    const actorInvokePath = '/v1.0/actors/Order/o1/method/Ping';
+    dapr.respond('POST', actorInvokePath, (_req, res) => res.writeHead(200).end());
+
+    const nr = new NodeRed();
+    await nr.start({ env: { OTEL_TRACES_SAMPLER: 'always_on' } });
+    t.after(() => nr.stop());
+    const appPort = await freePort();
+
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'actor-call-telemetry' },
+      {
+        id: 'c1',
+        type: 'dapr-connection',
+        daprHost: '127.0.0.1',
+        daprPort: String(dapr.port),
+        bindAddress: '127.0.0.1',
+        appPort: String(appPort),
+        tracingEnabled: true,
+      },
+      { id: 'in', type: 'http in', z: 'tab', url: '/call', method: 'post', wires: [['call']] },
+      {
+        id: 'call',
+        type: 'dapr-actor-call',
+        z: 'tab',
+        connection: 'c1',
+        actorType: 'Order',
+        actorId: 'o1',
+        method: 'Ping',
+        wires: [['res']],
+      },
+      { id: 'res', type: 'http response', z: 'tab' },
+    ]);
+    await dapr.waitForRequest(healthPath);
+    // The health probe landing is not the same event as the connection
+    // having processed and marked itself healthy -- wait on the real
+    // "sidecar is available" log line rather than a fixed settle.
+    await nr.waitForLog(/Dapr sidecar is available/i);
+
+    const response = await httpRequest(nr.nodeUrl('/call'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+      timeoutMs: 5000,
+    });
+    assert.equal(response.status, 200);
+
+    const invoked = dapr.requests.filter((request) => request.path === actorInvokePath).at(-1);
+    assert.match(invoked.headers.traceparent, TRACEPARENT_RE);
+  }
+);
+
+test(
+  'dapr-actor-schedule injects a real W3C traceparent once a connection enables tracing',
+  { timeout: 60000 },
+  async (t) => {
+    const dapr = await createFakeDaprStarted();
+    t.after(() => dapr.stop());
+    dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
+    const reminderPath = '/v1.0/actors/Order/o1/reminders/wake';
+    dapr.respond('POST', reminderPath, (_req, res) => res.writeHead(204).end());
+
+    const nr = new NodeRed();
+    await nr.start({ env: { OTEL_TRACES_SAMPLER: 'always_on' } });
+    t.after(() => nr.stop());
+    const appPort = await freePort();
+
+    await nr.deploy([
+      { id: 'tab', type: 'tab', label: 'actor-schedule-telemetry' },
+      {
+        id: 'c1',
+        type: 'dapr-connection',
+        daprHost: '127.0.0.1',
+        daprPort: String(dapr.port),
+        bindAddress: '127.0.0.1',
+        appPort: String(appPort),
+        tracingEnabled: true,
+      },
+      { id: 'in', type: 'http in', z: 'tab', url: '/set', method: 'post', wires: [['sched']] },
+      {
+        id: 'sched',
+        type: 'dapr-actor-schedule',
+        z: 'tab',
+        connection: 'c1',
+        operation: 'set',
+        actorType: 'Order',
+        actorId: 'o1',
+        scheduleName: 'wake',
+        dueTime: '5s',
+        period: '',
+        ttl: '',
+        wires: [['res']],
+      },
+      { id: 'res', type: 'http response', z: 'tab' },
+    ]);
+    await dapr.waitForRequest(healthPath);
+    // The health probe landing is not the same event as the connection
+    // having processed and marked itself healthy -- wait on the real
+    // "sidecar is available" log line rather than a fixed settle.
+    await nr.waitForLog(/Dapr sidecar is available/i);
+
+    const response = await httpRequest(nr.nodeUrl('/set'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+      timeoutMs: 5000,
+    });
+    assert.equal(response.status, 200);
+
+    const set = dapr.requests.filter((request) => request.path === reminderPath).at(-1);
+    assert.match(set.headers.traceparent, TRACEPARENT_RE);
+  }
+);

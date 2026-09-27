@@ -20,6 +20,9 @@
 // actor type, named on each invocation by msg.dapr.actor.trigger.name
 // (lib/actor-host.js sets this from the parsed route, never from the
 // reminder callback's body).
+const { REMINDER_METHOD } = require('../lib/actor-messages');
+const { createThrottledPusher } = require('../lib/status-throttle');
+
 module.exports = function registerDaprActorMethod(RED) {
   function DaprActorMethodNode(config) {
     RED.nodes.createNode(this, config);
@@ -53,10 +56,38 @@ module.exports = function registerDaprActorMethod(RED) {
       node.error(err.message);
       return;
     }
-    node.status({ fill: 'green', shape: 'dot', text: 'listening' });
+    // The number of admitted (including still-committing) handlers for THIS
+    // node's own registration, pushed on change but at most once a second
+    // (lib/status-throttle.js), including the final return to zero. One
+    // owned timer at most, cleared on close below; no per-message status
+    // churn and no idle timer while nothing is active.
+    let unwatch;
+    if (typeof connection.watchActorActive === 'function') {
+      const registryMethod = isReminder ? REMINDER_METHOD : config.method;
+      const throttle = createThrottledPusher({
+        render: (count) =>
+          node.status(
+            count > 0
+              ? { fill: 'green', shape: 'dot', text: `listening · ${count} active` }
+              : { fill: 'green', shape: 'dot', text: 'listening' }
+          ),
+      });
+      const stopWatching = connection.watchActorActive(
+        definition.actorType,
+        registryMethod,
+        (count) => throttle.push(count)
+      );
+      unwatch = () => {
+        throttle.close();
+        stopWatching();
+      };
+    }
 
     node.on('close', (_removed, done) => {
       unregister();
+      if (unwatch) {
+        unwatch();
+      }
       done();
     });
   }

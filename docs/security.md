@@ -133,7 +133,12 @@ stored options; unsaved form fields and credentials are never sent to it. Its
 response contains only bounded app/runtime text, at most 20 bounded component
 names/types, and total component/subscription counts. Dapr's arbitrary
 top-level `extended` metadata, component capabilities/version, raw body, API
-token, configuration, and raw errors are excluded. Closing the dialog or
+token, configuration, and raw errors are excluded — as is the `actorRuntime`
+block the connection's own actor-readiness status polls (see
+`docs/architecture.md`'s "Actor observability"): `lib/metadata-client.js`
+returns it as a field _sibling_ to the curated response this route spreads,
+never merged into it, so it structurally cannot reach this endpoint. Closing
+the dialog or
 redeploying the connection aborts the sidecar request.
 
 ## Request limits

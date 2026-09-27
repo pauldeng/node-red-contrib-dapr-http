@@ -3,10 +3,40 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { setImmediate: tick, setTimeout: delay } = require('node:timers/promises');
+const { trace, context, propagation, SpanStatusCode } = require('@opentelemetry/api');
+const {
+  NodeTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+  AlwaysOnSampler,
+} = require('@opentelemetry/sdk-trace-node');
 
 const { createActorHost } = require('../../lib/actor-host');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 const { FIXED_LIMITS } = require('../../lib/options');
+
+// Registers a real, in-memory-exported tracer as the process-wide provider
+// (lib/telemetry.js's getTracer() resolves whatever is globally registered),
+// runs `fn(exporter)`, then tears the registration down -- the same
+// register()/disable() pattern test/unit/telemetry.test.js's own
+// "flow hooks use the current tracer..." test uses, applied here to actor
+// spans instead of node spans.
+async function withTracing(fn) {
+  const exporter = new InMemorySpanExporter();
+  const provider = new NodeTracerProvider({
+    sampler: new AlwaysOnSampler(),
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  provider.register();
+  try {
+    await fn(exporter);
+  } finally {
+    trace.disable();
+    context.disable();
+    propagation.disable();
+    await provider.shutdown();
+  }
+}
 
 function limits(over = {}) {
   return {
@@ -52,12 +82,12 @@ function commitCountingClient(kind, impl) {
   return fakeClient({ [COMMIT_KINDS[kind].commitKey]: impl });
 }
 
-function makeCtx({ body = Buffer.alloc(0), deadlineAt, aborted = false } = {}) {
+function makeCtx({ body = Buffer.alloc(0), deadlineAt, aborted = false, headers } = {}) {
   const controller = new AbortController();
   if (aborted) {
     controller.abort();
   }
-  return { body, signal: controller.signal, deadlineAt, controller };
+  return { body, signal: controller.signal, deadlineAt, controller, headers };
 }
 
 test('a read finishing after the flow deadline never emits or commits', async () => {
@@ -527,7 +557,7 @@ for (const kind of Object.keys(COMMIT_KINDS)) {
     assert.equal(race, 'not-yet', 'whenCommitsSettled must not resolve before the commit does');
     assert.equal(commitCalls, 1);
     commitGate.resolve();
-    await settled; // now resolves promptly once the commit settles
+    assert.equal(await settled, false, 'the commit settled on its own; the backstop never fired');
     const result = await promise;
     assert.equal(result.status, 200);
     assert.equal(result.body, '"ok"');
@@ -550,7 +580,9 @@ test('a handler still waiting for a proposal at drain gets 503 and never commits
   const result = await promise;
   assert.equal(result.status, 503);
   assert.equal(saveCalls, 0);
-  await host.whenCommitsSettled(); // nothing committing -- must resolve immediately, not wait out drainTimeoutMs
+  // Nothing committing -- must resolve immediately, not wait out
+  // drainTimeoutMs, and report no backstop.
+  assert.equal(await host.whenCommitsSettled(), false);
 });
 
 test('an invocation admitted after drain() is rejected without evaluating, and never commits', async () => {
@@ -564,7 +596,7 @@ test('an invocation admitted after drain() is rejected without evaluating, and n
     ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
   });
   assert.equal(result.status, 503);
-  await host.whenCommitsSettled();
+  assert.equal(await host.whenCommitsSettled(), false);
 });
 
 test('a replayed request for an already-active actor is rejected busy with no second read and no second commit', async () => {
@@ -658,6 +690,7 @@ test('whenCommitsSettled is bounded by drainTimeoutMs when a commit never settle
     ]);
     assert.notEqual(result, 'timed-out', 'must not wait indefinitely for a stalled commit');
     assert.ok(Date.now() - start >= 450, 'must wait for the drain backstop');
+    assert.equal(result, true, 'whenCommitsSettled reports that the backstop fired');
   } finally {
     deadline.abort();
     stuck.resolve();
@@ -882,4 +915,535 @@ test('an ordinary (non-reminder) method invocation parses its body as the raw ar
   assert.deepEqual(received.payload, [1, 2, 3]);
   assert.equal(received.dapr.actor.method, 'GetMyData');
   assert.equal('trigger' in received.dapr.actor, false);
+});
+
+// ---- milestone 6: observability -- spans -----------------------------------
+
+const VALID_TRACEPARENT = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+
+function findSpan(exporter, name) {
+  return exporter.getFinishedSpans().find((s) => s.name === name);
+}
+
+test('a valid traceparent header parents the server span', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const ctx = makeCtx({
+      deadlineAt: Date.now() + 100000,
+      headers: { traceparent: VALID_TRACEPARENT },
+    });
+    const result = await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx,
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' }),
+    });
+    assert.equal(result.status, 200);
+    const span = findSpan(exporter, 'actor T.M');
+    assert.ok(span, 'expected a server span named "actor T.M"');
+    assert.equal(span.spanContext().traceId, VALID_TRACEPARENT.split('-')[1]);
+    assert.equal(span.parentSpanContext.spanId, VALID_TRACEPARENT.split('-')[2]);
+    assert.equal(span.kind, 1 /* SpanKind.SERVER */);
+    assert.equal(span.attributes['rpc.system'], 'dapr');
+    assert.equal(span.attributes['dapr.actor.type'], 'T');
+    assert.equal(span.attributes['dapr.actor.method'], 'M');
+    assert.equal(span.attributes['dapr.actor.trigger'], 'method');
+    assert.equal(span.attributes['dapr.actor.id'], 'a');
+    assert.equal(span.attributes['dapr.actor.outcome'], 'OK');
+    assert.equal(span.status.code, SpanStatusCode.OK);
+    assert.equal('id' in span.attributes, false);
+  });
+});
+
+test('a missing traceparent starts a fresh root span', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const ctx = makeCtx({ deadlineAt: Date.now() + 100000 });
+    await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx,
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' }),
+    });
+    const span = findSpan(exporter, 'actor T.M');
+    assert.equal(span.parentSpanContext, undefined);
+  });
+});
+
+test('a malformed traceparent starts a fresh root span, never crashes', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const ctx = makeCtx({
+      deadlineAt: Date.now() + 100000,
+      headers: { traceparent: 'not-a-real-traceparent' },
+    });
+    const result = await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx,
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' }),
+    });
+    assert.equal(result.status, 200);
+    const span = findSpan(exporter, 'actor T.M');
+    assert.equal(span.parentSpanContext, undefined);
+  });
+});
+
+test('a reminder trigger names the span without the reminder name, and reports it as an attribute', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const ctx = makeCtx({ deadlineAt: Date.now() + 100000 });
+    await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'remind/',
+      trigger: { kind: 'reminder', name: 'nightly' },
+      ctx,
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' }),
+    });
+    const span = findSpan(exporter, 'actor T reminder');
+    assert.ok(span, 'expected a span named "actor T reminder" with no reminder name in it');
+    assert.equal(span.attributes['dapr.actor.method'], 'nightly');
+    assert.equal(span.attributes['dapr.actor.trigger'], 'reminder');
+    assert.equal(
+      exporter.getFinishedSpans().some((s) => s.name.includes('nightly')),
+      false
+    );
+  });
+});
+
+test('the entire asynchronous actor turn runs in its server context, isolated from ambient context', async () => {
+  await withTracing(async (exporter) => {
+    const ambient = trace.getTracer('test').startSpan('unrelated');
+    const seen = [];
+    const observe = async () => {
+      await tick();
+      seen.push(trace.getSpan(context.active())?.spanContext().spanId);
+    };
+    const client = fakeClient({
+      readRecord: async () => {
+        await observe();
+        return { exists: false };
+      },
+      saveRecord: observe,
+    });
+    const host = createActorHost({ limits: limits(), client });
+    await context.with(trace.setSpan(context.active(), ambient), () =>
+      host.invoke({
+        actorType: 'T',
+        actorId: 'a',
+        method: 'M',
+        ctx: makeCtx({
+          deadlineAt: Date.now() + 100000,
+          headers: { traceparent: VALID_TRACEPARENT },
+        }),
+        emit: (msg) => host.settleActorReply(msg.dapr.actorRequestId, commitProposal('save')),
+      })
+    );
+    ambient.end();
+    const server = findSpan(exporter, 'actor T.M');
+    assert.deepEqual(seen, [server.spanContext().spanId, server.spanContext().spanId]);
+  });
+});
+
+test('the state read and commit are CLIENT child spans of the server span', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const ctx = makeCtx({ deadlineAt: Date.now() + 100000 });
+    await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx,
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, {
+          outcome: 'complete',
+          responseJson: '1',
+          nextStateJson: '{}',
+        }),
+    });
+    const server = findSpan(exporter, 'actor T.M');
+    const read = findSpan(exporter, 'actor state read');
+    const save = findSpan(exporter, 'actor state save');
+    assert.ok(read && save, 'expected both a read and a save child span');
+    assert.equal(read.kind, 2 /* SpanKind.CLIENT */);
+    assert.equal(save.kind, 2);
+    assert.equal(read.parentSpanContext.spanId, server.spanContext().spanId);
+    assert.equal(save.parentSpanContext.spanId, server.spanContext().spanId);
+    assert.equal(read.spanContext().traceId, server.spanContext().traceId);
+  });
+});
+
+test('a delete commit opens an "actor state delete" child span, not "save"', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const ctx = makeCtx({ deadlineAt: Date.now() + 100000 });
+    await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx,
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, {
+          outcome: 'complete',
+          responseJson: '1',
+          deleteState: true,
+        }),
+    });
+    assert.ok(findSpan(exporter, 'actor state delete'));
+    assert.equal(findSpan(exporter, 'actor state save'), undefined);
+  });
+});
+
+test('the state read injects a traceparent onto the sidecar request', async () => {
+  await withTracing(async () => {
+    let capturedHeaders;
+    const client = fakeClient({
+      readRecord: async (opts) => {
+        capturedHeaders = opts.headers;
+        return { exists: false };
+      },
+    });
+    const host = createActorHost({ limits: limits(), client });
+    const ctx = makeCtx({ deadlineAt: Date.now() + 100000 });
+    await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx,
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' }),
+    });
+    assert.match(capturedHeaders.traceparent, /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
+  });
+});
+
+test('a commit still injects a traceparent onto its own sidecar request', async () => {
+  await withTracing(async () => {
+    let capturedHeaders;
+    const client = fakeClient({
+      saveRecord: async (opts) => {
+        capturedHeaders = opts.headers;
+        return { status: 204 };
+      },
+    });
+    const host = createActorHost({ limits: limits(), client });
+    const ctx = makeCtx({ deadlineAt: Date.now() + 100000 });
+    await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx,
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, {
+          outcome: 'complete',
+          responseJson: '1',
+          nextStateJson: '{}',
+        }),
+    });
+    assert.match(capturedHeaders.traceparent, /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
+  });
+});
+
+test('flow emission runs inside the server span context, so a downstream flow span would nest under it', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const ctx = makeCtx({ deadlineAt: Date.now() + 100000 });
+    let capturedSpanId;
+    await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx,
+      emit: (msg) => {
+        capturedSpanId = trace.getSpan(context.active())?.spanContext().spanId;
+        host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' });
+      },
+    });
+    const server = findSpan(exporter, 'actor T.M');
+    assert.equal(capturedSpanId, server.spanContext().spanId);
+  });
+});
+
+test('a busy rejection still gets a span, ended once, with the ACTOR_BUSY outcome', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    // Occupy the actor first so the second call is rejected busy before any
+    // span-bearing work runs inside invokeBody.
+    const first = host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' }),
+    });
+    const busy = await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
+      emit: () => assert.fail('must not evaluate a busy call'),
+    });
+    assert.equal(busy.status, 503);
+    await first;
+    const spans = exporter.getFinishedSpans().filter((s) => s.name === 'actor T.M');
+    assert.equal(spans.length, 2);
+    const busySpan = spans.find(
+      (s) => s.attributes['dapr.actor.outcome'] === ErrorCodes.ACTOR_BUSY
+    );
+    assert.ok(busySpan, 'expected one span with outcome ACTOR_BUSY');
+    assert.equal(busySpan.status.code, SpanStatusCode.ERROR);
+  });
+});
+
+test('an invalid body is a single span with the INVALID_MESSAGE outcome', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const result = await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx: makeCtx({ deadlineAt: Date.now() + 100000, body: Buffer.from('{not json') }),
+      emit: () => assert.fail('must not emit on invalid JSON'),
+    });
+    assert.equal(result.status, 400);
+    const spans = exporter.getFinishedSpans().filter((s) => s.name === 'actor T.M');
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].attributes['dapr.actor.outcome'], ErrorCodes.INVALID_MESSAGE);
+  });
+});
+
+test('a drain-expired invocation is a single span with the ACTOR_REPLY_EXPIRED outcome', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const promise = host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
+      emit: () => {},
+    });
+    await tick();
+    host.drain();
+    const result = await promise;
+    assert.equal(result.status, 503);
+    const spans = exporter.getFinishedSpans().filter((s) => s.name === 'actor T.M');
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].attributes['dapr.actor.outcome'], ErrorCodes.ACTOR_REPLY_EXPIRED);
+  });
+});
+
+test('a transport failure mid-commit is a single span with the ACTOR_COMMIT_UNKNOWN outcome', async () => {
+  await withTracing(async (exporter) => {
+    const client = fakeClient({
+      saveRecord: async () => {
+        throw new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'boom');
+      },
+    });
+    const host = createActorHost({ limits: limits(), client });
+    const result = await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, {
+          outcome: 'complete',
+          responseJson: '1',
+          nextStateJson: '{}',
+        }),
+    });
+    assert.equal(result.status, 500);
+    const spans = exporter.getFinishedSpans().filter((s) => s.name === 'actor T.M');
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].attributes['dapr.actor.outcome'], ErrorCodes.ACTOR_COMMIT_UNKNOWN);
+    // The commit's own CLIENT span must also have settled exactly once, as an error.
+    const commitSpan = exporter.getFinishedSpans().find((s) => s.name === 'actor state save');
+    assert.equal(commitSpan.status.code, SpanStatusCode.ERROR);
+  });
+});
+
+test('an app-declared fail reply is a single span with the ACTOR_REPLY_FAILED outcome', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const result = await host.invoke({
+      actorType: 'T',
+      actorId: 'a',
+      method: 'M',
+      ctx: makeCtx({ deadlineAt: Date.now() + 100000 }),
+      emit: (msg) =>
+        host.settleActorReply(msg.dapr.actorRequestId, {
+          outcome: 'fail',
+          errorBody: JSON.stringify({ error: { code: 'BAD', message: 'no' } }),
+        }),
+    });
+    assert.equal(result.status, 500);
+    const spans = exporter.getFinishedSpans().filter((s) => s.name === 'actor T.M');
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].attributes['dapr.actor.outcome'], 'ACTOR_REPLY_FAILED');
+  });
+});
+
+test('a disconnect while still awaiting a reply is a single span with the ABORTED outcome', async () => {
+  await withTracing(async (exporter) => {
+    const host = createActorHost({ limits: limits(), client: fakeClient() });
+    const { promise, ctx } = await invokeAndCaptureRequest(host); // emit never replies
+    ctx.controller.abort(); // triggers the onAbort listener, settling ABORTED
+    const result = await promise;
+    assert.equal(result.status, 503);
+    const spans = exporter.getFinishedSpans().filter((s) => s.name === 'actor T.M');
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].attributes['dapr.actor.outcome'], 'ABORTED');
+  });
+});
+
+test('an in-flight commit keeps its span open until it settles, then ends it once', async () => {
+  await withTracing(async (exporter) => {
+    const gate = Promise.withResolvers();
+    const client = fakeClient({
+      saveRecord: async () => {
+        await gate.promise;
+        return { status: 204 };
+      },
+    });
+    const host = createActorHost({ limits: limits(), client });
+    const { promise, requestId } = await invokeAndCaptureRequest(host);
+    host.settleActorReply(requestId, {
+      outcome: 'complete',
+      responseJson: '"ok"',
+      nextStateJson: '{}',
+    });
+    await tick();
+    assert.equal(
+      findSpan(exporter, 'actor state save'),
+      undefined,
+      'still in flight, not yet ended'
+    );
+    gate.resolve();
+    await promise;
+    const commitSpan = findSpan(exporter, 'actor state save');
+    assert.ok(commitSpan);
+    assert.equal(commitSpan.status.code, SpanStatusCode.OK);
+  });
+});
+
+test('tracing disabled (no provider registered) costs nothing: invocation still succeeds with no exporter involved', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  const result = await host.invoke({
+    actorType: 'T',
+    actorId: 'a',
+    method: 'M',
+    ctx: makeCtx({ deadlineAt: Date.now() + 100000, headers: { traceparent: VALID_TRACEPARENT } }),
+    emit: (msg) =>
+      host.settleActorReply(msg.dapr.actorRequestId, { outcome: 'complete', responseJson: '1' }),
+  });
+  assert.equal(result.status, 200);
+});
+
+// ---- milestone 6: observability -- active-handler count for status --------
+
+test('watchActive is seeded with the current count and pushed on admit/settle', async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  const seen = [];
+  const unwatch = host.watchActive('T', 'M', (n) => seen.push(n));
+  assert.deepEqual(seen, [0]);
+  const { promise, requestId } = await invokeAndCaptureRequest(host);
+  assert.deepEqual(seen, [0, 1]);
+  host.settleActorReply(requestId, { outcome: 'complete', responseJson: '1' });
+  await promise;
+  assert.deepEqual(seen, [0, 1, 0]);
+  unwatch();
+});
+
+test('watchActive counts a committing invocation as still active until the commit settles', async () => {
+  const gate = Promise.withResolvers();
+  const client = fakeClient({
+    saveRecord: async () => {
+      await gate.promise;
+      return { status: 204 };
+    },
+  });
+  const host = createActorHost({ limits: limits(), client });
+  const seen = [];
+  host.watchActive('T', 'M', (n) => seen.push(n));
+  const { promise, requestId } = await invokeAndCaptureRequest(host);
+  host.settleActorReply(requestId, {
+    outcome: 'complete',
+    responseJson: '"ok"',
+    nextStateJson: '{}',
+  });
+  await tick();
+  assert.deepEqual(seen, [0, 1], 'still counted active while the commit is in flight');
+  gate.resolve();
+  await promise;
+  assert.deepEqual(seen, [0, 1, 0]);
+});
+
+test("watchActive for a different registration never sees another one's changes", async () => {
+  const host = createActorHost({ limits: limits(), client: fakeClient() });
+  const seen = [];
+  host.watchActive('Other', 'M', (n) => seen.push(n));
+  const { promise, requestId } = await invokeAndCaptureRequest(host);
+  host.settleActorReply(requestId, { outcome: 'complete', responseJson: '1' });
+  await promise;
+  assert.deepEqual(seen, [0]);
+});
+
+// ---- milestone 6: observability -- diagnostics -----------------------------
+
+test('a commit-unknown outcome reports ACTOR_COMMIT_UNKNOWN through onDiagnostic', async () => {
+  const client = fakeClient({
+    saveRecord: async () => {
+      throw new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'boom');
+    },
+  });
+  const events = [];
+  const host = createActorHost({
+    limits: limits(),
+    client,
+    onDiagnostic: (code, detail) => events.push({ code, detail }),
+  });
+  const { promise, requestId } = await invokeAndCaptureRequest(host);
+  host.settleActorReply(requestId, {
+    outcome: 'complete',
+    responseJson: '1',
+    nextStateJson: '{}',
+  });
+  await promise;
+  assert.equal(events.length, 1);
+  assert.equal(events[0].code, 'ACTOR_COMMIT_UNKNOWN');
+  assert.equal(events[0].detail.actorType, 'T');
+  assert.equal(events[0].detail.method, 'M');
+});
+
+test('a throwing onDiagnostic never changes the request outcome', async () => {
+  const client = fakeClient({
+    saveRecord: async () => {
+      throw new DaprError(ErrorCodes.SIDECAR_UNAVAILABLE, 'boom');
+    },
+  });
+  const host = createActorHost({
+    limits: limits(),
+    client,
+    onDiagnostic: () => {
+      throw new Error('logger exploded');
+    },
+  });
+  const { promise, requestId } = await invokeAndCaptureRequest(host);
+  host.settleActorReply(requestId, {
+    outcome: 'complete',
+    responseJson: '1',
+    nextStateJson: '{}',
+  });
+  const result = await promise;
+  assert.equal(result.status, 500);
+  assert.equal(JSON.parse(result.body).error.code, ErrorCodes.ACTOR_COMMIT_UNKNOWN);
 });

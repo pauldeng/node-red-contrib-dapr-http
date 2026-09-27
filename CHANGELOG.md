@@ -43,6 +43,28 @@ the same change that ships behavior.
   `DemoActorCounter`; attribution in `examples/DAPR-SAMPLES.md`), with an
   actor-enabled Redis component example and setup steps (including a Dapr
   Scheduler container for the reminder Injects) in `examples/README.md`.
+- Actor observability: a SERVER span per method/reminder invocation, parented
+  on the callback's own `traceparent` (a fresh root when it is missing or
+  malformed), with `dapr.actor.type`/`method`/`trigger`/`outcome` attributes
+  and the actor id only as a bounded attribute, never in the span name; child
+  CLIENT spans for the state read and commit, each injecting its own
+  `traceparent` onto the sidecar request; `dapr-actor-call` and
+  `dapr-actor-schedule` open their own CLIENT span the same way `dapr-invoke`
+  does. Bounded, rate-limited `node.warn()` diagnostics (actor type and
+  method/trigger only) for `ACTOR_COMMIT_UNKNOWN`, a tombstoned registration
+  actually hit, and the close-drain backstop firing.
+  `actorHost.whenCommitsSettled()` now reports whether that backstop fired.
+  `dapr-actor-method` shows `listening · N active` for its own admitted
+  (including still-committing) handler count, throttled to at most once a
+  second. Once any actor method is registered, the connection's existing
+  health poll also checks actor readiness (`GET /v1.0/metadata`'s curated
+  `actorRuntime`) and shows a yellow warning when it isn't confirmed
+  healthy — unknown/missing fields never read as healthy, and the warning
+  never reaches the "Test Connection" admin route. Actor turns retain their
+  server context through asynchronous reads and commits; stale readiness
+  responses cannot survive registration changes or sidecar failure. Repeated
+  unchanged counts produce no status updates, and diagnostic logger failures
+  cannot interrupt connection shutdown.
 
 ### Changed
 

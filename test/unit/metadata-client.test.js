@@ -3,20 +3,22 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const { once } = require('node:events');
 
 const { getMetadata } = require('../../lib/metadata-client');
 const { DaprError, ErrorCodes } = require('../../lib/errors');
 
 async function fakeSidecar(handler) {
   const server = http.createServer(handler);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
   return {
     baseUrl: `http://127.0.0.1:${server.address().port}`,
-    stop: () =>
-      new Promise((resolve) => {
-        server.closeAllConnections();
-        server.close(resolve);
-      }),
+    stop: async () => {
+      server.closeAllConnections();
+      server.close();
+      await once(server, 'close');
+    },
   };
 }
 
@@ -131,4 +133,62 @@ test('an over-size getMetadata response is RESPONSE_TOO_LARGE', async (t) => {
     getMetadata({ baseUrl: sidecar.baseUrl, maxResponseBytes: 1024 }),
     (err) => err instanceof DaprError && err.code === ErrorCodes.RESPONSE_TOO_LARGE
   );
+});
+
+// ---- milestone 6: observability -- curated actorRuntime --------------------
+
+test('getMetadata curates actorRuntime as a sibling of data, never merged into it', async (t) => {
+  const sidecar = await recordingSidecar(
+    200,
+    JSON.stringify({
+      id: 'my-app',
+      actorRuntime: {
+        runtimeStatus: 'RUNNING',
+        hostReady: true,
+        placement: 'placement: connected',
+        activeActors: [{ type: 'Secret', count: 3 }],
+        hostedActors: ['leaked-detail'],
+      },
+    })
+  );
+  t.after(() => sidecar.stop());
+
+  const result = await getMetadata({ baseUrl: sidecar.baseUrl });
+  assert.deepEqual(result.actorRuntime, {
+    runtimeStatus: 'RUNNING',
+    hostReady: true,
+    placement: 'placement: connected',
+  });
+  assert.equal('actorRuntime' in result.data, false, 'actorRuntime must never merge into data');
+  assert.equal(
+    'activeActors' in result.actorRuntime,
+    false,
+    'only the three verified fields are curated'
+  );
+});
+
+test('getMetadata reports actorRuntime undefined when the sidecar omits the block entirely', async (t) => {
+  const sidecar = await recordingSidecar(200, JSON.stringify({ id: 'my-app' }));
+  t.after(() => sidecar.stop());
+
+  const result = await getMetadata({ baseUrl: sidecar.baseUrl });
+  assert.equal(result.actorRuntime, undefined);
+});
+
+test('getMetadata treats an unrecognized hostReady/placement shape as absent, not healthy', async (t) => {
+  const sidecar = await recordingSidecar(
+    200,
+    JSON.stringify({
+      id: 'my-app',
+      actorRuntime: { runtimeStatus: 'RUNNING', hostReady: 'yes', placement: 42 },
+    })
+  );
+  t.after(() => sidecar.stop());
+
+  const result = await getMetadata({ baseUrl: sidecar.baseUrl });
+  assert.deepEqual(result.actorRuntime, {
+    runtimeStatus: 'RUNNING',
+    hostReady: undefined,
+    placement: undefined,
+  });
 });

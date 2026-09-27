@@ -9,6 +9,7 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const os = require('node:os');
+const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const { execFile } = require('node:child_process');
 
@@ -171,17 +172,60 @@ async function startOtelCollector({ port: fixedPort } = {}) {
     return records;
   }
 
+  const extractSpans = (doc) =>
+    (doc.resourceSpans || []).flatMap((rs) =>
+      (rs.scopeSpans || []).flatMap((ss) => ss.spans || [])
+    );
+  const readSpans = () => readJsonlRecords(outputPath, extractSpans);
+
+  // Resolves with the first exported span matching `predicate`, woken by a
+  // real fs.watch event on the output directory (the file exporter batches
+  // and may not have created spans.jsonl yet when this is called) rather
+  // than a fixed poll interval -- mirrors fake-dapr.js's waitForRequest:
+  // install the watcher before reading, so a write cannot fall between them.
+  // Still bounded by `timeoutMs`, the same way every other real-process
+  // readiness wait in this tier is (see test/helpers/wait-for.js's header
+  // comment): a collector container that never exports must not hang a test
+  // forever.
+  async function waitForSpan(predicate, { timeoutMs = 20000 } = {}) {
+    // Bridges watcher events and the timeout into one settlement.
+    return /* allow-promise: fs.watch/setTimeout settlement */ new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        watcher.close();
+        fn(value);
+      };
+      const check = async () => {
+        if (settled) return;
+        try {
+          const found = (await readSpans()).find(predicate);
+          if (found) {
+            finish(resolve, found);
+          }
+        } catch (err) {
+          finish(reject, err);
+        }
+      };
+      const watcher = fs.watch(outputDir, check);
+      watcher.on('error', (err) => finish(reject, err));
+      const timer = setTimeout(
+        () => finish(reject, new Error(`waitForSpan timed out after ${timeoutMs}ms`)),
+        timeoutMs
+      );
+      void check();
+    });
+  }
+
   return {
     port,
     name,
     // Every span the file exporter has flushed so far, parsed from its OTLP
     // JSON representation.
-    readSpans: () =>
-      readJsonlRecords(outputPath, (doc) =>
-        (doc.resourceSpans || []).flatMap((rs) =>
-          (rs.scopeSpans || []).flatMap((ss) => ss.spans || [])
-        )
-      ),
+    readSpans,
+    waitForSpan,
     // Every log record the file exporter has flushed so far.
     readLogRecords: () =>
       readJsonlRecords(logsOutputPath, (doc) =>
