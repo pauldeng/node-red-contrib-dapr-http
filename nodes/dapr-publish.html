@@ -1,7 +1,7 @@
 <script type="text/javascript">
   RED.nodes.registerType('dapr-publish', {
     category: 'network',
-    color: '#f3c969',
+    color: '#DEBD5C',
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
@@ -34,7 +34,7 @@
     },
     inputs: 1,
     outputs: 1,
-    icon: 'font-awesome/fa-paper-plane',
+    icon: 'dapr.svg',
     paletteLabel: 'dapr publish',
     label: function () {
       return this.name || this.topic || 'dapr publish';

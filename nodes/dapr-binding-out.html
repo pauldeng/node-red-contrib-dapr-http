@@ -1,7 +1,7 @@
 <script type="text/javascript">
   RED.nodes.registerType('dapr-binding-out', {
     category: 'network',
-    color: '#f3c969',
+    color: '#DEBD5C',
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
@@ -44,7 +44,7 @@
     },
     inputs: 1,
     outputs: 1,
-    icon: 'font-awesome/fa-sign-out',
+    icon: 'dapr.svg',
     paletteLabel: 'dapr binding out',
     label: function () {
       return this.name || 'dapr binding out';
