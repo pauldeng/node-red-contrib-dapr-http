@@ -1,7 +1,7 @@
 <script type="text/javascript">
   RED.nodes.registerType('dapr-ack', {
     category: 'network',
-    color: '#f3c969',
+    color: '#DEBD5C',
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
@@ -11,7 +11,7 @@
     inputs: 1,
     outputs: 1,
     align: 'right',
-    icon: 'font-awesome/fa-check',
+    icon: 'dapr.svg',
     paletteLabel: 'dapr ack',
     label: function () {
       if (this.ackStatusSource === 'message') {

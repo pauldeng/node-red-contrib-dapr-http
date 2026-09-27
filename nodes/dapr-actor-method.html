@@ -21,7 +21,7 @@
 
   RED.nodes.registerType('dapr-actor-method', {
     category: 'network',
-    color: '#f3c969',
+    color: '#DEBD5C',
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
@@ -47,7 +47,7 @@
     },
     inputs: 0,
     outputs: 1,
-    icon: 'font-awesome/fa-sign-in',
+    icon: 'dapr.svg',
     paletteLabel: 'actor method',
     label: function () {
       if (this.name) return this.name;

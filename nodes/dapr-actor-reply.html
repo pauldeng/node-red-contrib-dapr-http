@@ -1,7 +1,7 @@
 <script type="text/javascript">
   RED.nodes.registerType('dapr-actor-reply', {
     category: 'network',
-    color: '#f3c969',
+    color: '#DEBD5C',
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
@@ -15,7 +15,7 @@
     inputs: 1,
     outputs: 0,
     align: 'right',
-    icon: 'font-awesome/fa-reply',
+    icon: 'dapr.svg',
     paletteLabel: 'actor reply',
     label: function () {
       return this.name || `actor reply: ${this.outcome || 'complete'}`;

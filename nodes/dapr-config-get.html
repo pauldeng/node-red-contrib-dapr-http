@@ -1,7 +1,7 @@
 <script type="text/javascript">
   RED.nodes.registerType('dapr-config-get', {
     category: 'network',
-    color: '#f3c969',
+    color: '#DEBD5C',
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
@@ -38,7 +38,7 @@
     },
     inputs: 1,
     outputs: 1,
-    icon: 'font-awesome/fa-sliders',
+    icon: 'dapr.svg',
     paletteLabel: 'dapr config get',
     label: function () {
       return this.name || 'dapr config get';

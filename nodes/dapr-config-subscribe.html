@@ -1,7 +1,7 @@
 <script type="text/javascript">
   RED.nodes.registerType('dapr-config-subscribe', {
     category: 'network',
-    color: '#f3c969',
+    color: '#DEBD5C',
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
@@ -55,7 +55,7 @@
     },
     inputs: 0,
     outputs: 1,
-    icon: 'font-awesome/fa-sliders',
+    icon: 'dapr.svg',
     paletteLabel: 'dapr config subscribe',
     label: function () {
       return this.name || 'dapr config subscribe';

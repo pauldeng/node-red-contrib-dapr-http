@@ -68,6 +68,11 @@ the same change that ships behavior.
 
 ### Changed
 
+- Every Dapr palette node now shows the Dapr logo as a standard Node-RED
+  icon (white on transparent, 40 x 60) instead of a per-node Font Awesome
+  icon, and uses `#DEBD5C` from Node-RED's recommended node palette in place
+  of `#f3c969`. Node labels and help still name each node's function.
+
 - Development dependency review: override Express 4.22.2's `qs` to 6.16.0,
   clearing the remaining npm audit findings without downgrading Node-RED.
 - Test suite: remove duplicate unit runs in CI/release, combine dialog

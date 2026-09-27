@@ -1,7 +1,7 @@
 <script type="text/javascript">
   RED.nodes.registerType('dapr-state', {
     category: 'network',
-    color: '#f3c969',
+    color: '#DEBD5C',
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
@@ -45,7 +45,7 @@
     },
     inputs: 1,
     outputs: 1,
-    icon: 'font-awesome/fa-database',
+    icon: 'dapr.svg',
     paletteLabel: 'dapr state',
     label: function () {
       return this.name || `state ${this.operation || 'get'}`;

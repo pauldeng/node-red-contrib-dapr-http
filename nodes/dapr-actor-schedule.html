@@ -24,7 +24,7 @@
 
   RED.nodes.registerType('dapr-actor-schedule', {
     category: 'network',
-    color: '#f3c969',
+    color: '#DEBD5C',
     defaults: {
       name: { value: '' },
       connection: { value: '', type: 'dapr-connection', required: true },
@@ -39,7 +39,7 @@
     },
     inputs: 1,
     outputs: 1,
-    icon: 'font-awesome/fa-clock-o',
+    icon: 'dapr.svg',
     paletteLabel: 'actor schedule',
     label: function () {
       return this.name || `${this.actorType || 'actor'} ${this.operation || 'set'} reminder`;
