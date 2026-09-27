@@ -12,6 +12,30 @@ const { setTimeout: delay } = require('node:timers/promises');
 const healthPath = '/v1.0/healthz/outbound';
 const publishPath = '/v1.0/publish/pubsub/orders';
 
+// Propagation tests need a live provider, not repeated exporter-outage waits.
+// Keep the receiver alive through Node-RED shutdown so flushing is immediate.
+async function startTracedRuntime(t) {
+  const receiver = await createFakeDaprStarted();
+  receiver.respond('POST', '/v1/traces', (_req, res) =>
+    res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
+  );
+  const nr = new NodeRed();
+  t.after(async () => {
+    try {
+      await nr.stop();
+    } finally {
+      await receiver.stop();
+    }
+  });
+  await nr.start({
+    env: {
+      OTEL_TRACES_SAMPLER: 'always_on',
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${receiver.url}/v1/traces`,
+    },
+  });
+  return nr;
+}
+
 // W3C traceparent: version-traceId-spanId-flags, e.g.
 // 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
 const TRACEPARENT_RE = /^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
@@ -125,9 +149,7 @@ test(
     const invokePath = '/v1.0/invoke/target/method/echo';
     dapr.respond('POST', invokePath, (_req, res) => res.writeHead(200).end('{}'));
 
-    const nr = new NodeRed();
-    await nr.start({ env: { OTEL_TRACES_SAMPLER: 'always_on' } });
-    t.after(() => nr.stop());
+    const nr = await startTracedRuntime(t);
     const appPort = await freePort();
 
     await nr.deploy([
@@ -197,9 +219,7 @@ test(
     dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
     dapr.respond('POST', forwardedPublishPath, (_req, res) => res.writeHead(204).end());
 
-    const nr = new NodeRed();
-    await nr.start({ env: { OTEL_TRACES_SAMPLER: 'always_on' } });
-    t.after(() => nr.stop());
+    const nr = await startTracedRuntime(t);
     const appPort = await freePort();
 
     // dapr-subscribe wired straight into dapr-publish. Proves that the
@@ -285,9 +305,7 @@ test(
     dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
     dapr.respond('POST', forwardedPublishPath, (_req, res) => res.writeHead(204).end());
 
-    const nr = new NodeRed();
-    await nr.start({ env: { OTEL_TRACES_SAMPLER: 'always_on' } });
-    t.after(() => nr.stop());
+    const nr = await startTracedRuntime(t);
     const appPort = await freePort();
 
     // sub1 -> a plain function node (no OpenTelemetry awareness at all) ->
@@ -373,9 +391,7 @@ test(
     dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
     dapr.respond('POST', forwardedPublishPath, (_req, res) => res.writeHead(204).end());
 
-    const nr = new NodeRed();
-    await nr.start({ env: { OTEL_TRACES_SAMPLER: 'always_on' } });
-    t.after(() => nr.stop());
+    const nr = await startTracedRuntime(t);
     const appPort = await freePort();
 
     await nr.deploy([
@@ -472,9 +488,7 @@ test(
     const actorInvokePath = '/v1.0/actors/Order/o1/method/Ping';
     dapr.respond('POST', actorInvokePath, (_req, res) => res.writeHead(200).end());
 
-    const nr = new NodeRed();
-    await nr.start({ env: { OTEL_TRACES_SAMPLER: 'always_on' } });
-    t.after(() => nr.stop());
+    const nr = await startTracedRuntime(t);
     const appPort = await freePort();
 
     await nr.deploy([
@@ -530,9 +544,7 @@ test(
     const reminderPath = '/v1.0/actors/Order/o1/reminders/wake';
     dapr.respond('POST', reminderPath, (_req, res) => res.writeHead(204).end());
 
-    const nr = new NodeRed();
-    await nr.start({ env: { OTEL_TRACES_SAMPLER: 'always_on' } });
-    t.after(() => nr.stop());
+    const nr = await startTracedRuntime(t);
     const appPort = await freePort();
 
     await nr.deploy([

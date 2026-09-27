@@ -22,7 +22,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 
 // Pinned by digest — see test/helpers/integration.js for the re-pin procedure.
 const NATS_IMAGE =
-  'nats:2.14.3-alpine@sha256:c11af972c99ae542de8925e6a7d9c533aa1eb039660420d2074beed6089b3bf0';
+  'nats:2.15.0-alpine@sha256:ac8f88a6494bffc2c2a5289a0ca61cb28a9145c11ba5677cf24265d07f46d8d4';
 
 function runId() {
   return crypto.randomBytes(4).toString('hex');

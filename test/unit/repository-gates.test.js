@@ -15,6 +15,8 @@ test('durable docs list every test tier and CI enforces cheap completion gates',
   }
 
   const workflow = read('.github/workflows/ci.yml');
+  assert.doesNotMatch(workflow, /- run: npm test\s*\n/);
+  assert.doesNotMatch(read('.github/workflows/release.yml'), /- run: npm test\s*\n/);
   const pkg = JSON.parse(read('package.json'));
   // A serialized chain of focused per-broker scripts (test:integration:nats
   // runs first, per docs/testing.md's NATS-primary rebalance), not one glob

@@ -4,9 +4,10 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { NodeRed, freePort } = require('../helpers/node-red');
+const { createRuntimeFixture } = require('../helpers/runtime-fixture');
+const useRuntime = createRuntimeFixture();
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
-const { setTimeout: delay } = require('node:timers/promises');
 
 const healthPath = '/v1.0/healthz/outbound';
 const STORE = 'configstore';
@@ -81,6 +82,7 @@ function post(nr, dapr) {
 }
 
 async function startFlow(t, respondents = []) {
+  const nr = await useRuntime(t);
   const dapr = await createFakeDaprStarted();
   t.after(() => dapr.stop());
   dapr.respond('GET', healthPath, (_req, res) => res.writeHead(204).end());
@@ -88,13 +90,9 @@ async function startFlow(t, respondents = []) {
     dapr.respond(method, path, responder);
   }
 
-  const nr = new NodeRed();
-  await nr.start();
-  t.after(() => nr.stop());
   const appPort = await freePort();
   await nr.deploy(configGetFlow({ appPort, daprPort: dapr.port }));
   await dapr.waitForRequest(healthPath);
-  await delay(50);
   return { dapr, nr };
 }
 
@@ -122,24 +120,14 @@ test("a 200 response resolves the store's own per-key map", async (t) => {
 });
 
 test('a 204 (no items) resolves an empty object, not a Catch failure', async (t) => {
-  const { nr } = await startFlow(t, [['GET', getPath(), (_req, res) => res.writeHead(204).end()]]);
+  const { nr, dapr } = await startFlow(t, [
+    ['GET', getPath(), (_req, res) => res.writeHead(204).end()],
+  ]);
 
   const response = await post(nr, {});
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(response.text).payload, {});
-});
-
-test('no keys sends no key query params (reads everything)', async (t) => {
-  const { dapr, nr } = await startFlow(t, [
-    [
-      'GET',
-      getPath(),
-      (_req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end('{}'),
-    ],
-  ]);
-
-  await post(nr, {});
-  assert.deepEqual(dapr.requests.filter((r) => r.path === getPath())[0].query, {});
+  assert.deepEqual(dapr.requests.find((r) => r.path === getPath()).query, {});
 });
 
 test('a non-2xx response reaches a Catch node as CONFIGURATION_OPERATION_FAILED', async (t) => {

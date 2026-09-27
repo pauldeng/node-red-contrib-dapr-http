@@ -52,9 +52,9 @@ async function waitForLogEvent(logEvents, initialText, pattern, timeoutMs) {
 // CI one ("waitForRequest timed out ... (saw: no requests)"), which is what
 // makes it worth removing rather than waiting longer for.
 //
-// Picking below the ephemeral floor closes that race: nothing is assigned there
-// spontaneously, so the only possible claimant is another caller here — covered
-// by the handed-out set and the retry.
+// Picking below the ephemeral floor avoids spontaneous outbound allocation.
+// The handed-out set prevents reuse within this process; another process can
+// still claim an explicit port between the probe and the real listener binding.
 const PORT_FLOOR = 20000;
 const HANDED_OUT = new Set();
 

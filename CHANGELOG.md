@@ -68,6 +68,15 @@ the same change that ships behavior.
 
 ### Changed
 
+- Development dependency review: override Express 4.22.2's `qs` to 6.16.0,
+  clearing the remaining npm audit findings without downgrading Node-RED.
+- Test suite: remove duplicate unit runs in CI/release, combine dialog
+  validation with screenshots and successful invocation with the broader
+  Dapr matrix, reuse isolated runtime table fixtures, and stop waiting for
+  unrelated caller/exporter timeouts. Fix conflicting Playwright colour flags
+  and retain a finite bound for concurrent actor-probe event listeners. Let
+  the OS bind the container editor port, removing its port-probe race.
+
 - Reminder callbacks reject mesh caller headers. Schedule validation rejects
   non-boolean overwrite values and bounds a snapshot of the data, including
   Unicode escaping in the callback. Malformed get responses fail instead of
@@ -78,6 +87,22 @@ the same change that ships behavior.
 - Pin the Dapr integration runtime and deployment examples to 1.18.4 by
   image digest. The full real-daprd integration suite passes on 1.18.4, and
   the NATS JetStream `deadLetterTopic` stall still reproduces there.
+- Update every dependency to its latest release: the OpenTelemetry runtime
+  packages move together to the `0.222.0`/`2.11.0` release train; devDependency
+  bumps include `node-red` 5.0.7, `eslint` 10.11.0, `html-validate` 11.16.0,
+  `@playwright/test` 1.63.0, and `prettier` 3.9.9. Test/deployment Docker
+  images move to `nodered/node-red:5.0.7-24`, `nats:2.15.0-alpine`, and
+  `otel/opentelemetry-collector-contrib:0.161.0` (all re-pinned by digest).
+  `redis:7.4-alpine` moves to `redis:8.10-alpine` (a major bump); the full
+  Redis-backed integration tier (pub/sub, retry, dead letter, token, state,
+  configuration) passes unchanged against it. Dapr itself and
+  `engines.node`/`node-red.version` are unchanged — 1.18.4 and Node-RED
+  `>=5.0.1 <6` both remain current. `npm audit`'s dev-only permitted-advisory
+  list in `docs/testing.md` is re-reviewed against the refreshed tree: every
+  previously-permitted advisory (`jsonata`, `brace-expansion`, `tar`,
+  `ip-address`, `js-yaml`, `undici`, `fast-uri`, `body-parser`, `axios`) is
+  gone or fixed. A scoped Express override clears the remaining `qs`
+  advisories; no advisory remains permitted.
 
 ## 0.2.1 - 2026-08-22
 

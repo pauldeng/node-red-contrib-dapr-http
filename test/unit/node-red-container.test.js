@@ -8,11 +8,13 @@ const path = require('node:path');
 
 const { ContainerNodeRed } = require('../helpers/node-red-container');
 
-test('container readiness resolves from the flow-started log event', async () => {
+test('container readiness discovers the bound port and waits for flows to start', async () => {
   const nr = new ContainerNodeRed();
+  nr._appendLog('1 Sep 10:00:00 - [info] Server now running at http://127.0.0.1:45678/\n');
   queueMicrotask(() => nr._appendLog('1 Sep 10:00:00 - [info] Started flows\n'));
 
   await nr._waitReady(1000);
+  assert.equal(nr.port, 45678);
 });
 
 test('stop treats container-owned temp-dir cleanup as best effort', async (t) => {

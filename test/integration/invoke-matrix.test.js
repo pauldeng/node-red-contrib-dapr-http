@@ -1,7 +1,6 @@
 'use strict';
 
-// Expands test/integration/invoke.test.js's basic round trip into the full
-// invocation matrix: all supported verbs,
+// The full invocation matrix: successful outbound/inbound round trips, all supported verbs,
 // query strings, headers, binary data, non-2xx responses, timeout, and
 // unknown-method 404 — all through real daprd, not the fake sidecar.
 
@@ -165,6 +164,24 @@ return msg;`,
     wires: [['resp']],
   },
 
+  // Reuse the same outbound invoke node for the successful round trip.
+  {
+    id: 'echo-in',
+    type: 'http in',
+    z: 'tab',
+    url: '/call-echo',
+    method: 'post',
+    wires: [['echo-override']],
+  },
+  {
+    id: 'echo-override',
+    type: 'function',
+    z: 'tab',
+    func: "msg.dapr = { method: 'echo', verb: 'POST' }; return msg;",
+    outputs: 1,
+    wires: [['inv']],
+  },
+
   // Outbound side: dapr-invoke, triggered over HTTP, targeting /slow with a
   // 1s per-message timeout override — proves the OUTBOUND direction also
   // aborts against a real, genuinely slow real-daprd-mediated call, not just
@@ -266,6 +283,7 @@ test(
         return r.status === 200 ? r : null;
       });
       const body = JSON.parse(res.text);
+      if (verb !== 'GET' && verb !== 'DELETE') assert.deepEqual(body.body, { ping: verb });
       assert.equal(body.verb, verb, `verb ${verb} echoed correctly`);
       assert.deepEqual(body.query, { foo: 'bar', num: '1' }, `query string preserved for ${verb}`);
       assert.equal(body.custom, 'hello-value', `custom header preserved for ${verb}`);
@@ -275,6 +293,15 @@ test(
         `custom response header preserved for ${verb}`
       );
     }
+
+    // Success through the visible dapr-invoke node, not only direct HTTP calls.
+    const viaNode = await nr.waitForHttp('/call-echo', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ n: 2 }),
+      until: (r) => r.status === 200,
+    });
+    assert.deepEqual(JSON.parse(viaNode.text).body, { n: 2 });
 
     // Binary request AND response body, byte-for-byte — including bytes that
     // are not valid standalone UTF-8, to prove real Buffer handling rather

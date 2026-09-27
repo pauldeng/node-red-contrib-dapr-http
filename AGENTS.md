@@ -13,7 +13,7 @@ token loads on every request. Detail belongs in `docs/`, linked below.
 
 ## Stack
 
-Node.js >= 22.9 · Node-RED 5.0.4 (`>=5.0.1 <6`) · Dapr runtime 1.18.4.
+Node.js >= 22.9 · Node-RED 5.0.7 (`>=5.0.1 <6`) · Dapr runtime 1.18.4.
 Tests use the native `node:test` runner — no Mocha/Jest/Vitest/Sinon/Supertest,
 no `node-red-node-test-helper`.
 

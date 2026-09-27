@@ -35,7 +35,7 @@ const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 
 const { httpRequest } = require('./http');
-const { freePort, waitForLogEvent } = require('./node-red');
+const { waitForLogEvent } = require('./node-red');
 const { execFileP, ensureImage } = require('./docker');
 const { setTimeout: delay } = require('node:timers/promises');
 
@@ -44,17 +44,18 @@ const PKG = require(path.join(WORKSPACE, 'package.json'));
 
 // Pinned by digest — see test/helpers/integration.js for the re-pin procedure.
 const NODE_RED_IMAGE =
-  'nodered/node-red:5.0.1-24@sha256:6cb1b27fa5a83deec6a662db62eec8bb32e55ac5412d6b7a653e874ce62055d5';
+  'nodered/node-red:5.0.7-24@sha256:a649dd711d55490151a2c39a8e48ad0c44325488fbc0e66315f2d2e19e5e1ace';
 
 function runId() {
   return crypto.randomBytes(4).toString('hex');
 }
 
-function settingsSource(uiPort, { loggingExtra = '' } = {}) {
+function settingsSource({ loggingExtra = '' } = {}) {
   // loggingExtra: see test/helpers/node-red.js's own settingsSource for why
   // this is a raw source fragment rather than a serializable value.
   return `module.exports = {
-  uiPort: ${uiPort},
+  uiPort: 0,
+  uiHost: '127.0.0.1',
   httpAdminRoot: '/',
   httpNodeRoot: '/',
   flowFile: 'flows.json',
@@ -102,7 +103,8 @@ class ContainerNodeRed {
 
   async start({ flows = [], readyTimeoutMs = 30000, env = {}, loggingExtra = '' } = {}) {
     await ensureImage(NODE_RED_IMAGE);
-    this.port = await freePort();
+    this.port = null;
+    this._logs = [];
     this.name = `nrdapr-it-nodered-${runId()}`;
     try {
       this.userDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'nrdapr-container-'));
@@ -120,10 +122,7 @@ class ContainerNodeRed {
       await fsp.mkdir(path.dirname(linkPath), { recursive: true });
       await fsp.symlink(WORKSPACE, linkPath, 'dir');
 
-      await fsp.writeFile(
-        path.join(this.userDir, 'settings.js'),
-        settingsSource(this.port, { loggingExtra })
-      );
+      await fsp.writeFile(path.join(this.userDir, 'settings.js'), settingsSource({ loggingExtra }));
       await fsp.writeFile(path.join(this.userDir, 'flows.json'), JSON.stringify(flows));
       await fsp.chmod(path.join(this.userDir, 'settings.js'), 0o666);
       await fsp.chmod(path.join(this.userDir, 'flows.json'), 0o666);
@@ -166,8 +165,16 @@ class ContainerNodeRed {
   }
 
   async _waitReady(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
     try {
-      await this.waitForLog('Started flows', { timeoutMs });
+      // Node-RED 5 logs server.address().port for uiPort: 0. Discover the
+      // actual bound port instead of racing another process after a probe.
+      const address = /Server now running at http:\/\/127\.0\.0\.1:(\d+)\//;
+      const logs = await this.waitForLog(address, { timeoutMs });
+      this.port = Number(logs.match(address)[1]);
+      await this.waitForLog('Started flows', {
+        timeoutMs: Math.max(1, deadline - Date.now()),
+      });
     } catch (err) {
       let status = null;
       try {
