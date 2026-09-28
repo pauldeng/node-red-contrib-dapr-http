@@ -86,3 +86,40 @@ test('the secret example does not log the retrieved value and creates its develo
   assert.match(examplesReadme, /development-only|not\s+for\s+production/i);
   assert.match(examplesReadme, /umask\s+077/);
 });
+
+test('local broker examples keep unauthenticated Redis and NATS ports on loopback', () => {
+  const examplesReadme = read('examples/README.md');
+  const stateStoreExample = read('examples/redis-statestore-component.yaml');
+  const compose = read('docker-compose.yml');
+
+  assert.match(examplesReadme, /nats-server --addr 127\.0\.0\.1 -js/);
+  assert.match(examplesReadme, /-p 127\.0\.0\.1:6379:6379 redis:8\.10-alpine/);
+  assert.match(stateStoreExample, /-p 127\.0\.0\.1:6379:6379 redis:8\.10-alpine/);
+  assert.match(compose, /'127\.0\.0\.1:6379:6379'/);
+  assert.match(compose, /'127\.0\.0\.1:4222:4222'/);
+});
+
+test('local sidecars and integration fixtures explicitly restrict their listening interfaces', () => {
+  for (const file of [
+    'docker-compose.yml',
+    'docs/deployment.md',
+    'examples/README.md',
+    'test/helpers/integration.js',
+  ]) {
+    const source = read(file);
+    assert.match(source, /--dapr-listen-addresses[= ]127\.0\.0\.1/, file);
+    assert.match(source, /--dapr-internal-grpc-listen-address[= ]127\.0\.0\.1/, file);
+    assert.match(source, /--enable-metrics=false/, file);
+  }
+  for (const [file, port] of [
+    ['test/helpers/integration.js', 6379],
+    ['test/helpers/nats.js', 4222],
+    ['test/helpers/otel-collector.js', 4318],
+  ]) {
+    assert.ok(read(file).includes('`127.0.0.1:${port}:' + port + '`'), file);
+  }
+  assert.match(read('docs/deployment.md'), /'127\.0\.0\.1:1880:1880'/);
+  for (const file of ['docs/deployment.md', 'examples/README.md']) {
+    assert.match(read(file), /npx node-red -D uiHost=127\.0\.0\.1/, file);
+  }
+});

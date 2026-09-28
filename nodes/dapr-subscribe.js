@@ -1,5 +1,7 @@
 'use strict';
 
+const { setImmediate: nextTurn } = require('node:timers/promises');
+
 const crypto = require('node:crypto');
 
 const { context, propagation, trace, SpanKind } = require('@opentelemetry/api');
@@ -328,7 +330,7 @@ module.exports = function registerDaprSubscribe(RED) {
       activeAckIds.clear();
       if (pending > 0) {
         // Let the settled handlers write their response before the node tears down.
-        await new Promise((resolve) => setImmediate(resolve));
+        await nextTurn();
       }
       done();
     });

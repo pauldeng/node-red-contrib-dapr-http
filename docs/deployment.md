@@ -3,8 +3,10 @@
 Local, Compose, and Kubernetes topology. The one constraint every topology
 must satisfy: Node-RED and `daprd` need to reach each other over `127.0.0.1`,
 because the app-channel listener binds loopback by default (see
-`docs/security.md` for why) and the sidecar's outbound API defaults to
-`127.0.0.1:3500`.
+`docs/security.md` for why) and this package calls the sidecar at
+`127.0.0.1:3500` by default. Standalone daprd itself listens on all interfaces
+unless explicitly restricted; the local examples below bind both its app-facing
+APIs and internal gRPC to loopback and disable unused metrics.
 
 ## Local (no containers)
 
@@ -13,7 +15,9 @@ port:
 
 ```bash
 daprd --app-id my-flow --app-port 3000 --app-protocol http \
-  --dapr-http-port 3500 --resources-path ./components
+  --dapr-http-port 3500 --resources-path ./components \
+  --dapr-listen-addresses 127.0.0.1 \
+  --dapr-internal-grpc-listen-address 127.0.0.1 --enable-metrics=false
 ```
 
 daprd's gRPC API stays on its own default port (`50001`) regardless — passing
@@ -22,8 +26,10 @@ OS-assigned ephemeral port instead (confirmed against real daprd 1.18.2: the
 gRPC server still listens and accepts connections). This package only ever
 speaks HTTP to the sidecar, so the gRPC port — whichever one it ends up
 on — is simply never used; there's no need to configure it either way.
-Node-RED's own editor/admin port (default 1880) is unrelated to any of this
-and needs no special configuration.
+Node-RED's own editor/admin port (default 1880) is separate and needs its own
+protection. For local development use `npx node-red -D uiHost=127.0.0.1` (or
+set `uiHost: '127.0.0.1'` in settings). An unset `uiHost` defaults to all
+interfaces; remote access needs Node-RED authentication and network controls.
 
 ## Docker Compose
 
@@ -35,7 +41,7 @@ services:
   node-red:
     image: nodered/node-red:5.0.7-24@sha256:a649dd711d55490151a2c39a8e48ad0c44325488fbc0e66315f2d2e19e5e1ace
     ports:
-      - '1880:1880'
+      - '127.0.0.1:1880:1880'
   daprd:
     image: daprio/daprd:1.18.4@sha256:1e218523a15be5be5f36d64aa33a40cbde8fbe963ba6122d42d9c9de5b24a372
     network_mode: 'service:node-red'
@@ -44,6 +50,9 @@ services:
       - '--app-id=my-flow'
       - '--app-port=3000'
       - '--dapr-http-port=3500'
+      - '--dapr-listen-addresses=127.0.0.1'
+      - '--dapr-internal-grpc-listen-address=127.0.0.1'
+      - '--enable-metrics=false'
       - '--resources-path=/components'
     volumes:
       - ./components:/components:ro
@@ -60,7 +69,7 @@ containers in the same Kubernetes pod.
 
 **This repo's own `docker-compose.yml`** takes a different shape because
 Node-RED is _not_ a Compose service there — a human runs it on the host
-(`npx node-red`, the devDependency this repo already installs) so they can
+(`npx node-red -D uiHost=127.0.0.1`, using the installed devDependency) so they can
 iterate on a flow. `daprd` instead uses
 `network_mode: host` to reach `127.0.0.1:3000` on the host directly. That's
 the right pattern only when Node-RED itself runs on the host; don't copy it
@@ -157,5 +166,7 @@ loopback-friendly case the whole design assumes.
 Only bind the app-channel listener beyond `127.0.0.1`, or run Node-RED and
 `daprd` on genuinely separate hosts, if you've read `docs/security.md`'s
 non-loopback and ACL sections first — those configurations need an app API
-token and network-level access controls that aren't needed in the default,
-same-namespace case.
+token and network-level access controls. The local examples also restrict
+daprd's internal gRPC to loopback, so a mesh spanning hosts or pods needs a
+deliberately reachable internal address plus mTLS and network policy. Never
+expose the editor/admin API merely to enable sidecar communication.

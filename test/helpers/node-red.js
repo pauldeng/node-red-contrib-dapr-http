@@ -14,9 +14,11 @@ const PKG = require(path.join(WORKSPACE, 'package.json'));
 const { setTimeout: delay } = require('node:timers/promises');
 const NODE_RED_BIN = path.join(WORKSPACE, 'node_modules', 'node-red', 'red.js');
 
-async function waitForLogEvent(logEvents, initialText, pattern, timeoutMs) {
-  const matches = (text) =>
-    typeof pattern === 'string' ? text.includes(pattern) : text.search(pattern) !== -1;
+async function waitForLogEvent(logEvents, initialText, pattern, timeoutMs, after = 0) {
+  const matches = (text) => {
+    const recent = text.slice(after);
+    return typeof pattern === 'string' ? recent.includes(pattern) : recent.search(pattern) !== -1;
+  };
   let text = initialText;
   if (matches(text)) {
     return text;
@@ -155,8 +157,8 @@ class NodeRed {
   //
   // Output already seen is checked first: the line frequently lands before the
   // test gets around to awaiting it, and an event-only API would hang there.
-  async waitForLog(pattern, { timeoutMs = 10000 } = {}) {
-    return waitForLogEvent(this._logEvents, this.logText(), pattern, timeoutMs);
+  async waitForLog(pattern, { timeoutMs = 10000, after = 0 } = {}) {
+    return waitForLogEvent(this._logEvents, this.logText(), pattern, timeoutMs, after);
   }
 
   adminUrl(p = '/') {
@@ -264,8 +266,8 @@ class NodeRed {
     }
   }
 
-  // Full-deploy a flow set via the documented Admin API (v2). Resolves once the
-  // runtime has applied and started the flows.
+  // Submit a flow set via the documented Admin API (v2). Its response accepts
+  // the deployment; callers must still observe flow/route readiness.
   async deploy(flows, { timeoutMs = 30000, deploymentType = 'full' } = {}) {
     const res = await httpRequest(this.adminUrl('/flows'), {
       method: 'POST',

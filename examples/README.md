@@ -31,14 +31,18 @@ pub/sub.
    ```bash
    cd ~/.node-red
    npm install @pauldeng/node-red-contrib-dapr-http
-   npx node-red
+   npx node-red -D uiHost=127.0.0.1
    ```
+
+   The override keeps the editor/admin API local too. Remote editor access
+   needs its own authentication and network controls; the Dapr app token does
+   not protect that port.
 
 2. In another terminal, start `nats-server` with JetStream enabled and create a
    memory-backed stream:
 
    ```bash
-   nats-server -js
+   nats-server --addr 127.0.0.1 -js
 
    nats stream add node-red-examples --server nats://127.0.0.1:4222 \
      --subjects greetings --storage memory --defaults
@@ -53,7 +57,9 @@ pub/sub.
 
    ```bash
    daprd --app-id node-red --app-port 3000 --app-protocol http \
-     --dapr-http-port 3500 --resources-path ./components
+     --dapr-http-port 3500 --resources-path ./components \
+     --dapr-listen-addresses 127.0.0.1 \
+     --dapr-internal-grpc-listen-address 127.0.0.1 --enable-metrics=false
    ```
 
 4. In the Node-RED editor, import `examples/basic-pubsub.json`.
@@ -86,13 +92,13 @@ metadata, dead-letter topic, raw-payload mode, CEL rules, or bulk settings.
   back with a separate `dapr-state` (get) node. It needs
   `redis-statestore-component.yaml` (or another Dapr state-store component
   named `statestore`), started the same way as this quickstart's Redis
-  pub/sub option: `docker run -d -p 6379:6379 redis:8.10-alpine`.
+  pub/sub option: `docker run -d -p 127.0.0.1:6379:6379 redis:8.10-alpine`.
 - `dynamic-configuration.json` reads and watches `featureFlag` in a Redis
   configuration store named `configstore`. Redis keyspace notifications must
   be enabled for change delivery:
 
   ```bash
-  docker run -d -p 6379:6379 redis:8.10-alpine \
+  docker run -d -p 127.0.0.1:6379:6379 redis:8.10-alpine \
     redis-server --notify-keyspace-events KEA
   ```
 
@@ -260,6 +266,8 @@ docker run -d --rm --name nrdapr-example-scheduler \
   --etcd-data-dir=/tmp/sched --override-broadcast-host-port=127.0.0.1:50006
 daprd --app-id actor-demo --app-port 3000 --app-protocol http \
   --dapr-http-port 3500 --resources-path ./components-actors \
+  --dapr-listen-addresses 127.0.0.1 \
+  --dapr-internal-grpc-listen-address 127.0.0.1 --enable-metrics=false \
   --placement-host-address 127.0.0.1:50005 \
   --scheduler-host-address 127.0.0.1:50006
 ```
@@ -310,5 +318,4 @@ supported by this package. See [source attribution](DAPR-SAMPLES.md).
 Stop the example containers with `docker stop nrdapr-example-placement
 nrdapr-example-scheduler nrdapr-example-redis`. This development Redis
 container is ephemeral; stopping it does not demonstrate durable production
-storage. Actor lifecycle/redeploy qualification remains pending as described
-in `../docs/architecture.md`.
+storage.

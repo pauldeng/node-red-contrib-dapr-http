@@ -6,8 +6,9 @@
 #
 # Copy this into the directory daprd loads resources from (--resources-path), fill
 # in the three placeholders, and set MEMORYDB_PASSWORD in daprd's own environment.
-# Verified against real MemoryDB (Redis 7.2.4) and Dapr 1.18.1 by
-# test/integration/memorydb-pubsub.test.js.
+# Last live verification: real MemoryDB (Redis 7.2.4) with Dapr 1.18.1 via
+# test/integration/memorydb-pubsub.test.js. The optional tier has not run on
+# the current Dapr 1.18.4 pin, so that version is not claimed here.
 #
 # Before it will work:
 #   * Routing. MemoryDB has no public endpoint. daprd must run inside the

@@ -1,5 +1,7 @@
 'use strict';
 
+const { setImmediate: nextTurn } = require('node:timers/promises');
+
 const crypto = require('node:crypto');
 
 const { context, propagation, trace, SpanKind } = require('@opentelemetry/api');
@@ -164,7 +166,7 @@ module.exports = function registerDaprService(RED) {
       activeIds.clear();
       if (pending > 0) {
         // Let the settled handlers write their 503 before the node tears down.
-        await new Promise((resolve) => setImmediate(resolve));
+        await nextTurn();
       }
       done();
     });

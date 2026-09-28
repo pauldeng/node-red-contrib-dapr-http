@@ -39,13 +39,13 @@ services:
   redis:
     image: redis:8.10-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
 
   nats:
     image: nats:2.15.0-alpine@sha256:ac8f88a6494bffc2c2a5289a0ca61cb28a9145c11ba5677cf24265d07f46d8d4
     command: ['-js']
     ports:
-      - '4222:4222'
+      - '127.0.0.1:4222:4222'
 
   daprd:
     image: daprio/daprd:1.18.4@sha256:1e218523a15be5be5f36d64aa33a40cbde8fbe963ba6122d42d9c9de5b24a372
@@ -61,6 +61,9 @@ services:
       - '--app-port=3000'
       - '--app-protocol=http'
       - '--dapr-http-port=3500'
+      - '--dapr-listen-addresses=127.0.0.1'
+      - '--dapr-internal-grpc-listen-address=127.0.0.1'
+      - '--enable-metrics=false'
       - '--dapr-grpc-port=0'
       - '--resources-path=/components'
       - '--log-level=info'

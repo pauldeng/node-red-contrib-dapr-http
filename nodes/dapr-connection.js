@@ -1,5 +1,7 @@
 'use strict';
 
+const { setImmediate: nextTurn } = require('node:timers/promises');
+
 const { resolveOptions } = require('../lib/options');
 const { acquireListener } = require('../lib/app-channel');
 const { ErrorCodes } = require('../lib/errors');
@@ -157,14 +159,7 @@ module.exports = function registerDaprConnection(RED) {
     // start). Until then `healthy` is only a default, not an observation — a
     // message that arrives in that window must not be failed as "sidecar down"
     // when the sidecar is in fact up.
-    let markHealthKnown;
-    // Exposes a resolver captured for later, unrelated calls
-    // (pollOnce/startListener/close) to settle — not a single awaited op.
-    const healthKnown = /* allow-promise: resolver captured for later settlement */ new Promise(
-      (resolve) => {
-        markHealthKnown = resolve;
-      }
-    );
+    const { promise: healthKnown, resolve: markHealthKnown } = Promise.withResolvers();
 
     node.isSidecarHealthy = () => healthy;
     node.whenHealthKnown = () => healthKnown;
@@ -472,9 +467,7 @@ module.exports = function registerDaprConnection(RED) {
         pendingResponses.drain({ status: 503, headers: {}, body: 'connection restarting' }) +
         actorHost.drain();
       if (drained > 0) {
-        // Yields one tick with no event to await on; setImmediate has no
-        // native promise form.
-        await new Promise((resolve) => setImmediate(resolve)); // allow-promise: one tick, no event to await
+        await nextTurn();
       }
       // A handler that had already started committing state before drain()
       // ran gets to finish and hand its caller the real outcome (200, or a
@@ -487,7 +480,7 @@ module.exports = function registerDaprConnection(RED) {
       if (backstopFired) {
         warnActorDiagnostic('ACTOR_DRAIN_BACKSTOP');
       }
-      await new Promise((resolve) => setImmediate(resolve)); // allow-promise: one tick, no event to await
+      await nextTurn();
       if (node.lease) {
         // On a redeploy (removed === false) hold the listener through a short
         // grace window so the replacement node reacquires it; on delete keep

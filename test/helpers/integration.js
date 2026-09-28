@@ -44,11 +44,11 @@ function runId() {
   return crypto.randomBytes(4).toString('hex');
 }
 
-async function dockerRun(args) {
+async function dockerRun(args, options) {
   // No --rm: a container that crashes at startup (e.g. a bad --config fixture)
   // must stick around long enough for dockerLogs() to read why. dockerStop()
   // always removes it explicitly instead.
-  return execFileP('docker', ['run', '-d', ...args]);
+  return execFileP('docker', ['run', '-d', ...args], options);
 }
 
 async function dockerStop(name) {
@@ -194,7 +194,7 @@ async function startRedis({ notifyKeyspaceEvents } = {}) {
   await ensureImage(REDIS_IMAGE);
   const port = await freePort();
   const name = `nrdapr-it-redis-${runId()}`;
-  const args = ['--name', name, '-p', `${port}:6379`, REDIS_IMAGE];
+  const args = ['--name', name, '-p', `127.0.0.1:${port}:6379`, REDIS_IMAGE];
   if (notifyKeyspaceEvents) {
     args.push('redis-server', '--notify-keyspace-events', notifyKeyspaceEvents);
   }
@@ -421,16 +421,18 @@ async function startDaprd({
   const attempt = async () => {
     const name = `nrdapr-it-daprd-${runId()}`;
     const args = ['--name', name, '--network', 'host', '-v', `${resourcesDir}:/components:ro`];
+    const containerEnv = {};
     if (appApiToken) {
-      args.push('-e', `APP_API_TOKEN=${appApiToken}`);
+      containerEnv.APP_API_TOKEN = appApiToken;
     }
     if (daprApiToken) {
-      args.push('-e', `DAPR_API_TOKEN=${daprApiToken}`);
+      containerEnv.DAPR_API_TOKEN = daprApiToken;
     }
-    // execFileP runs docker without a shell, so a value containing shell
-    // metacharacters (a generated password, say) is passed through verbatim.
-    for (const [key, value] of Object.entries(env)) {
-      args.push('-e', `${key}=${value}`);
+    Object.assign(containerEnv, env);
+    // Docker's -e NAME reads its process environment. Values stay out of argv
+    // and startup-failure diagnostics, including real optional MemoryDB secrets.
+    for (const key of Object.keys(containerEnv)) {
+      args.push('-e', key);
     }
     args.push(
       DAPRD_IMAGE,
@@ -438,6 +440,8 @@ async function startDaprd({
       `--app-id=${appId}`,
       `--app-port=${appPort}`,
       '--app-protocol=http',
+      '--dapr-listen-addresses=127.0.0.1',
+      '--dapr-internal-grpc-listen-address=127.0.0.1',
       `--dapr-http-port=${httpPort}`,
       '--dapr-grpc-port=0',
       // The INTERNAL gRPC port (sidecar-to-sidecar) must be allocated as
@@ -463,7 +467,7 @@ async function startDaprd({
       args.push(`--scheduler-host-address=${schedulerAddress}`);
     }
 
-    await dockerRun(args);
+    await dockerRun(args, { env: containerEnv });
     try {
       await waitForHttp(`http://127.0.0.1:${httpPort}/v1.0/healthz/outbound`, {
         headers: healthHeaders,

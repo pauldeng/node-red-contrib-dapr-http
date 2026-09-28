@@ -127,21 +127,25 @@ class ContainerNodeRed {
       await fsp.chmod(path.join(this.userDir, 'settings.js'), 0o666);
       await fsp.chmod(path.join(this.userDir, 'flows.json'), 0o666);
 
-      const envArgs = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-      await execFileP('docker', [
-        'run',
-        '-d',
-        '--name',
-        this.name,
-        '--network',
-        'host',
-        '-v',
-        `${this.userDir}:/data`,
-        '-v',
-        `${WORKSPACE}:${WORKSPACE}:ro`,
-        ...envArgs,
-        NODE_RED_IMAGE,
-      ]);
+      const envArgs = Object.keys(env).flatMap((key) => ['-e', key]);
+      await execFileP(
+        'docker',
+        [
+          'run',
+          '-d',
+          '--name',
+          this.name,
+          '--network',
+          'host',
+          '-v',
+          `${this.userDir}:/data`,
+          '-v',
+          `${WORKSPACE}:${WORKSPACE}:ro`,
+          ...envArgs,
+          NODE_RED_IMAGE,
+        ],
+        { env }
+      );
 
       this._startLogStream();
       await this._waitReady(readyTimeoutMs);

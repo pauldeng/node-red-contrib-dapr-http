@@ -534,7 +534,7 @@ test(
         type: 'function',
         z: 'tab',
         // A wrong Content-Length + a CRLF-injecting header must be neutralized.
-        func: "msg.payload = 'ok'; msg.dapr.responseHeaders = { 'content-length': '999', 'x-inject': 'a\\r\\nEvil: 1', 'x-good': 'yes' }; return msg;",
+        func: "msg.payload = 'ok'; msg.dapr.responseHeaders = { 'content-length': '999', 'x-inject': 'a\\r\\nEvil: 1', 'x-object': { toString: null }, get 'x-getter'() { throw new Error('unreadable'); }, 'x-good': 'yes' }; return msg;",
         outputs: 1,
         wires: [['resp']],
       },

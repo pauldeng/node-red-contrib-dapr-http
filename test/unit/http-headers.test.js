@@ -28,6 +28,10 @@ test('sanitizeResponseHeaders drops entries with invalid names or values', () =>
     'x good': 'v', // space in name → invalid
     'x-bad-value': 'line1\r\nInjected: 1', // CRLF injection → invalid
     'x-ok': 'fine',
+    'x-object': { toString: null },
+    get 'x-getter'() {
+      throw new Error('unreadable header');
+    },
   });
   assert.deepEqual(out, { 'x-ok': 'fine' });
 });
@@ -67,7 +71,15 @@ test('parseRequestHeaders accepts an object or a JSON string and coerces values'
 });
 
 test('parseRequestHeaders rejects bad shapes and illegal names or values', () => {
-  for (const value of ['[1,2]', '{bad json', 42, ['a'], { 'x bad': 'v' }, { 'x-a': 'a\r\nb: 1' }]) {
+  for (const value of [
+    '[1,2]',
+    '{bad json',
+    42,
+    ['a'],
+    { 'x bad': 'v' },
+    { 'x-a': 'a\r\nb: 1' },
+    { 'x-object': { toString: null } },
+  ]) {
     assert.throws(
       () => parseRequestHeaders(value, 'msg.dapr.headers'),
       (err) => err.code === ErrorCodes.INVALID_MESSAGE,

@@ -37,6 +37,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const { readFile } = require('node:fs/promises');
 
 const { freePort } = require('../helpers/node-red');
 const { ContainerNodeRed } = require('../helpers/node-red-container');
@@ -446,6 +447,22 @@ test(
       configFixture: 'secret-scopes.yaml',
     });
     t.after(() => daprd.stop());
+
+    // This tier already requires Linux host networking. Inspect the actual
+    // listening socket, so a firewall cannot conceal a wildcard bind.
+    const sockets = (
+      await Promise.all(['/proc/net/tcp', '/proc/net/tcp6'].map((p) => readFile(p, 'utf8')))
+    )
+      .flatMap((table) => table.trim().split('\n').slice(1))
+      .map((line) => line.trim().split(/\s+/))
+      .filter(
+        (fields) => fields[3] === '0A' && parseInt(fields[1].split(':')[1], 16) === daprHttpPort
+      );
+    assert.deepEqual(
+      sockets.map((fields) => fields[1].split(':')[0]),
+      ['0100007F'],
+      'the unauthenticated fixture API must listen only on IPv4 loopback'
+    );
 
     // startDaprd() resolving only proves daprd's OWN /healthz answers; the
     // dapr-connection node polls independently on its own bounded-backoff
