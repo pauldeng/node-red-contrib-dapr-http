@@ -45,7 +45,16 @@ async function startNats() {
   await ensureImage(NATS_IMAGE);
   const port = await freePort();
   const name = `nrdapr-it-nats-${runId()}`;
-  await execFileP('docker', ['run', '-d', '--name', name, '-p', `${port}:4222`, NATS_IMAGE, '-js']);
+  await execFileP('docker', [
+    'run',
+    '-d',
+    '--name',
+    name,
+    '-p',
+    `127.0.0.1:${port}:4222`,
+    NATS_IMAGE,
+    '-js',
+  ]);
 
   const deadline = Date.now() + 15000;
   let ready = false;

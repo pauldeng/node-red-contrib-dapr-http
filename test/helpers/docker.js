@@ -5,6 +5,8 @@
 // nodered/node-red image) — both drive real Docker the same way.
 
 const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+const execFileAsync = promisify(execFile);
 
 // A fresh CI runner has none of these images cached, and pulling one can take
 // minutes on a slow link — far past a timeout sized for a local CLI call.
@@ -12,16 +14,16 @@ const { execFile } = require('node:child_process');
 // keeping every other docker command's timeout tight.
 const PULL_TIMEOUT_MS = 5 * 60 * 1000;
 
-function execFileP(cmd, args, { timeout = 15000 } = {}) {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error(`${cmd} ${args.join(' ')} failed: ${stderr || err.message}`));
-        return;
-      }
-      resolve(stdout.trim());
-    });
-  });
+async function execFileP(cmd, args, { timeout = 15000, env = {} } = {}) {
+  try {
+    const { stdout } = await execFileAsync(cmd, args, { timeout, env: { ...process.env, ...env } });
+    return stdout.trim();
+  } catch (err) {
+    // execFile's message includes argv. Never repeat arguments or retain that
+    // error as a cause: a caller may have passed credentials on the command line.
+    // eslint-disable-next-line preserve-caught-error -- The original error contains credential-bearing argv.
+    throw new Error(`${cmd} failed: ${err.stderr?.trim() || err.code || 'unknown error'}`);
+  }
 }
 
 async function ensureImage(image) {

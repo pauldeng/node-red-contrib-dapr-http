@@ -125,7 +125,7 @@
   </p>
   <p>
     On failure, the node calls <code>done(error)</code> so a Catch node can handle it; messages are
-    not queued while the sidecar is unavailable. Real daprd 1.18.2 reports an unconfigured binding
+    not queued while the sidecar is unavailable. Real daprd 1.18.4 reports an unconfigured binding
     name, an operation the binding does not support, and the component's own operation failure
     identically &mdash; the same status and error code for all three, distinguishable only by the
     free-text message, not a dedicated code the way state has for a missing key.

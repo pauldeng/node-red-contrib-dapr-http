@@ -182,9 +182,35 @@ test('a duplicate (actorType, method) owned by another node is rejected', () => 
 
 test('re-registering the same nodeId is not a duplicate (redeploy)', () => {
   const registry = createConnectionRegistry();
-  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, handler);
-  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, handler);
+  const oldHandler = () => 'old';
+  const newHandler = () => 'new';
+  const removeOld = registry.addActorMethod(
+    { nodeId: 'm1', actorType: 'T', method: 'Do' },
+    oldHandler
+  );
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'T', method: 'Do' }, newHandler);
   assert.equal(registry.activation().actorConfig.entities.length, 1);
+  assert.equal(registry.actorHandlerFor('T', 'Do'), newHandler);
+
+  // A delayed close from the old registration must not remove its replacement.
+  removeOld();
+  assert.equal(registry.actorHandlerFor('T', 'Do'), newHandler);
+});
+
+test('overwriting a nodeId with a new pair removes the prior indexed pair', () => {
+  const registry = createConnectionRegistry();
+  const oldHandler = () => 'old';
+  const newHandler = () => 'new';
+  const removeOld = registry.addActorMethod(
+    { nodeId: 'm1', actorType: 'OldType', method: 'Do' },
+    oldHandler
+  );
+  registry.addActorMethod({ nodeId: 'm1', actorType: 'NewType', method: 'Run' }, newHandler);
+
+  assert.equal(registry.actorHandlerFor('OldType', 'Do'), undefined);
+  assert.equal(registry.actorHandlerFor('NewType', 'Run'), newHandler);
+  removeOld();
+  assert.equal(registry.actorHandlerFor('NewType', 'Run'), newHandler);
 });
 
 test('an invalid, empty, or unsafe actorType or method is rejected as INVALID_OPTIONS', () => {

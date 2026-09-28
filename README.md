@@ -1,8 +1,8 @@
 # @pauldeng/node-red-contrib-dapr-http
 
 Node-RED nodes for Dapr pub/sub, service invocation, state management,
-dynamic configuration, output bindings, and secrets, talking to a Dapr
-sidecar over its HTTP API only, with optional first-party OpenTelemetry
+dynamic configuration, output bindings, secrets, and actors, talking to a
+Dapr sidecar over its HTTP API only, with optional first-party OpenTelemetry
 tracing and application-log export.
 
 ## Prerequisites
@@ -101,8 +101,9 @@ export:
 Deliberately **not** covered: input bindings, bulk secrets, actor timers and
 reentrancy, workflows, distributed lock, jobs, the conversation API, and gRPC
 transport.
-A flow that needs one of those can reach it with a `dapr-invoke` node or a
-core `http request` node against the sidecar's own API in the meantime.
+A flow that needs one of those can use a core `http request` node against the
+sidecar's own API in the meantime. `dapr-invoke` is for calling a method on
+another Dapr app; it does not expose arbitrary sidecar APIs.
 
 ## OpenTelemetry tracing
 

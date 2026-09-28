@@ -15,12 +15,7 @@ const { getTracer, endSpan } = require('../lib/telemetry');
 // msg.dapr's shape.
 function resolveBulkMode(config, msg) {
   const dapr = msg.dapr;
-  if (
-    dapr &&
-    typeof dapr === 'object' &&
-    !Array.isArray(dapr) &&
-    Object.prototype.hasOwnProperty.call(dapr, 'bulk')
-  ) {
+  if (dapr && typeof dapr === 'object' && !Array.isArray(dapr) && Object.hasOwn(dapr, 'bulk')) {
     if (typeof dapr.bulk !== 'boolean') {
       throw new DaprError(ErrorCodes.INVALID_MESSAGE, 'msg.dapr.bulk must be a boolean');
     }

@@ -56,7 +56,7 @@ outbound request.
 ## Listener lifecycle across redeploy
 
 Dapr fetches programmatic subscriptions once at `daprd` startup and caches
-them; there is no refresh endpoint in Dapr 1.18.2. A `dapr-connection` node
+them; there is no refresh endpoint in Dapr 1.18.4. A `dapr-connection` node
 is a transient Node-RED object recreated on every deploy, so the listener
 itself is owned by a module-scoped registry (`lib/app-channel.js`)
 independent of any one node instance:
@@ -160,6 +160,12 @@ Exceeding it tears the exchange down mid-read rather than after it, and fails as
 `RESPONSE_TOO_LARGE` — deliberately a different code from `SIDECAR_UNAVAILABLE`,
 because the sidecar did answer.
 
+Inbound admission precedes body buffering. Cancellation detaches body-read
+listeners and releases accumulated chunks; an unfinished upload closes after
+its response is flushed, even while the listener remains available for
+redeploy. Body limits apply per request, not to total process memory: concurrent
+bodies, JSON decoding, flow clones and tracing all add to the working set.
+
 Publishing used to go through the `@dapr/dapr` SDK. That cost 140 transitive
 runtime packages (including `express`, `@grpc/grpc-js`, `protobufjs`, and
 `node-fetch@2`) for a single call, plus a private-API poke to skip the SDK's
@@ -242,6 +248,8 @@ Three layers, each independently useful:
   calls `done()` (most existing nodes — this needs the modern 3-argument
   `(msg, send, done)` form) has its span force-closed after a bounded timeout
   and marked `node_red.span.incomplete`, rather than left open forever.
+  An unsampled child, or one rejected by the span registry's capacity limit,
+  clears any inherited completion token so it cannot settle its parent's span.
 - **Export.** Batched OTLP/HTTP, off the message path entirely — nothing a
   flow does ever awaits an export. A stopped or unreachable collector is
   fail-open at both ends: mid-operation, the SDK's own batch processor
@@ -326,6 +334,11 @@ to the real collector, whose log record carries that exact span's trace and
 span IDs.
 
 ## Actor request ownership
+
+`lib/connection-registry.js` indexes handlers by actor type and method for
+expected constant-time dispatch. The index holds registration references, not
+per-device records. Removing an old registration checks its identity so a late
+close cannot delete a replacement with the same Node-RED node id.
 
 `lib/actor-host.js` owns each invocation from state read through commit. The
 reply node submits a serialized proposal; only the handler writes the actor's

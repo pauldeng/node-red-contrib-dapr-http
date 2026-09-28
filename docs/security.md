@@ -60,7 +60,7 @@ authorize _which app-id_ may invoke a `dapr-service` method. It only works
 when mTLS is enabled between sidecars: without it, daprd cannot read a
 caller's identity from a client certificate, evaluates every caller as
 `id: ""`, and every policy collapses to its `defaultAction` regardless of the
-caller's real app-id. This was confirmed against real daprd 1.18.2 in
+caller's real app-id. This was confirmed against real daprd 1.18.4 in
 `test/integration/acl.test.js`.
 
 This package does not stand up mTLS or a Sentry service anywhere, so
@@ -105,6 +105,13 @@ The successful response is necessarily placed on the flow message. A Debug
 node, Function node, application log, or exported/captured message can reveal
 it; flows must consume the value and avoid logging or retaining it.
 
+Other operations retain identifying telemetry metadata: configuration-change
+spans include the configuration key name (`dapr.configuration.key`), and actor
+spans include the actor id as a bounded attribute. These are not covered by
+the secret-get key suppression above. Keep sensitive data out of identifiers
+and node names, and restrict access to the collector; disable tracing when
+those identifiers cannot leave the runtime's trust boundary.
+
 ## Non-loopback binding
 
 The app-channel listener binds `127.0.0.1` by default. A non-loopback bind is
@@ -118,6 +125,15 @@ only reachable through explicit configuration, and:
   interface, so pair it with the network-level controls described above.
 
 `0.0.0.0` is not loopback: it binds every interface, including public ones.
+
+The sidecar has separate listeners. In standalone mode, daprd's API defaults
+to all interfaces, even when this package connects to `127.0.0.1`. Our local
+commands explicitly set `--dapr-listen-addresses=127.0.0.1` and
+`--dapr-internal-grpc-listen-address=127.0.0.1`, and disable unused metrics.
+The second flag also limits sidecar-to-sidecar traffic to this host/network
+namespace; see `docs/deployment.md` before adapting it for a remote mesh.
+These are independent of the app-channel bind and of each other's tokens.
+See the [Dapr argument reference](https://docs.dapr.io/reference/arguments-annotations-overview/).
 
 ## Node-RED Admin API
 
@@ -155,6 +171,10 @@ Before buffering any request data, the listener enforces:
 On shutdown, the registry tracks open sockets and drains in-flight requests
 for a bounded window before destroying whatever's left — a slow or stalled
 client can't block a redeploy indefinitely.
+Cancelling a partial upload also detaches its body listeners and releases its
+buffer immediately, then closes the unfinished stream after the response.
+The body limit is per request; size broker delivery concurrency and flow
+fan-out for the available RAM rather than treating it as a process memory cap.
 
 ## What's never returned over HTTP
 

@@ -61,7 +61,7 @@ primary/secondary broker split the way pub/sub does (NATS JetStream vs.
 Redis) — it needs exactly one backing store, and Redis is the one this
 package already has pinned and Docker-tested. It proves `dapr-state`'s five
 operations against a real `state.redis` component: a save/get round trip's
-real ETag, genuine 409s on stale-etag save/delete, the generic 500 daprd 1.18.2
+real ETag, genuine 409s on stale-etag save/delete, the generic 500 daprd 1.18.4
 returns for a transactional ETag conflict, bulk get, and an atomic transaction.
 
 `test/integration/configuration.test.js` lives in the same bucket for the
@@ -95,10 +95,10 @@ POST (asserted from the capture server's own independently-observed received
 body, not this package's code), that the component's real response
 round-trips back through `msg.payload`/`msg.dapr`, and that an unconfigured
 binding name produces a real `500`/`ERR_INVOKE_OUTPUT_BINDING` from real
-daprd 1.18.2 — confirming the source-level finding that daprd gives no
+daprd 1.18.4 — confirming the source-level finding that daprd gives no
 dedicated not-found status for this endpoint (see
 `nodes/dapr-binding-out.html`). Its secrets subtest proves the three real,
-distinct outcomes daprd 1.18.2 actually produces against a real
+distinct outcomes daprd 1.18.4 actually produces against a real
 `secretstores.local.file` component pointed at a static test fixture
 (`test/integration/fixtures/secrets.json`), plus a real Dapr Configuration
 resource (`test/integration/fixtures/secret-scopes.yaml`) exercising real
@@ -290,17 +290,37 @@ Overload beyond the fixed 1,000-handler admission budget is proved at the unit
 tier only; a runtime test at that scale would not be representative.
 
 For a small repeatable overhead observation, run
-`node test/helpers/actor-host-benchmark.js`. It alternates tracing off/on,
+`node --expose-gc test/helpers/actor-host-benchmark.js`. It alternates tracing off/on,
 warms each configuration, then executes 4,096 successful read-and-save turns
 at concurrency 32 with fake asynchronous storage. Tracing uses an always-on
-sampler and a bounded in-memory exporter (three spans per turn). On
-2026-09-27 with Node 26.8.1, two measured passes took 51.8–53.0 ms with tracing
-off and 133.4–167.6 ms with tracing on. Integration tests were also running on
-the host. These are handler overhead observations, not end-to-end latency or
-fleet capacity estimates: HTTP, Node-RED, real storage and OTLP export are
-excluded. There is no timing assertion or release threshold.
+sampler and a bounded in-memory exporter (three spans per turn). It reports
+elapsed time, process CPU time, and heap/RSS before and after the work. With
+`--expose-gc`, the heap readings follow explicit collections; RSS still includes
+memory retained by the allocator and earlier passes. These are endpoint
+readings, not peak memory measurements.
+
+On 2026-09-27 with Node 26.8.1 and explicit collection, two measured passes
+took 91–96 ms elapsed / 109–120 ms CPU with tracing off and 171–233 ms /
+235–365 ms with tracing on. Post-collection heap was 8.9–10.1 MB; RSS was
+89–132 MB. Host load, collection and warmup affect these observations; compare
+runs with the same flags and load. These are handler overhead observations,
+not end-to-end latency or fleet capacity estimates: HTTP, Node-RED, real
+storage and OTLP export are excluded. There is no timing assertion or release
+threshold. For a CPU profile, run the same helper with `--cpu-prof` and keep
+the generated profile outside the repository.
 
 ## Test cost and consolidation
+
+Integration fixtures publish Redis, NATS and collector ports only on loopback;
+host-network daprd binds both its app-facing and internal APIs there too.
+Container credentials travel through the Docker CLI's environment (`-e NAME`),
+not its argument values. Command failures omit argv; subprocess output remains
+diagnostic data, so components must not log their credentials.
+
+Run the browser tier after Docker integration on the same host. Container
+network changes can interrupt Chromium resource loads (`ERR_NETWORK_CHANGED`);
+the retained Playwright trace distinguishes that failure from an editor defect.
+Browser workers can still run concurrently with each other.
 
 CI and release run the complete unit suite once through `test:coverage`;
 `npm test` remains the faster local command without coverage instrumentation.
@@ -423,7 +443,8 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
   caller's identity from a client cert and evaluates every caller as `id: ""` —
   every access-control policy collapses to its `defaultAction`, regardless of
   the caller's real app-id. This is a genuine Dapr constraint, confirmed
-  against real daprd 1.18.2 debug logs, not a harness bug. See `docs/security.md`
+  against real daprd 1.18.2 debug logs, not a harness bug; the same test still
+  passes on 1.18.4. See `docs/security.md`
   for the operator-facing consequence; standing up
   Sentry/mTLS to test a real allow/deny split is future work.
 - **`rawPayload` is two independent flags, confirmed against real daprd
@@ -464,7 +485,7 @@ test:integration` passes `--test-concurrency=1`. Each file starts real Docker
   client itself only talks to daprd's own HTTP API, never the broker
   directly, so which broker backs daprd is not a variable this client-level
   suite needs to hold constant (see "NATS-primary rebalance" below).
-- **`deadLetterTopic` stalls with `pubsub.jetstream` in Dapr 1.18.2
+- **`deadLetterTopic` stalls with `pubsub.jetstream` in Dapr 1.18.4
   (integration, Milestone 9):** confirmed twice via real daprd debug logs —
   the runtime logs the original delivery's failure, then logs "Publishing to
   topic \<dlq\>", and logs nothing further within the bounded window each

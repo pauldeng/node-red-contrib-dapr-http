@@ -414,6 +414,22 @@ test('a node span with a no-op tracer never registers a pending entry', () => {
   assert.equal(exporter.getFinishedSpans().length, 0);
 });
 
+test('an unsampled child completion cannot settle its recorded parent delivery', async () => {
+  const { tracer, exporter } = inMemoryTracer();
+  const { tracer: unsampled } = inMemoryTracer({ sampler: new AlwaysOffSampler() });
+  const parent = startNodeSpan(tracer, ROOT_CONTEXT, FAKE_NODE);
+  try {
+    const child = startNodeSpan(unsampled, parent, { id: 'child', type: 'function' });
+    completeNodeSpan(child, new Error('child failure'));
+    await tick();
+    assert.equal(exporter.getFinishedSpans().length, 0, 'parent is still processing');
+  } finally {
+    completeNodeSpan(parent, undefined);
+    await tick();
+  }
+  assert.equal(exporter.getFinishedSpans()[0].status.code, SpanStatusCode.OK);
+});
+
 test('a node span that never completes closes itself as incomplete after its timeout', async () => {
   const { tracer, exporter } = inMemoryTracer();
   startNodeSpan(tracer, ROOT_CONTEXT, FAKE_NODE, { timeoutMs: 20 });

@@ -1,5 +1,6 @@
 'use strict';
 
+const { once } = require('node:events');
 const { test, expect } = require('./helpers/fixtures');
 const { createFakeDaprStarted } = require('../helpers/fake-dapr');
 const { httpRequest } = require('../helpers/http');
@@ -178,24 +179,30 @@ test('closing the connection dialog cancels a pending Test Connection request', 
   appPort,
 }) => {
   const dapr = await createFakeDaprStarted();
-  let metadataClosed = false;
+  let metadataResponse;
   dapr.respond('GET', '/v1.0/healthz/outbound', (_req, res) => res.writeHead(204).end());
   dapr.respond('GET', '/v1.0/metadata', (_req, res) => {
-    res.on('close', () => {
-      metadataClosed = true;
-    });
+    metadataResponse = res;
   });
 
   try {
-    await nr.deploy(interactionsFlow({ appPort, daprPort: dapr.port }));
+    // Actor readiness also requests metadata; this test must observe only the
+    // editor's request, not cancellation of an unrelated background probe.
+    await nr.deploy(
+      interactionsFlow({ appPort, daprPort: dapr.port }).filter(
+        (node) => !node.type.startsWith('dapr-actor-')
+      )
+    );
     await gotoEditor(page, nr);
     await openNodeDialog(page, 'sub');
     await openConnectionDialog(page);
     await page.click('#dapr-test-connection');
-    await waitFor(() => dapr.requests.find((request) => request.path === '/v1.0/metadata'));
+    await dapr.waitForRequest('/v1.0/metadata');
 
-    await closeDialog(page, { save: false, config: true });
-    await waitFor(() => metadataClosed || null, { timeoutMs: 2000 });
+    await Promise.all([
+      once(metadataResponse, 'close', { signal: AbortSignal.timeout(2000) }),
+      closeDialog(page, { save: false, config: true }),
+    ]);
   } finally {
     await dapr.stop();
   }

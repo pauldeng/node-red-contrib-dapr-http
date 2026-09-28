@@ -436,8 +436,17 @@
   <h3>Status</h3>
   <p>
     The node polls <code>/v1.0/healthz/outbound</code> and shows connected (green) or sidecar
-    unavailable (red). Subscription changes require restarting the sidecar; a routine flow redeploy
-    does not.
+    unavailable (red). Adding, removing, or renaming a subscription or an actor type requires
+    restarting the sidecar (<code>restart sidecar: subscriptions changed</code> /
+    <code>restart sidecar: actor types changed</code>); a routine flow redeploy does not.
+  </p>
+  <p>
+    Once any <code>dapr actor method</code> node on this connection is registered, the same poll
+    also checks actor readiness (<code>GET /v1.0/metadata</code>'s <code>actorRuntime</code>) and
+    shows a yellow <code>actors: placement disconnected</code>, <code>actors: host not ready</code>,
+    or <code>actors: runtime status unknown</code> warning when it isn't confirmed healthy &mdash; a
+    missing or unrecognized field reads as unknown, never healthy. The warning disappears as soon as
+    no actor method remains registered, and never reaches the Test Connection result below.
   </p>
 
   <h3>Test Connection</h3>

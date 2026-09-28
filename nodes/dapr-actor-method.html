@@ -183,6 +183,16 @@
     write actor state directly; only a paired <code>dapr actor reply</code> may propose it.
   </p>
 
+  <h3>Status</h3>
+  <p>
+    <code>listening</code> while idle, or <code>listening &middot; N active</code> for the number of
+    invocations currently admitted (including one still committing) for this node's own
+    registration, updated at most once a second so a burst never floods the editor.
+    <code>missing connection</code> or <code>invalid config</code> reports a setup problem instead —
+    see <code>dapr connection</code>'s help for the shared "restart sidecar: actor types changed"
+    and actor-readiness statuses.
+  </p>
+
   <h3>Example</h3>
   <p>
     Wire <code>dapr actor method</code> (actor type <code>DemoActor</code>, method

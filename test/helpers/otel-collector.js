@@ -114,7 +114,7 @@ async function startOtelCollector({ port: fixedPort } = {}) {
     '--name',
     name,
     '-p',
-    `${port}:4318`,
+    `127.0.0.1:${port}:4318`,
     '-v',
     `${configPath}:/etc/otelcol-contrib/config.yaml:ro`,
     '-v',

@@ -69,6 +69,7 @@ test(
     assert.equal(r.json().marker, 'M2-b');
 
     // Characterize Express's qs override through real Node-RED HTTP nodes.
+    const beforeParserDeploy = nr.logText().length;
     await nr.deploy([
       { id: 'parse-tab', type: 'tab', label: 'parser' },
       {
@@ -89,6 +90,7 @@ test(
       },
       { id: 'parse-res', type: 'http response', z: 'parse-tab' },
     ]);
+    await nr.waitForLog('Started flows', { after: beforeParserDeploy });
     const parsed = await httpRequest(nr.nodeUrl('/parse?filter[name]=demo&tags[]=a&tags[]=b'), {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },

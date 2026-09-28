@@ -2,6 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { once } = require('node:events');
 const net = require('node:net');
 
 const { acquireListener } = require('../../lib/app-channel');
@@ -311,6 +312,42 @@ test('releasing a generation drains in-flight requests as 503 and aborts handler
   assert.equal(res.status, 503);
   assert.ok(Date.now() - started < 1500, 'settled on release, not at the 5s deadline');
   assert.equal(aborted, true, 'handler observed the abort signal');
+});
+
+test('releasing during a partial body upload closes its socket after a retryable response', async (t) => {
+  const port = await freePort();
+  const lease = await acquire(t, { port });
+  lease.activate({
+    routes: [
+      route('/upload', async () => assert.fail('partial body reached handler'), 'service', 'POST'),
+    ],
+  });
+
+  const socket = net.connect(port, BIND);
+  t.after(() => socket.destroy());
+  const received = [];
+  socket.on('data', (chunk) => received.push(chunk));
+  await once(socket, 'connect');
+  // Node sends 100 Continue from its request event before the body reader
+  // awaits input. Observing it proves admission without a polling/sleep race.
+  const continued = once(socket, 'data', { signal: AbortSignal.timeout(2000) });
+  socket.write(
+    'POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1000000\r\nExpect: 100-continue\r\n\r\npartial'
+  );
+  assert.match((await continued)[0].toString(), /HTTP\/1\.1 100 Continue/);
+  const closed = once(socket, 'close', { signal: AbortSignal.timeout(2000) });
+  // Keep the listener for replacement; its forced-close backstop must not
+  // be what releases this cancelled upload.
+  lease.release({ graceMs: 10000 });
+  try {
+    await closed;
+    assert.match(Buffer.concat(received).toString(), /HTTP\/1\.1 503/);
+  } finally {
+    socket.destroy();
+    const replacement = await acquire(t, { port });
+    replacement.release();
+    await replacement.whenClosed();
+  }
 });
 
 test('concurrent acquisition yields exactly one owner and one DUPLICATE_LISTENER', async (t) => {

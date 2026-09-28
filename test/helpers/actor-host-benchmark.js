@@ -63,13 +63,25 @@ async function measure(tracing) {
   }
   try {
     await run(1024);
+    global.gc?.(); // optional --expose-gc: compare retained heap after warmup/work
+    const before = process.memoryUsage();
+    const cpuStart = process.cpuUsage();
     const elapsedMs = await run(calls);
+    const cpu = process.cpuUsage(cpuStart);
+    global.gc?.();
+    const after = process.memoryUsage();
     return {
       tracing,
       calls,
       concurrency,
       elapsedMs: +elapsedMs.toFixed(1),
       callsPerSecond: Math.round((calls * 1000) / elapsedMs),
+      cpuMs: +((cpu.user + cpu.system) / 1000).toFixed(1),
+      gcAvailable: typeof global.gc === 'function',
+      heapUsedBeforeBytes: before.heapUsed,
+      heapUsedAfterBytes: after.heapUsed,
+      rssBeforeBytes: before.rss,
+      rssAfterBytes: after.rss,
     };
   } finally {
     trace.disable();
