@@ -1,7 +1,7 @@
 {
   "name": "@pauldeng/node-red-contrib-dapr-http",
-  "version": "0.2.1",
-  "description": "Node-RED nodes for Dapr pub/sub, service invocation, state management, dynamic configuration, output bindings, and secrets over HTTP.",
+  "version": "0.3.0",
+  "description": "Node-RED nodes for Dapr pub/sub, service invocation, state management, dynamic configuration, output bindings, secrets, and actors over HTTP.",
   "license": "MIT",
   "author": {
     "name": "Paul Deng",
@@ -31,6 +31,7 @@
     "dynamic-configuration",
     "output-bindings",
     "secrets",
+    "actors",
     "cloudevents",
     "sidecar",
     "microservices"
