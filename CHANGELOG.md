@@ -5,90 +5,76 @@ All notable changes to this package. This project follows
 `package.json` is what a consumer installs, so bump it and add an entry here in
 the same change that ships behavior.
 
-## Unreleased
+## 0.3.0 - 2026-09-27
 
 ### Added
 
-- Actor deletion requires an own `deleteState: true` property; inherited
-  properties cannot request a destructive state operation.
-
-- Actor mode: `dapr-actor-method`, `dapr-actor-reply`, and `dapr-actor-call`
+- **Actor mode:** `dapr-actor-method`, `dapr-actor-reply`, and `dapr-actor-call`
   nodes host Dapr actors in flows and call actors hosted elsewhere, over the
   existing app channel and sidecar HTTP client. One JSON `record` per actor;
   needs a Dapr Placement service and a state store configured with
   `actorStateStore: "true"`. Reentrancy is not supported.
-- Actor reminders: a `dapr-actor-schedule` node sets, gets, or deletes a
+- **Actor reminders:** a `dapr-actor-schedule` node sets, gets, or deletes a
   reminder; a `dapr-actor-method` node with Trigger set to Reminder receives
   every reminder of its actor type through the same gate/deadline/commit path
   as an ordinary method call, named on each firing by
   `msg.dapr.actor.trigger.name`. Needs a Dapr Scheduler service
   (`--scheduler-host-address`); reminders survive a Node-RED and daprd
-  restart. Timers are not supported.
-- `msg.dapr.actor.deleteState: true` on a Complete reply deletes the actor's
-  entire record through the same commit path as an ordinary replacement,
-  with `nextState` absent. The next invocation reports `stateExists: false`;
+  restart, and timers are not supported. Reminder callbacks reject mesh
+  caller headers; schedule validation rejects non-boolean `overwrite` values
+  and bounds the reminder data snapshot (including its Unicode escaping in
+  the callback), and a malformed `get` response fails instead of reading as a
+  missing reminder.
+- **Actor state delete:** `msg.dapr.actor.deleteState: true` on a Complete
+  reply — as an own, not inherited, property — deletes the actor's entire
+  record through the same commit path as an ordinary replacement, with
+  `nextState` absent. The next invocation reports `stateExists: false`;
   deleting an already-absent record is not an error, and reminders are
   unaffected.
-- The request handler, not the reply node, commits actor state, and only
-  after the reply. Calls to one actor take turns; its gate and daprd's request
-  stay open until the commit settles, including across a redeploy or
-  shutdown, bounded by the drain timeout. A commit whose outcome cannot be confirmed fails as
-  `ACTOR_COMMIT_UNKNOWN`, never as success.
-- Removed actor methods and types answer a retryable 503, never a 404,
-  including the gap before a deferred routing update, because daprd treats
-  an actor 404 as permanent.
-- Call failures keep bounded Dapr diagnostics on `msg.error.cause` for Catch.
-- `examples/actor-demo.json` adapts Dapr's own SDK samples (Python
-  `DemoActor`, including its reminder methods, and JavaScript
-  `DemoActorCounter`; attribution in `examples/DAPR-SAMPLES.md`), with an
-  actor-enabled Redis component example and setup steps (including a Dapr
-  Scheduler container for the reminder Injects) in `examples/README.md`.
-- Actor observability: a SERVER span per method/reminder invocation, parented
-  on the callback's own `traceparent` (a fresh root when it is missing or
-  malformed), with `dapr.actor.type`/`method`/`trigger`/`outcome` attributes
-  and the actor id only as a bounded attribute, never in the span name; child
-  CLIENT spans for the state read and commit, each injecting its own
-  `traceparent` onto the sidecar request; `dapr-actor-call` and
-  `dapr-actor-schedule` open their own CLIENT span the same way `dapr-invoke`
-  does. Bounded, rate-limited `node.warn()` diagnostics (actor type and
-  method/trigger only) for `ACTOR_COMMIT_UNKNOWN`, a tombstoned registration
-  actually hit, and the close-drain backstop firing.
-  `actorHost.whenCommitsSettled()` now reports whether that backstop fired.
+- **Actor observability:** a SERVER span per method/reminder invocation,
+  parented on the callback's own `traceparent` (a fresh root when it is
+  missing or malformed), with `dapr.actor.type`/`method`/`trigger`/`outcome`
+  attributes and the actor id only as a bounded attribute, never in the span
+  name; child CLIENT spans for the state read and commit; `dapr-actor-call`
+  and `dapr-actor-schedule` open their own CLIENT span the same way
+  `dapr-invoke` does. Bounded, rate-limited `node.warn()` diagnostics (actor
+  type and method/trigger only) for `ACTOR_COMMIT_UNKNOWN`, a tombstoned
+  registration actually hit, and the close-drain backstop firing.
   `dapr-actor-method` shows `listening · N active` for its own admitted
   (including still-committing) handler count, throttled to at most once a
   second. Once any actor method is registered, the connection's existing
   health poll also checks actor readiness (`GET /v1.0/metadata`'s curated
   `actorRuntime`) and shows a yellow warning when it isn't confirmed
   healthy — unknown/missing fields never read as healthy, and the warning
-  never reaches the "Test Connection" admin route. Actor turns retain their
-  server context through asynchronous reads and commits; stale readiness
-  responses cannot survive registration changes or sidecar failure. Repeated
-  unchanged counts produce no status updates, and diagnostic logger failures
-  cannot interrupt connection shutdown.
+  never reaches the "Test Connection" admin route.
+- **Actor lifecycle safety:** the request handler, not the reply node,
+  commits actor state, and only after the reply. Calls to one actor take
+  turns; its gate and daprd's request stay open until the commit settles,
+  including across a redeploy or shutdown, bounded by the drain timeout. A
+  commit whose outcome cannot be confirmed fails as `ACTOR_COMMIT_UNKNOWN`,
+  never as success. Removed actor methods and types answer a retryable 503,
+  never a 404, including the gap before a deferred routing update, because
+  daprd treats an actor 404 as permanent. Call failures keep bounded Dapr
+  diagnostics on `msg.error.cause` for Catch.
+- `examples/actor-demo.json` adapts Dapr's own SDK samples (Python
+  `DemoActor`, including its reminder methods, and JavaScript
+  `DemoActorCounter`; attribution in `examples/DAPR-SAMPLES.md`), with an
+  actor-enabled Redis component example and setup steps (including a Dapr
+  Scheduler container for the reminder Injects) in `examples/README.md`.
 
 ### Changed
 
+- Actor method dispatch uses an index instead of scanning registrations on
+  every invocation. Publish validation reuses the shared message validators;
+  pending settlements and close yields use native Node.js promise APIs.
+- Local Redis and NATS example ports bind to loopback; the README distinguishes
+  arbitrary sidecar API calls from service invocation.
 - Every Dapr palette node now shows the Dapr logo as a standard Node-RED
   icon (white on transparent, 40 x 60) instead of a per-node Font Awesome
   icon, and uses `#DEBD5C` from Node-RED's recommended node palette in place
-  of `#f3c969`. Node labels and help still name each node's function.
-
-- Development dependency review: override Express 4.22.2's `qs` to 6.16.0,
-  clearing the remaining npm audit findings without downgrading Node-RED.
-- Test suite: remove duplicate unit runs in CI/release, combine dialog
-  validation with screenshots and successful invocation with the broader
-  Dapr matrix, reuse isolated runtime table fixtures, and stop waiting for
-  unrelated caller/exporter timeouts. Fix conflicting Playwright colour flags
-  and retain a finite bound for concurrent actor-probe event listeners. Let
-  the OS bind the container editor port, removing its port-probe race.
-
-- Reminder callbacks reject mesh caller headers. Schedule validation rejects
-  non-boolean overwrite values and bounds a snapshot of the data, including
-  Unicode escaping in the callback. Malformed get responses fail instead of
-  looking like a missing reminder; editor schedule validation matches runtime.
-- Closing an outbound node prevents a pending health probe from starting a
-  new sidecar call. The actor demo tolerates user-supplied reminder count fields.
-
+  of `#f3c969`. Node labels and help still name each node's function; this is
+  a visual change only, with no config field, `msg.dapr` contract, or default
+  behavior affected.
 - Pin the Dapr integration runtime and deployment examples to 1.18.4 by
   image digest. The full real-daprd integration suite passes on 1.18.4, and
   the NATS JetStream `deadLetterTopic` stall still reproduces there.
@@ -106,8 +92,30 @@ the same change that ships behavior.
   list in `docs/testing.md` is re-reviewed against the refreshed tree: every
   previously-permitted advisory (`jsonata`, `brace-expansion`, `tar`,
   `ip-address`, `js-yaml`, `undici`, `fast-uri`, `body-parser`, `axios`) is
-  gone or fixed. A scoped Express override clears the remaining `qs`
-  advisories; no advisory remains permitted.
+  gone or fixed. A scoped Express override (`qs` to 6.16.0) clears the
+  remaining advisories; none remains permitted.
+- Test suite consolidation, with no assertion dropped: service invocation,
+  output bindings, secrets and Test Connection metadata share one real daprd
+  in `dapr-building-blocks.test.js`; the Redis pub/sub and dead-letter
+  scenarios share one in `pubsub.test.js`; nine runtime-tier fake-sidecar
+  cases already proven against real daprd are removed; CI and release no
+  longer run the unit suite twice.
+
+### Fixed
+
+- Local sidecar examples and integration fixtures now explicitly bind exposed
+  APIs to loopback; the Compose editor example does the same. Standalone daprd
+  does not default to loopback as the deployment guide previously claimed.
+- Docker test helpers no longer echo command arguments on failure, and pass
+  container credentials through the child environment instead of argv.
+- Cancelled partial uploads release their body buffers and close their sockets
+  after the shutdown response, including during a listener's redeploy grace.
+- Unsampled or untracked child spans cannot complete their parent's span.
+- Malformed response header values are dropped individually instead of failing
+  the entire response; invalid outbound header values report `INVALID_MESSAGE`.
+- Closing a superseded actor registration cannot remove its replacement.
+- Closing an outbound node no longer lets a health probe already in flight
+  start a new sidecar call afterward.
 
 ## 0.2.1 - 2026-08-22
 
